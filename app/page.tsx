@@ -1,15 +1,12 @@
 import type { Metadata } from "next";
-import { SkeletonPreview } from "./_sites-preview/SkeletonPreview";
+
+import { QuotationApp } from "@/components/quotation-app";
 
 export const metadata: Metadata = {
-  title: "Your site is taking shape",
-  description:
-    "Codex is building the first version. It’ll appear here automatically when it’s ready.",
-  other: {
-    "codex-preview": "development",
-  },
+  title: "报价审批中心",
+  description: "面向销售、销售主管与 CEO 的报价审批协作工作台。",
 };
 
 export default function Home() {
-  return <SkeletonPreview />;
+  return <QuotationApp />;
 }
