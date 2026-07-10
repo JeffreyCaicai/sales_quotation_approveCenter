@@ -2,7 +2,8 @@
 
 import { useState } from "react";
 
-import { calculatePricing, submitQuote } from "@/lib/quotation";
+import { BUILDINGS, CUSTOMERS, PACKAGES } from "@/lib/mock-data";
+import { calculatePricing, submitQuote, validateQuote, validateQuoteReferences } from "@/lib/quotation";
 import { loadQuotes, resetQuotes, saveQuotes } from "@/lib/store";
 import type { Quote, QuoteInput, User } from "@/lib/types";
 
@@ -74,6 +75,7 @@ export function QuotationApp() {
   };
 
   const handleSubmit = (input: QuoteInput) => {
+    assertPersistableQuote(input, user);
     const quote = submitQuote(input, wizard?.initialQuote, user);
     persistQuote(quote, wizard?.initialQuote);
     setWizard(null);
@@ -116,6 +118,10 @@ export function QuotationApp() {
 }
 
 function saveDraft(input: QuoteInput, previousQuote: Quote | undefined, actor: User): Quote {
+  const persistableInput = input.placementMode || !previousQuote
+    ? input
+    : { ...input, placementMode: previousQuote.placementMode };
+  assertPersistableQuote(persistableInput, actor);
   const now = new Date().toISOString();
   const identifier = now.replace(/\D/g, "");
 
@@ -123,15 +129,15 @@ function saveDraft(input: QuoteInput, previousQuote: Quote | undefined, actor: U
     id: previousQuote?.id ?? `quote-draft-${identifier}`,
     quoteNumber: previousQuote?.quoteNumber ?? `DEMO-DRAFT-${identifier.slice(0, 8)}-${identifier.slice(8)}`,
     salesId: actor.id,
-    customerId: input.customerId ?? "",
-    brandId: input.brandId ?? "",
-    placementMode: input.placementMode ?? "building",
-    placementIds: [...(input.placementIds ?? [])],
-    weeks: input.weeks ?? 0,
-    spots: input.spots ?? 0,
-    bonus: input.bonus ?? 0,
-    discount: input.discount,
-    pricing: calculatePricing(input),
+    customerId: persistableInput.customerId ?? "",
+    brandId: persistableInput.brandId ?? "",
+    placementMode: persistableInput.placementMode ?? "building",
+    placementIds: [...(persistableInput.placementIds ?? [])],
+    weeks: persistableInput.weeks ?? 0,
+    spots: persistableInput.spots ?? 0,
+    bonus: persistableInput.bonus ?? 0,
+    discount: persistableInput.discount,
+    pricing: calculatePricing(persistableInput),
     status: previousQuote?.status === "returned" ? "returned" : "draft",
     version: previousQuote?.version ?? 1,
     approvalHistory: [...(previousQuote?.approvalHistory ?? [])],
@@ -139,4 +145,20 @@ function saveDraft(input: QuoteInput, previousQuote: Quote | undefined, actor: U
     updatedAt: now,
     isDemoData: true,
   };
+}
+
+function assertPersistableQuote(input: QuoteInput, actor: User) {
+  const errors = {
+    ...validateQuoteReferences(input, actor.id, {
+      customers: CUSTOMERS,
+      buildings: BUILDINGS,
+      packages: PACKAGES,
+    }),
+    ...validateQuote(input),
+    ...(!input.placementMode ? { placementMode: "请选择投放方式" } : {}),
+  };
+
+  if (Object.keys(errors).length > 0) {
+    throw new Error(Object.values(errors).join("；"));
+  }
 }

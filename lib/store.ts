@@ -23,7 +23,7 @@ export function loadQuotes(): Quote[] {
 
 export function saveQuotes(quotes: Quote[]): void {
   const storage = getStorage();
-  if (!storage) return;
+  if (!storage || !isQuoteArray(quotes)) return;
 
   try {
     storage.setItem(STORAGE_KEY, JSON.stringify(quotes));
@@ -86,13 +86,13 @@ function isQuote(value: unknown): value is Quote {
     isString(value.brandId) &&
     (value.placementMode === "building" || value.placementMode === "package") &&
     isStringArray(value.placementIds) &&
-    isFiniteNumber(value.weeks) &&
-    isFiniteNumber(value.spots) &&
-    isFiniteNumber(value.bonus) &&
-    isFiniteNumber(value.discount) &&
+    isPositiveInteger(value.weeks) &&
+    isPositiveInteger(value.spots) &&
+    isNonnegativeInteger(value.bonus) &&
+    isFiniteNumber(value.discount) && value.discount >= 0 && value.discount <= 100 &&
     isPricing(value.pricing) &&
     STATUSES.includes(value.status as QuoteStatus) &&
-    isFiniteNumber(value.version) &&
+    isPositiveInteger(value.version) &&
     value.approvalHistory.every(isApprovalEvent) &&
     isString(value.createdAt) &&
     isString(value.updatedAt) &&
@@ -102,13 +102,8 @@ function isQuote(value: unknown): value is Quote {
 }
 
 function isPricing(value: Record<string, unknown>): boolean {
-  return (
-    isFiniteNumber(value.basePrice) &&
-    isFiniteNumber(value.discountAmount) &&
-    isFiniteNumber(value.netPrice) &&
-    isFiniteNumber(value.tax) &&
-    isFiniteNumber(value.total)
-  );
+  const amounts = [value.basePrice, value.discountAmount, value.netPrice, value.tax, value.total];
+  return amounts.every((amount) => isFiniteNumber(amount) && amount >= 0);
 }
 
 function isApprovalEvent(value: unknown): boolean {
@@ -140,4 +135,12 @@ function isStringArray(value: unknown): value is string[] {
 
 function isFiniteNumber(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value);
+}
+
+function isPositiveInteger(value: unknown): value is number {
+  return isFiniteNumber(value) && Number.isInteger(value) && value > 0;
+}
+
+function isNonnegativeInteger(value: unknown): value is number {
+  return isFiniteNumber(value) && Number.isInteger(value) && value >= 0;
 }

@@ -3,7 +3,7 @@
 import { useState } from "react";
 
 import { BUILDINGS, CUSTOMERS, DEMO_TAX_RATE, PACKAGES } from "@/lib/mock-data";
-import { calculatePricing, validateQuote } from "@/lib/quotation";
+import { calculatePricing, validateQuote, validateQuoteReferences } from "@/lib/quotation";
 import type { PlacementMode, Quote, QuoteInput, User } from "@/lib/types";
 
 import { Money } from "./ui";
@@ -29,6 +29,18 @@ interface WizardValues {
 
 const STEPS = ["客户与品牌", "投放方式", "资源选择", "投放参数", "折扣审批", "确认提交"];
 const METRIC_FORMATTER = new Intl.NumberFormat("zh-CN");
+const QUOTE_REFERENCES = { customers: CUSTOMERS, buildings: BUILDINGS, packages: PACKAGES };
+const ERROR_STEPS: Record<string, number> = {
+  customerId: 0,
+  brandId: 0,
+  placementMode: 1,
+  placementIds: 2,
+  basePrice: 2,
+  weeks: 3,
+  spots: 3,
+  bonus: 3,
+  discount: 4,
+};
 
 export function QuoteWizard({ initialQuote, salesUser, onCancel, onSave, onSubmit }: QuoteWizardProps) {
   const [step, setStep] = useState(0);
@@ -58,11 +70,16 @@ export function QuoteWizard({ initialQuote, salesUser, onCancel, onSave, onSubmi
     ? PACKAGES.filter((item) => values.placementIds.includes(item.id))
     : BUILDINGS.filter((item) => values.placementIds.includes(item.id));
   const weeklyRate = selectedResources.reduce((total, item) => total + item.priceRmb, 0);
-  const basePrice = Math.round(weeklyRate * (values.weeks / 4));
+  const basePrice = Number.isFinite(values.weeks)
+    ? Math.round(weeklyRate * (values.weeks / 4))
+    : 0;
   const traffic = selectedResources.reduce((total, item) => total + item.traffic, 0);
   const impressions = selectedResources.reduce((total, item) => total + item.impressions, 0);
   const input = toQuoteInput(values, basePrice);
-  const pricing = calculatePricing(input);
+  const pricing = calculatePricing({
+    ...input,
+    discount: Number.isFinite(input.discount) ? input.discount : 0,
+  });
   const approval = approvalPath(values.discount);
 
   const updateValue = <Key extends keyof WizardValues>(key: Key, value: WizardValues[Key]) => {
@@ -76,26 +93,34 @@ export function QuoteWizard({ initialQuote, salesUser, onCancel, onSave, onSubmi
   };
 
   const validateStep = (targetStep: number) => {
-    const validation = validateQuote(input);
+    const validation = getValidationErrors(input, values, salesUser.id);
     const keysByStep: Array<Array<keyof QuoteInput | "placementMode">> = [
       ["customerId", "brandId"],
       ["placementMode"],
-      ["placementIds"],
-      ["weeks", "spots"],
+      ["placementIds", "basePrice"],
+      ["weeks", "spots", "bonus"],
       ["discount"],
-      ["customerId", "brandId", "placementMode", "placementIds", "weeks", "spots", "discount"],
+      ["customerId", "brandId", "placementMode", "placementIds", "basePrice", "weeks", "spots", "bonus", "discount"],
     ];
     const nextErrors: Record<string, string> = {};
 
     for (const key of keysByStep[targetStep]) {
-      if (key === "placementMode" && !values.placementMode) {
-        nextErrors.placementMode = "请选择投放方式";
-      } else if (validation[key]) {
+      if (validation[key]) {
         nextErrors[key] = validation[key];
       }
     }
 
     setErrors(nextErrors);
+    return Object.keys(nextErrors).length === 0;
+  };
+
+  const validateAll = () => {
+    const nextErrors = getValidationErrors(input, values, salesUser.id);
+    setErrors(nextErrors);
+    const firstError = Object.keys(nextErrors)
+      .map((key) => ERROR_STEPS[key] ?? STEPS.length - 1)
+      .sort((left, right) => left - right)[0];
+    if (firstError !== undefined) setStep(firstError);
     return Object.keys(nextErrors).length === 0;
   };
 
@@ -105,8 +130,13 @@ export function QuoteWizard({ initialQuote, salesUser, onCancel, onSave, onSubmi
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
+  const handleSave = () => {
+    if (!validateAll()) return;
+    onSave(input);
+  };
+
   const handleSubmit = () => {
-    if (!validateStep(STEPS.length - 1)) return;
+    if (!validateAll()) return;
     onSubmit(input);
   };
 
@@ -119,7 +149,7 @@ export function QuoteWizard({ initialQuote, salesUser, onCancel, onSave, onSubmi
           <h1>{initialQuote ? "编辑报价" : "新建报价"}</h1>
           <p>{initialQuote ? `${initialQuote.quoteNumber} · V${initialQuote.version}` : "按步骤完成客户、资源与商业条件配置。"}</p>
         </div>
-        <button className="button button--secondary" type="button" onClick={() => onSave(input)}>
+        <button className="button button--secondary" type="button" onClick={handleSave}>
           保存草稿
         </button>
       </header>
@@ -179,7 +209,7 @@ export function QuoteWizard({ initialQuote, salesUser, onCancel, onSave, onSubmi
                 selectedIds={values.placementIds}
                 search={search}
                 visibleBuildings={visibleBuildings}
-                error={errors.placementIds}
+                error={errors.placementIds ?? errors.basePrice}
                 onSearchChange={setSearch}
                 onToggle={(id) => {
                   const selected = values.placementIds.includes(id);
@@ -345,7 +375,11 @@ function PlacementModeStep({
   onChange: (mode: PlacementMode) => void;
 }) {
   return (
-    <fieldset className="form-fieldset" aria-describedby={error ? "placement-mode-error" : undefined}>
+    <fieldset
+      className="form-fieldset"
+      aria-invalid={Boolean(error)}
+      aria-describedby={error ? "placement-mode-error" : undefined}
+    >
       <legend>投放方式</legend>
       <div className="mode-grid">
         <button
@@ -397,7 +431,12 @@ function ResourceStep({
 
   const resources = mode === "building" ? visibleBuildings : PACKAGES;
   return (
-    <div className="form-stack">
+    <fieldset
+      className="form-fieldset form-stack"
+      aria-invalid={Boolean(error)}
+      aria-describedby={error ? "placement-error" : undefined}
+    >
+      <legend className="sr-only">投放资源</legend>
       {mode === "building" ? (
         <label className="search-field">
           <span className="sr-only">搜索楼宇</span>
@@ -448,7 +487,7 @@ function ResourceStep({
       </div>
       {resources.length === 0 ? <p className="inline-notice">没有匹配的楼宇，请调整搜索关键词。</p> : null}
       <FieldError id="placement-error" message={error} />
-    </div>
+    </fieldset>
   );
 }
 
@@ -565,7 +604,7 @@ function ReviewStep({
       <dl className="review-grid">
         <div><dt>客户</dt><dd>{customerName}</dd></div>
         <div><dt>品牌</dt><dd>{brandName}</dd></div>
-        <div><dt>投放方式</dt><dd>{mode === "building" ? "定点挑楼" : "预设销售包"}</dd></div>
+        <div><dt>投放方式</dt><dd>{mode === "building" ? "定点挑楼" : mode === "package" ? "预设销售包" : "未选择"}</dd></div>
         <div><dt>投放参数</dt><dd>{values.weeks} 周 · {values.spots} Spot · {values.bonus} Bonus</dd></div>
         <div className="review-grid__wide"><dt>投放资源</dt><dd>{resources.join("、") || "未选择"}</dd></div>
         <div className="review-grid__wide"><dt>审批路径</dt><dd><strong>{approval.label}</strong></dd></div>
@@ -668,6 +707,17 @@ function toQuoteInput(values: WizardValues, basePrice: number): QuoteInput {
     discount: values.discount,
     basePrice,
     taxRate: DEMO_TAX_RATE,
+  };
+}
+
+function getValidationErrors(input: QuoteInput, values: WizardValues, salesId: string) {
+  const referenceErrors = validateQuoteReferences(input, salesId, QUOTE_REFERENCES);
+  const fieldErrors = validateQuote(input);
+
+  return {
+    ...referenceErrors,
+    ...fieldErrors,
+    ...(!values.placementMode ? { placementMode: "请选择投放方式" } : {}),
   };
 }
 

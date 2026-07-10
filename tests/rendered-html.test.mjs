@@ -64,9 +64,11 @@ test("replaces the disposable starter with the quotation workspace", async () =>
   assert.match(quotationApp, /<QuoteWizard/);
   assert.match(quoteWizard, /export function QuoteWizard/);
   assert.match(quoteWizard, /validateQuote/);
+  assert.match(quoteWizard, /validateQuoteReferences/);
   assert.match(quoteWizard, /calculatePricing/);
   assert.match(quoteWizard, /销售主管 → CEO/);
   assert.match(quoteWizard, /aria-current=\{index === step \? "step" : undefined\}/);
+  assert.match(quoteWizard, /aria-invalid=\{Boolean\(error\)\}/);
   assert.match(appShell, /DEMO/);
   assert.match(dashboard, /quotesForRole/);
   assert.match(ui, /export function StatusBadge/);
@@ -82,6 +84,8 @@ test("replaces the disposable starter with the quotation workspace", async () =>
   assert.match(appShell, /退出当前角色/);
   assert.doesNotMatch(appShell, /onClick=\{onLogout\}><UserIcon \/>我的/);
   assert.match(css, /@media \(forced-colors: active\)/);
+  assert.match(css, /@media \(max-width: 760px\)[\s\S]*\.pricing-ledger \{ display: grid;/);
+  assert.doesNotMatch(css, /\.pricing-ledger \{ display: none;/);
 
   await assert.rejects(access(new URL("app/_sites-preview/SkeletonPreview.tsx", templateRoot)));
   await assert.rejects(access(new URL("app/_sites-preview/preview.css", templateRoot)));

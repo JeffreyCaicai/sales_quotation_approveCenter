@@ -1,9 +1,16 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { BUILDINGS, CUSTOMERS, PACKAGES, SEEDED_QUOTES, USERS } from "../lib/mock-data.ts";
-import { calculatePricing, getDiscountBand, getNextApproval, submitQuote, validateQuote } from "../lib/quotation.ts";
+import {
+  calculatePricing,
+  getDiscountBand,
+  getNextApproval,
+  submitQuote,
+  validateQuote,
+  validateQuoteReferences,
+} from "../lib/quotation.ts";
 import { loadQuotes, quotesForRole, resetQuotes, saveQuotes } from "../lib/store.ts";
-import type { Quote } from "../lib/types.ts";
+import type { Quote, QuoteInput } from "../lib/types.ts";
 
 test("discount bands keep 60 and 70 inside their stated bands", () => {
   assert.equal(getDiscountBand(60), "standard");
@@ -49,6 +56,89 @@ test("invalid quote fields return field-level messages", () => {
 test("non-finite discount returns the discount range message", () => {
   const errors = validateQuote({ discount: Number.NaN });
   assert.equal(errors.discount, "折扣必须在 0%–100% 之间");
+});
+
+test("weeks and spots must be finite positive integers", () => {
+  assert.equal(validateQuote({ ...validQuoteInput(), weeks: 1.5 }).weeks, "投放周期必须为正整数");
+  assert.equal(validateQuote({ ...validQuoteInput(), weeks: Number.POSITIVE_INFINITY }).weeks, "投放周期必须为正整数");
+  assert.equal(validateQuote({ ...validQuoteInput(), spots: -1 }).spots, "Spot 数量必须为正整数");
+  assert.equal(validateQuote({ ...validQuoteInput(), spots: 3.2 }).spots, "Spot 数量必须为正整数");
+});
+
+test("bonus must be a finite nonnegative integer", () => {
+  assert.equal(validateQuote({ ...validQuoteInput(), bonus: Number.NaN }).bonus, "Bonus 必须为非负整数");
+  assert.equal(validateQuote({ ...validQuoteInput(), bonus: -1 }).bonus, "Bonus 必须为非负整数");
+  assert.equal(validateQuote({ ...validQuoteInput(), bonus: 1.5 }).bonus, "Bonus 必须为非负整数");
+  assert.equal(validateQuote({ ...validQuoteInput(), bonus: 0 }).bonus, undefined);
+});
+
+test("explicit pricing inputs must stay finite before persistence", () => {
+  assert.equal(
+    validateQuote({ ...validQuoteInput(), basePrice: Number.POSITIVE_INFINITY }).basePrice,
+    "报价基础价格必须为有限非负数",
+  );
+  assert.equal(
+    validateQuote({ ...validQuoteInput(), taxRate: Number.NaN }).taxRate,
+    "模拟税率必须为有限非负数",
+  );
+});
+
+test("submitQuote rejects invalid numeric input before creating a persistable quote", () => {
+  const salesUser = USERS.find((user) => user.role === "sales");
+  assert.ok(salesUser);
+
+  assert.throws(
+    () => submitQuote({ ...validQuoteInput(), bonus: Number.NaN }, undefined, salesUser),
+    /Bonus 必须为非负整数/,
+  );
+});
+
+test("reference validation rejects a customer outside the active salesperson portfolio", () => {
+  const foreignCustomer = { ...CUSTOMERS[0], id: "customer-foreign", salesId: "sales-other" };
+  const errors = validateQuoteReferences(
+    { ...validQuoteInput(), customerId: foreignCustomer.id },
+    "sales-chen",
+    { customers: [...CUSTOMERS, foreignCustomer], buildings: BUILDINGS, packages: PACKAGES },
+  );
+
+  assert.equal(errors.customerId, "请选择当前销售负责的客户");
+});
+
+test("reference validation rejects a brand that does not belong to the selected customer", () => {
+  const errors = validateQuoteReferences(
+    { ...validQuoteInput(), brandId: "brand-traveloka" },
+    "sales-chen",
+    { customers: CUSTOMERS, buildings: BUILDINGS, packages: PACKAGES },
+  );
+
+  assert.equal(errors.brandId, "请选择该客户旗下的品牌");
+});
+
+test("reference validation rejects resources outside the selected placement mode", () => {
+  const references = { customers: CUSTOMERS, buildings: BUILDINGS, packages: PACKAGES };
+  const buildingInPackage = validateQuoteReferences(
+    { ...validQuoteInput(), placementMode: "package", placementIds: [BUILDINGS[0].id], basePrice: BUILDINGS[0].priceRmb },
+    "sales-chen",
+    references,
+  );
+  const unknownBuilding = validateQuoteReferences(
+    { ...validQuoteInput(), placementMode: "package", placementIds: ["resource-unknown"], basePrice: 0 },
+    "sales-chen",
+    references,
+  );
+
+  assert.equal(buildingInPackage.placementIds, "所选资源与投放方式不匹配");
+  assert.equal(unknownBuilding.placementIds, "所选资源与投放方式不匹配");
+});
+
+test("reference validation rejects a base price that does not match selected resources", () => {
+  const errors = validateQuoteReferences(
+    { ...validQuoteInput(), basePrice: 0 },
+    "sales-chen",
+    { customers: CUSTOMERS, buildings: BUILDINGS, packages: PACKAGES },
+  );
+
+  assert.equal(errors.basePrice, "报价基础价格与所选资源不一致");
 });
 
 test("submitting a valid new quote creates version 1 pending manager approval", () => {
@@ -278,6 +368,26 @@ test("browser persistence round-trips valid quotes and falls back on invalid dat
   });
 });
 
+test("browser persistence refuses invalid numeric quotes without overwriting valid data", () => {
+  const storage = new MemoryStorage();
+
+  withBrowserStorage(storage, () => {
+    const valid = [structuredClone(SEEDED_QUOTES[0])];
+    saveQuotes(valid);
+
+    const invalidQuotes: Quote[] = [
+      { ...valid[0], bonus: Number.NaN },
+      { ...valid[0], weeks: 1.5 },
+      { ...valid[0], spots: -1 },
+      { ...valid[0], discount: 101 },
+    ];
+    for (const invalid of invalidQuotes) {
+      saveQuotes([invalid]);
+      assert.deepEqual(loadQuotes(), valid);
+    }
+  });
+});
+
 class MemoryStorage implements Storage {
   readonly #values = new Map<string, string>();
 
@@ -322,4 +432,18 @@ function withBrowserStorage(storage: Storage, callback: () => void) {
       Reflect.deleteProperty(globalThis, "window");
     }
   }
+}
+
+function validQuoteInput(): QuoteInput {
+  return {
+    customerId: "customer-kopi",
+    brandId: "brand-kopi-kenangan",
+    placementMode: "building",
+    placementIds: ["building-pacific-place"],
+    weeks: 4,
+    spots: 160,
+    bonus: 0,
+    discount: 50,
+    basePrice: 128_000,
+  };
 }

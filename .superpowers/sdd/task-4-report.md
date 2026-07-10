@@ -66,3 +66,34 @@ Direct `npx tsc --noEmit` is not a configured project script and still reports p
 - The Browser plugin was present but reported no available browser backends (`agent.browsers.list()` returned `[]`), so no screenshot-based desktop/mobile interaction pass was possible in this environment.
 - Visual behavior is covered by responsive CSS review, successful production compilation, and source/render smoke checks, but a later browser pass should exercise both building and package journeys at desktop and mobile widths.
 - Direct standalone TypeScript verification remains noisy because of the pre-existing project configuration issues listed above; the supported lint/build/test commands are green.
+
+## Review Fixes: Numeric Safety, Referential Integrity, and Mobile Summary
+
+### Review RED Evidence
+
+- Logic tests first failed because `validateQuoteReferences` did not exist.
+- The new pricing-input test then failed because infinite `basePrice` and non-finite `taxRate` were accepted.
+- The storage-boundary regression failed after a NaN Bonus serialized to `null`, causing `loadQuotes()` to reject the stored array and fall back to all seeded quotes instead of preserving the last valid payload.
+- The source/smoke contract first failed because the wizard did not call referential validation and mobile CSS hid `.pricing-ledger` entirely.
+
+### Review GREEN Evidence
+
+- Logic suite expanded from 17 to 26 passing tests.
+- Weeks and Spot now require finite positive integers; Bonus requires a finite nonnegative integer; discount remains finite and constrained to 0%–100%.
+- Explicit base price and tax-rate values must be finite and nonnegative.
+- `submitQuote`, wizard save/submit actions, `QuotationApp` persistence, and `saveQuotes` each provide a defensive validation boundary.
+- `saveQuotes` refuses non-finite, fractional, negative, or out-of-range quote numerics without overwriting the last valid local payload.
+- Referential validation now rejects customers outside the active Sales PIC portfolio, brands outside the selected customer, building/package mode mismatches, unknown IDs, duplicate/package-multiplicity mismatches, and tampered base prices.
+- Draft updates preserve an existing placement mode when a caller omits it, while new drafts still require an explicit mode.
+- Placement mode and resource groups expose `aria-invalid` plus error-linked `aria-describedby`.
+- The mobile summary now renders a compact two-column ledger containing Rate Card base, discount, net, simulated 6% tax, and full-width total instead of hiding core price figures.
+
+### Review Verification
+
+- `npm run test:logic`: PASS — 26/26 tests.
+- `node --test tests/rendered-html.test.mjs`: PASS — 2/2 tests.
+- `npm run lint`: PASS.
+- `npm run build`: PASS.
+- `git diff --check`: PASS.
+
+The previously recorded browser-backend limitation still applies; no live screenshot pass became available during this review fix.

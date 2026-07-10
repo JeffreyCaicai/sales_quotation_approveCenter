@@ -870,7 +870,14 @@ button {
   .wizard-section { min-height: 0; padding: 24px 18px 30px; }
   .wizard-actions { position: sticky; z-index: 5; bottom: 75px; padding: 13px 18px; }
   .pricing-summary { position: static; order: -1; width: 100%; }
-  .pricing-ledger { display: none; }
+  .pricing-ledger { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); padding: 0 12px; }
+  .pricing-ledger > div { display: grid; align-content: center; gap: 2px; min-height: 58px; padding: 8px; border-bottom: 1px solid #ebe8e1; }
+  .pricing-ledger > div:nth-child(odd):not(.pricing-ledger__total) { border-right: 1px solid #ebe8e1; }
+  .pricing-ledger > .pricing-ledger__net { border-bottom: 1px solid #ebe8e1; }
+  .pricing-ledger > .pricing-ledger__total { grid-column: 1 / -1; display: flex; min-height: 58px; margin: 0 -12px; padding: 0 20px; }
+  .pricing-ledger dt { font-size: 9px; }
+  .pricing-ledger dd { font-size: 11px; }
+  .pricing-ledger__total dd { font-size: 18px; }
   .pricing-summary > header { padding: 15px 17px; }
   .pricing-summary .audience-summary { margin-block: 12px; }
   .pricing-summary .approval-strip { margin-bottom: 14px; }

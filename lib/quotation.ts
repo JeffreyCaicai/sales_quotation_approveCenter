@@ -1,4 +1,20 @@
-import type { DiscountBand, PricingSummary, Quote, QuoteInput, QuoteStatus, User } from "./types.ts";
+import type {
+  Building,
+  Customer,
+  DiscountBand,
+  PricingSummary,
+  Quote,
+  QuoteInput,
+  QuoteStatus,
+  SalesPackage,
+  User,
+} from "./types.ts";
+
+interface QuoteReferenceData {
+  customers: readonly Customer[];
+  buildings: readonly Building[];
+  packages: readonly SalesPackage[];
+}
 
 export function getDiscountBand(discount: number): DiscountBand {
   if (discount <= 60) return "standard";
@@ -34,16 +50,82 @@ export function validateQuote(input: QuoteInput): Record<string, string> {
   if (!input.placementIds?.length) {
     errors.placementIds = "请至少选择一栋楼宇或一个销售包";
   }
-  if (!input.weeks || input.weeks <= 0) errors.weeks = "投放周期必须大于 0";
-  if (!input.spots || input.spots <= 0) errors.spots = "Spot 数量必须大于 0";
+  if (!Number.isInteger(input.weeks) || (input.weeks ?? 0) <= 0) {
+    errors.weeks = "投放周期必须为正整数";
+  }
+  if (!Number.isInteger(input.spots) || (input.spots ?? 0) <= 0) {
+    errors.spots = "Spot 数量必须为正整数";
+  }
+  if (!Number.isInteger(input.bonus ?? 0) || (input.bonus ?? 0) < 0) {
+    errors.bonus = "Bonus 必须为非负整数";
+  }
   if (!Number.isFinite(input.discount) || input.discount < 0 || input.discount > 100) {
     errors.discount = "折扣必须在 0%–100% 之间";
+  }
+  if (input.basePrice !== undefined && (!Number.isFinite(input.basePrice) || input.basePrice < 0)) {
+    errors.basePrice = "报价基础价格必须为有限非负数";
+  }
+  if (input.taxRate !== undefined && (!Number.isFinite(input.taxRate) || input.taxRate < 0)) {
+    errors.taxRate = "模拟税率必须为有限非负数";
+  }
+
+  return errors;
+}
+
+export function validateQuoteReferences(
+  input: QuoteInput,
+  salesId: string,
+  references: QuoteReferenceData,
+): Record<string, string> {
+  const errors: Record<string, string> = {};
+  const customer = references.customers.find((item) => item.id === input.customerId);
+
+  if (!customer || customer.salesId !== salesId) {
+    errors.customerId = "请选择当前销售负责的客户";
+  } else if (!customer.brands.some((brand) => brand.id === input.brandId)) {
+    errors.brandId = "请选择该客户旗下的品牌";
+  }
+
+  const resourceIds = input.placementIds ?? [];
+  const resources = input.placementMode === "building"
+    ? references.buildings
+    : input.placementMode === "package"
+      ? references.packages
+      : undefined;
+  const selectedResources = resources
+    ? resourceIds.map((id) => resources.find((resource) => resource.id === id))
+    : [];
+  const hasWrongResource = !resources
+    || new Set(resourceIds).size !== resourceIds.length
+    || selectedResources.some((resource) => !resource)
+    || (input.placementMode === "package" && resourceIds.length !== 1);
+
+  if (resourceIds.length > 0 && hasWrongResource) {
+    errors.placementIds = "所选资源与投放方式不匹配";
+  } else if (
+    resourceIds.length > 0
+    && selectedResources.every((resource) => resource !== undefined)
+    && Number.isInteger(input.weeks)
+    && (input.weeks ?? 0) > 0
+  ) {
+    const expectedBasePrice = Math.round(
+      selectedResources.reduce((total, resource) => total + resource.priceRmb, 0)
+      * ((input.weeks ?? 0) / 4),
+    );
+    if (!Number.isFinite(input.basePrice) || input.basePrice !== expectedBasePrice) {
+      errors.basePrice = "报价基础价格与所选资源不一致";
+    }
   }
 
   return errors;
 }
 
 export function submitQuote(input: QuoteInput, previousQuote: Quote | undefined, actor: User): Quote {
+  const errors = validateQuote(input);
+  if (Object.keys(errors).length > 0) {
+    throw new Error(Object.values(errors).join("；"));
+  }
+
   const now = new Date().toISOString();
   const isResubmission = previousQuote?.status === "returned";
   const version = isResubmission ? previousQuote.version + 1 : (previousQuote?.version ?? 1);
