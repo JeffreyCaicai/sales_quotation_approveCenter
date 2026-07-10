@@ -15,7 +15,7 @@ export function calculatePricing(input: QuoteInput): PricingSummary {
   const basePrice = input.basePrice ?? 0;
   const discountAmount = Math.round(basePrice * (input.discount / 100));
   const netPrice = basePrice - discountAmount;
-  const tax = Math.round(netPrice * (input.taxRate ?? 0));
+  const tax = Math.round(netPrice * (input.taxRate ?? 0.06));
 
   return {
     basePrice,
@@ -36,7 +36,7 @@ export function validateQuote(input: QuoteInput): Record<string, string> {
   }
   if (!input.weeks || input.weeks <= 0) errors.weeks = "投放周期必须大于 0";
   if (!input.spots || input.spots <= 0) errors.spots = "Spot 数量必须大于 0";
-  if (input.discount < 0 || input.discount > 100) {
+  if (!Number.isFinite(input.discount) || input.discount < 0 || input.discount > 100) {
     errors.discount = "折扣必须在 0%–100% 之间";
   }
 

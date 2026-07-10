@@ -26,9 +26,24 @@ test("pricing applies discount then simulated 6 percent tax", () => {
   });
 });
 
+test("pricing defaults to the simulated 6 percent tax rate", () => {
+  assert.deepEqual(calculatePricing({ basePrice: 100000, discount: 25 }), {
+    basePrice: 100000,
+    discountAmount: 25000,
+    netPrice: 75000,
+    tax: 4500,
+    total: 79500,
+  });
+});
+
 test("invalid quote fields return field-level messages", () => {
   const errors = validateQuote({ customerId: "", brandId: "", placementIds: [], weeks: 0, spots: 0, discount: 101 });
   assert.equal(errors.customerId, "请选择客户");
   assert.equal(errors.placementIds, "请至少选择一栋楼宇或一个销售包");
+  assert.equal(errors.discount, "折扣必须在 0%–100% 之间");
+});
+
+test("non-finite discount returns the discount range message", () => {
+  const errors = validateQuote({ discount: Number.NaN });
   assert.equal(errors.discount, "折扣必须在 0%–100% 之间");
 });
