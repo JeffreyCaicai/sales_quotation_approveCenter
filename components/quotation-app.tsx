@@ -19,6 +19,7 @@ import { ApprovalScreen } from "./approval-screen";
 import { DashboardScreen } from "./dashboard-screen";
 import { LoginScreen } from "./login-screen";
 import { QuoteWizard } from "./quote-wizard";
+import { QuotationScreen } from "./quotation-screen";
 import { Modal } from "./ui";
 
 interface PlaceholderState {
@@ -36,6 +37,7 @@ export function QuotationApp() {
   const [placeholder, setPlaceholder] = useState<PlaceholderState | null>(null);
   const [wizard, setWizard] = useState<WizardSession | null>(null);
   const [approvalQuoteId, setApprovalQuoteId] = useState<string | null>(null);
+  const [quotationQuoteId, setQuotationQuoteId] = useState<string | null>(null);
 
   if (!user) return <LoginScreen onLogin={setUser} />;
 
@@ -52,6 +54,7 @@ export function QuotationApp() {
     setQuotes(resetQuotes());
     setWizard(null);
     setApprovalQuoteId(null);
+    setQuotationQuoteId(null);
     setPlaceholder({ title: "演示数据已重置", message: "所有报价已恢复为初始演示状态。" });
   };
 
@@ -74,6 +77,11 @@ export function QuotationApp() {
       || (user.role === "ceo" && quote.status === "pending_ceo")
     )) {
       setApprovalQuoteId(quote.id);
+      return;
+    }
+
+    if (quote?.status === "approved") {
+      setQuotationQuoteId(quote.id);
       return;
     }
 
@@ -105,6 +113,9 @@ export function QuotationApp() {
 
   const approvalQuote = approvalQuoteId
     ? quotes.find((quote) => quote.id === approvalQuoteId)
+    : undefined;
+  const quotationQuote = quotationQuoteId
+    ? quotes.find((quote) => quote.id === quotationQuoteId)
     : undefined;
 
   const handleApprove = () => {
@@ -138,16 +149,24 @@ export function QuotationApp() {
         setUser(nextUser);
         setWizard(null);
         setApprovalQuoteId(null);
+        setQuotationQuoteId(null);
       }}
       onReset={handleReset}
       onLogout={() => {
         setUser(null);
         setWizard(null);
         setApprovalQuoteId(null);
+        setQuotationQuoteId(null);
       }}
       onPlaceholder={openPlaceholder}
     >
-      {approvalQuote && (user.role === "manager" || user.role === "ceo") ? (
+      {quotationQuote ? (
+        <QuotationScreen
+          quote={quotationQuote}
+          onBack={() => setQuotationQuoteId(null)}
+          onPrint={() => window.print()}
+        />
+      ) : approvalQuote && (user.role === "manager" || user.role === "ceo") ? (
         <ApprovalScreen
           quote={approvalQuote}
           actor={user}

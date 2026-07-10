@@ -14,7 +14,7 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "报价审批中心",
-  description: "销售报价与分级审批协作工作台。",
+  description: "楼宇报价与折扣审批的一体化协作工作台。",
   icons: {
     icon: "/favicon.svg",
     shortcut: "/favicon.svg",

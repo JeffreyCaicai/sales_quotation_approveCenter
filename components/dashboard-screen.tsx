@@ -128,6 +128,15 @@ function CeoDashboard({
         onAction={onAction}
         showRisk
       />
+      {approvedQuotes.length > 0 ? (
+        <QuoteTable
+          title="已批准报价"
+          description="已完成审批，可查看并打印正式报价"
+          role="ceo"
+          quotes={approvedQuotes}
+          onAction={onAction}
+        />
+      ) : null}
     </div>
   );
 }
@@ -226,10 +235,11 @@ function QuoteTable({
 }
 
 function actionFor(role: Role, quote: Quote): { label: string; primary: boolean } {
+  if (quote.status === "approved") return { label: "查看正式报价", primary: false };
+
   if (role === "sales") {
     if (quote.status === "returned") return { label: "修改并重新提交", primary: true };
     if (quote.status === "draft") return { label: "继续编辑", primary: true };
-    if (quote.status === "approved") return { label: "查看报价", primary: false };
     return { label: "查看进度", primary: false };
   }
 
