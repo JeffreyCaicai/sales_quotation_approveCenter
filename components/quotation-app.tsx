@@ -3,7 +3,7 @@
 import { useState } from "react";
 
 import { BUILDINGS, CUSTOMERS, PACKAGES } from "@/lib/mock-data";
-import { calculatePricing, submitQuote, validateQuote, validateQuoteReferences } from "@/lib/quotation";
+import { createDraftQuote, submitQuote, validateQuote, validateQuoteReferences } from "@/lib/quotation";
 import { loadQuotes, resetQuotes, saveQuotes } from "@/lib/store";
 import type { Quote, QuoteInput, User } from "@/lib/types";
 
@@ -63,7 +63,7 @@ export function QuotationApp() {
   };
 
   const handleSave = (input: QuoteInput) => {
-    const draft = saveDraft(input, wizard?.initialQuote, user);
+    const draft = createDraftQuote(input, wizard?.initialQuote, user);
     persistQuote(draft, wizard?.initialQuote);
     setWizard(null);
     setPlaceholder({
@@ -115,36 +115,6 @@ export function QuotationApp() {
       </Modal>
     </AppShell>
   );
-}
-
-function saveDraft(input: QuoteInput, previousQuote: Quote | undefined, actor: User): Quote {
-  const persistableInput = input.placementMode || !previousQuote
-    ? input
-    : { ...input, placementMode: previousQuote.placementMode };
-  assertPersistableQuote(persistableInput, actor);
-  const now = new Date().toISOString();
-  const identifier = now.replace(/\D/g, "");
-
-  return {
-    id: previousQuote?.id ?? `quote-draft-${identifier}`,
-    quoteNumber: previousQuote?.quoteNumber ?? `DEMO-DRAFT-${identifier.slice(0, 8)}-${identifier.slice(8)}`,
-    salesId: actor.id,
-    customerId: persistableInput.customerId ?? "",
-    brandId: persistableInput.brandId ?? "",
-    placementMode: persistableInput.placementMode ?? "building",
-    placementIds: [...(persistableInput.placementIds ?? [])],
-    weeks: persistableInput.weeks ?? 0,
-    spots: persistableInput.spots ?? 0,
-    bonus: persistableInput.bonus ?? 0,
-    discount: persistableInput.discount,
-    pricing: calculatePricing(persistableInput),
-    status: previousQuote?.status === "returned" ? "returned" : "draft",
-    version: previousQuote?.version ?? 1,
-    approvalHistory: [...(previousQuote?.approvalHistory ?? [])],
-    createdAt: previousQuote?.createdAt ?? now,
-    updatedAt: now,
-    isDemoData: true,
-  };
 }
 
 function assertPersistableQuote(input: QuoteInput, actor: User) {

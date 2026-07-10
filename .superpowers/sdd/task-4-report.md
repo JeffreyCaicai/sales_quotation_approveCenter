@@ -97,3 +97,30 @@ Direct `npx tsc --noEmit` is not a configured project script and still reports p
 - `git diff --check`: PASS.
 
 The previously recorded browser-backend limitation still applies; no live screenshot pass became available during this review fix.
+
+## Final Review Fixes: Draft-Safe Saving
+
+### Final RED Evidence
+
+- The logic suite first failed because the pure `createDraftQuote` helper did not exist.
+- After the helper was added, the incomplete-draft round-trip still failed because the storage schema rejected zero weeks/Spot and an unchosen placement mode, falling back to seed data.
+- The source/smoke test failed because Bonus did not receive `errors.bonus` and Save Draft still called full `validateAll()`.
+
+### Final GREEN Evidence
+
+- Added a pure draft constructor that preserves incomplete customer, brand, resource, and placement-mode state while normalizing unsafe numeric inputs to finite values.
+- A new early-step draft with zero weeks/Spot and no placement mode safely round-trips through local storage.
+- NaN, Infinity, negative, and fractional campaign inputs normalize to safe draft values; the storage boundary continues to refuse any forged corrupt quote.
+- `Quote.placementMode` is optional for work-in-progress records, and storage permits missing mode/zero period only for editable `draft` or `returned` states. Submitted states remain strict.
+- Save Draft now calls `onSave(input)` directly and does not navigate to full-validation errors. Next and Submit still use step/full validation.
+- Bonus now receives `error={errors.bonus}`, activating its visible field message, `aria-invalid`, and `aria-describedby` behavior through `NumberField`.
+
+### Final Verification
+
+- `npm run test:logic`: PASS — 28/28 tests.
+- `node --test tests/rendered-html.test.mjs`: PASS — 2/2 tests.
+- `npm run lint`: PASS.
+- `npm run build`: PASS.
+- `git diff --check`: PASS.
+
+The browser-backend and standalone-TypeScript configuration concerns documented above are unchanged.

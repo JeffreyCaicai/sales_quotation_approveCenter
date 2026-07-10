@@ -69,6 +69,8 @@ test("replaces the disposable starter with the quotation workspace", async () =>
   assert.match(quoteWizard, /销售主管 → CEO/);
   assert.match(quoteWizard, /aria-current=\{index === step \? "step" : undefined\}/);
   assert.match(quoteWizard, /aria-invalid=\{Boolean\(error\)\}/);
+  assert.match(quoteWizard, /id="bonus"[\s\S]*error=\{errors\.bonus\}/);
+  assert.match(quoteWizard, /const handleSave = \(\) => \{\s*onSave\(input\);\s*\}/);
   assert.match(appShell, /DEMO/);
   assert.match(dashboard, /quotesForRole/);
   assert.match(ui, /export function StatusBadge/);

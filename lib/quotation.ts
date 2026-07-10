@@ -47,6 +47,7 @@ export function validateQuote(input: QuoteInput): Record<string, string> {
 
   if (!input.customerId) errors.customerId = "请选择客户";
   if (!input.brandId) errors.brandId = "请选择品牌";
+  if (!input.placementMode) errors.placementMode = "请选择投放方式";
   if (!input.placementIds?.length) {
     errors.placementIds = "请至少选择一栋楼宇或一个销售包";
   }
@@ -70,6 +71,44 @@ export function validateQuote(input: QuoteInput): Record<string, string> {
   }
 
   return errors;
+}
+
+export function createDraftQuote(input: QuoteInput, previousQuote: Quote | undefined, actor: User): Quote {
+  const now = new Date().toISOString();
+  const identifier = now.replace(/\D/g, "");
+  const normalizedInput: QuoteInput = {
+    ...input,
+    customerId: input.customerId ?? "",
+    brandId: input.brandId ?? "",
+    placementIds: [...(input.placementIds ?? [])],
+    weeks: normalizeDraftInteger(input.weeks),
+    spots: normalizeDraftInteger(input.spots),
+    bonus: normalizeDraftInteger(input.bonus),
+    discount: normalizeDraftDiscount(input.discount),
+    basePrice: normalizeDraftAmount(input.basePrice),
+    taxRate: normalizeDraftTaxRate(input.taxRate),
+  };
+
+  return {
+    id: previousQuote?.id ?? `quote-draft-${identifier}`,
+    quoteNumber: previousQuote?.quoteNumber ?? `DEMO-DRAFT-${identifier.slice(0, 8)}-${identifier.slice(8)}`,
+    salesId: actor.id,
+    customerId: normalizedInput.customerId ?? "",
+    brandId: normalizedInput.brandId ?? "",
+    placementMode: normalizedInput.placementMode,
+    placementIds: [...(normalizedInput.placementIds ?? [])],
+    weeks: normalizedInput.weeks ?? 0,
+    spots: normalizedInput.spots ?? 0,
+    bonus: normalizedInput.bonus ?? 0,
+    discount: normalizedInput.discount,
+    pricing: calculatePricing(normalizedInput),
+    status: previousQuote?.status === "returned" ? "returned" : "draft",
+    version: previousQuote?.version ?? 1,
+    approvalHistory: [...(previousQuote?.approvalHistory ?? [])],
+    createdAt: previousQuote?.createdAt ?? now,
+    updatedAt: now,
+    isDemoData: true,
+  };
 }
 
 export function validateQuoteReferences(
@@ -164,4 +203,20 @@ export function submitQuote(input: QuoteInput, previousQuote: Quote | undefined,
     updatedAt: now,
     isDemoData: true,
   };
+}
+
+function normalizeDraftInteger(value: number | undefined): number {
+  return Number.isInteger(value) && (value ?? 0) >= 0 ? (value ?? 0) : 0;
+}
+
+function normalizeDraftDiscount(value: number): number {
+  return Number.isFinite(value) && value >= 0 && value <= 100 ? value : 0;
+}
+
+function normalizeDraftAmount(value: number | undefined): number {
+  return Number.isFinite(value) && (value ?? 0) >= 0 ? (value ?? 0) : 0;
+}
+
+function normalizeDraftTaxRate(value: number | undefined): number {
+  return Number.isFinite(value) && (value ?? 0) >= 0 ? (value ?? 0) : 0.06;
 }

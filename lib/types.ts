@@ -99,7 +99,7 @@ export interface Quote {
   salesId: string;
   customerId: string;
   brandId: string;
-  placementMode: PlacementMode;
+  placementMode?: PlacementMode;
   placementIds: string[];
   weeks: number;
   spots: number;

@@ -77,6 +77,11 @@ function isQuoteArray(value: unknown): value is Quote[] {
 
 function isQuote(value: unknown): value is Quote {
   if (!isRecord(value) || !isRecord(value.pricing) || !Array.isArray(value.approvalHistory)) return false;
+  const status = value.status as QuoteStatus;
+  const isEditable = status === "draft" || status === "returned";
+  const hasValidPlacementMode = value.placementMode === "building"
+    || value.placementMode === "package"
+    || (isEditable && value.placementMode === undefined);
 
   return (
     isString(value.id) &&
@@ -84,14 +89,14 @@ function isQuote(value: unknown): value is Quote {
     isString(value.salesId) &&
     isString(value.customerId) &&
     isString(value.brandId) &&
-    (value.placementMode === "building" || value.placementMode === "package") &&
+    hasValidPlacementMode &&
     isStringArray(value.placementIds) &&
-    isPositiveInteger(value.weeks) &&
-    isPositiveInteger(value.spots) &&
+    (isEditable ? isNonnegativeInteger(value.weeks) : isPositiveInteger(value.weeks)) &&
+    (isEditable ? isNonnegativeInteger(value.spots) : isPositiveInteger(value.spots)) &&
     isNonnegativeInteger(value.bonus) &&
     isFiniteNumber(value.discount) && value.discount >= 0 && value.discount <= 100 &&
     isPricing(value.pricing) &&
-    STATUSES.includes(value.status as QuoteStatus) &&
+    STATUSES.includes(status) &&
     isPositiveInteger(value.version) &&
     value.approvalHistory.every(isApprovalEvent) &&
     isString(value.createdAt) &&

@@ -131,7 +131,6 @@ export function QuoteWizard({ initialQuote, salesUser, onCancel, onSave, onSubmi
   };
 
   const handleSave = () => {
-    if (!validateAll()) return;
     onSave(input);
   };
 
@@ -526,6 +525,7 @@ function ParameterStep({
         suffix="次"
         min={0}
         value={values.bonus}
+        error={errors.bonus}
         onChange={(value) => onChange("bonus", value)}
       />
       <div className="parameter-note">

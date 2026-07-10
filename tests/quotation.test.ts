@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { BUILDINGS, CUSTOMERS, PACKAGES, SEEDED_QUOTES, USERS } from "../lib/mock-data.ts";
 import {
   calculatePricing,
+  createDraftQuote,
   getDiscountBand,
   getNextApproval,
   submitQuote,
@@ -91,6 +92,82 @@ test("submitQuote rejects invalid numeric input before creating a persistable qu
     () => submitQuote({ ...validQuoteInput(), bonus: Number.NaN }, undefined, salesUser),
     /Bonus 必须为非负整数/,
   );
+});
+
+test("an incomplete early-step draft remains safely serializable and persistable", () => {
+  const salesUser = USERS.find((user) => user.role === "sales");
+  assert.ok(salesUser);
+  const draft = createDraftQuote(
+    {
+      customerId: "",
+      brandId: "",
+      placementIds: [],
+      weeks: 0,
+      spots: 0,
+      bonus: 0,
+      discount: 50,
+      basePrice: 0,
+    },
+    undefined,
+    salesUser,
+  );
+
+  assert.equal(draft.status, "draft");
+  assert.equal(draft.customerId, "");
+  assert.equal(draft.brandId, "");
+  assert.equal(draft.placementMode, undefined);
+  assert.deepEqual(draft.placementIds, []);
+  assert.equal(draft.weeks, 0);
+  assert.equal(draft.spots, 0);
+  assert.ok([
+    draft.weeks,
+    draft.spots,
+    draft.bonus,
+    draft.discount,
+    ...Object.values(draft.pricing),
+  ].every(Number.isFinite));
+
+  const storage = new MemoryStorage();
+  withBrowserStorage(storage, () => {
+    saveQuotes([draft]);
+    const [loadedDraft] = loadQuotes();
+    assert.equal(loadedDraft.id, draft.id);
+    assert.equal(loadedDraft.placementMode, undefined);
+    assert.equal(loadedDraft.weeks, 0);
+    assert.equal(loadedDraft.spots, 0);
+    assert.deepEqual(loadedDraft.pricing, draft.pricing);
+  });
+});
+
+test("draft creation normalizes non-finite numerics without changing mode selection", () => {
+  const salesUser = USERS.find((user) => user.role === "sales");
+  assert.ok(salesUser);
+  const draft = createDraftQuote(
+    {
+      placementMode: "package",
+      weeks: Number.NaN,
+      spots: Number.POSITIVE_INFINITY,
+      bonus: -1.5,
+      discount: Number.NaN,
+      basePrice: Number.NaN,
+      taxRate: Number.NaN,
+    },
+    undefined,
+    salesUser,
+  );
+
+  assert.equal(draft.placementMode, "package");
+  assert.equal(draft.weeks, 0);
+  assert.equal(draft.spots, 0);
+  assert.equal(draft.bonus, 0);
+  assert.equal(draft.discount, 0);
+  assert.deepEqual(draft.pricing, {
+    basePrice: 0,
+    discountAmount: 0,
+    netPrice: 0,
+    tax: 0,
+    total: 0,
+  });
 });
 
 test("reference validation rejects a customer outside the active salesperson portfolio", () => {
