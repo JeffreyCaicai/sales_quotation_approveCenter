@@ -1,4 +1,4 @@
-import type { DiscountBand, PricingSummary, QuoteInput, QuoteStatus } from "./types.ts";
+import type { DiscountBand, PricingSummary, Quote, QuoteInput, QuoteStatus, User } from "./types.ts";
 
 export function getDiscountBand(discount: number): DiscountBand {
   if (discount <= 60) return "standard";
@@ -41,4 +41,45 @@ export function validateQuote(input: QuoteInput): Record<string, string> {
   }
 
   return errors;
+}
+
+export function submitQuote(input: QuoteInput, previousQuote: Quote | undefined, actor: User): Quote {
+  const now = new Date().toISOString();
+  const isResubmission = previousQuote?.status === "returned";
+  const version = isResubmission ? previousQuote.version + 1 : (previousQuote?.version ?? 1);
+  const identifier = now.replace(/\D/g, "");
+  const id = previousQuote?.id ?? `quote-demo-${identifier}`;
+  const action = isResubmission ? "resubmitted" : "submitted";
+
+  return {
+    id,
+    quoteNumber: previousQuote?.quoteNumber ?? `DEMO-Q-${identifier.slice(0, 8)}-${identifier.slice(8)}`,
+    salesId: actor.id,
+    customerId: input.customerId ?? "",
+    brandId: input.brandId ?? "",
+    placementMode: input.placementMode ?? "building",
+    placementIds: [...(input.placementIds ?? [])],
+    weeks: input.weeks ?? 0,
+    spots: input.spots ?? 0,
+    bonus: input.bonus ?? 0,
+    discount: input.discount,
+    pricing: calculatePricing(input),
+    status: "pending_manager",
+    version,
+    approvalHistory: [
+      ...(previousQuote?.approvalHistory ?? []),
+      {
+        id: `${id}-v${version}-${action}`,
+        role: "sales",
+        action,
+        actorId: actor.id,
+        actorName: actor.name,
+        createdAt: now,
+        version,
+      },
+    ],
+    createdAt: previousQuote?.createdAt ?? now,
+    updatedAt: now,
+    isDemoData: true,
+  };
 }

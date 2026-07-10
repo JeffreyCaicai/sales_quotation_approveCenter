@@ -2,12 +2,14 @@
 
 import { useState } from "react";
 
-import { loadQuotes, resetQuotes } from "@/lib/store";
-import type { Quote, User } from "@/lib/types";
+import { calculatePricing, submitQuote } from "@/lib/quotation";
+import { loadQuotes, resetQuotes, saveQuotes } from "@/lib/store";
+import type { Quote, QuoteInput, User } from "@/lib/types";
 
 import { AppShell } from "./app-shell";
 import { DashboardScreen } from "./dashboard-screen";
 import { LoginScreen } from "./login-screen";
+import { QuoteWizard } from "./quote-wizard";
 import { Modal } from "./ui";
 
 interface PlaceholderState {
@@ -15,10 +17,15 @@ interface PlaceholderState {
   message: string;
 }
 
+interface WizardSession {
+  initialQuote?: Quote;
+}
+
 export function QuotationApp() {
   const [user, setUser] = useState<User | null>(null);
   const [quotes, setQuotes] = useState<Quote[]>(() => loadQuotes());
   const [placeholder, setPlaceholder] = useState<PlaceholderState | null>(null);
+  const [wizard, setWizard] = useState<WizardSession | null>(null);
 
   if (!user) return <LoginScreen onLogin={setUser} />;
 
@@ -33,21 +40,103 @@ export function QuotationApp() {
 
   const handleReset = () => {
     setQuotes(resetQuotes());
+    setWizard(null);
     setPlaceholder({ title: "演示数据已重置", message: "所有报价已恢复为初始演示状态。" });
+  };
+
+  const persistQuote = (quote: Quote, previousQuote?: Quote) => {
+    const next = previousQuote
+      ? quotes.map((item) => item.id === previousQuote.id ? quote : item)
+      : [quote, ...quotes];
+    setQuotes(next);
+    saveQuotes(next);
+  };
+
+  const handleDashboardAction = (label: string, quote?: Quote) => {
+    if (user.role === "sales" && (label === "新建报价" || (quote && (quote.status === "draft" || quote.status === "returned")))) {
+      setWizard({ initialQuote: quote });
+      return;
+    }
+
+    openPlaceholder(label, quote);
+  };
+
+  const handleSave = (input: QuoteInput) => {
+    const draft = saveDraft(input, wizard?.initialQuote, user);
+    persistQuote(draft, wizard?.initialQuote);
+    setWizard(null);
+    setPlaceholder({
+      title: "草稿已保存",
+      message: draft.status === "returned"
+        ? `${draft.quoteNumber} 的修改已保存，可继续完善后重新提交。`
+        : `${draft.quoteNumber} 已保存到“我的报价”。`,
+    });
+  };
+
+  const handleSubmit = (input: QuoteInput) => {
+    const quote = submitQuote(input, wizard?.initialQuote, user);
+    persistQuote(quote, wizard?.initialQuote);
+    setWizard(null);
+    setPlaceholder({
+      title: wizard?.initialQuote?.status === "returned" ? "报价已重新提交" : "报价已提交",
+      message: `${quote.quoteNumber} 已进入销售主管审批。`,
+    });
   };
 
   return (
     <AppShell
       user={user}
-      onSwitchUser={setUser}
+      onSwitchUser={(nextUser) => {
+        setUser(nextUser);
+        setWizard(null);
+      }}
       onReset={handleReset}
-      onLogout={() => setUser(null)}
+      onLogout={() => {
+        setUser(null);
+        setWizard(null);
+      }}
       onPlaceholder={openPlaceholder}
     >
-      <DashboardScreen user={user} quotes={quotes} onAction={openPlaceholder} />
+      {wizard && user.role === "sales" ? (
+        <QuoteWizard
+          initialQuote={wizard.initialQuote}
+          salesUser={user}
+          onCancel={() => setWizard(null)}
+          onSave={handleSave}
+          onSubmit={handleSubmit}
+        />
+      ) : (
+        <DashboardScreen user={user} quotes={quotes} onAction={handleDashboardAction} />
+      )}
       <Modal open={placeholder !== null} title={placeholder?.title ?? ""} onClose={() => setPlaceholder(null)}>
         <p>{placeholder?.message}</p>
       </Modal>
     </AppShell>
   );
+}
+
+function saveDraft(input: QuoteInput, previousQuote: Quote | undefined, actor: User): Quote {
+  const now = new Date().toISOString();
+  const identifier = now.replace(/\D/g, "");
+
+  return {
+    id: previousQuote?.id ?? `quote-draft-${identifier}`,
+    quoteNumber: previousQuote?.quoteNumber ?? `DEMO-DRAFT-${identifier.slice(0, 8)}-${identifier.slice(8)}`,
+    salesId: actor.id,
+    customerId: input.customerId ?? "",
+    brandId: input.brandId ?? "",
+    placementMode: input.placementMode ?? "building",
+    placementIds: [...(input.placementIds ?? [])],
+    weeks: input.weeks ?? 0,
+    spots: input.spots ?? 0,
+    bonus: input.bonus ?? 0,
+    discount: input.discount,
+    pricing: calculatePricing(input),
+    status: previousQuote?.status === "returned" ? "returned" : "draft",
+    version: previousQuote?.version ?? 1,
+    approvalHistory: [...(previousQuote?.approvalHistory ?? [])],
+    createdAt: previousQuote?.createdAt ?? now,
+    updatedAt: now,
+    isDemoData: true,
+  };
 }

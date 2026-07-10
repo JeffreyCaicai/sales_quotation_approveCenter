@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { BUILDINGS, CUSTOMERS, PACKAGES, SEEDED_QUOTES, USERS } from "../lib/mock-data.ts";
-import { calculatePricing, getDiscountBand, getNextApproval, validateQuote } from "../lib/quotation.ts";
+import { calculatePricing, getDiscountBand, getNextApproval, submitQuote, validateQuote } from "../lib/quotation.ts";
 import { loadQuotes, quotesForRole, resetQuotes, saveQuotes } from "../lib/store.ts";
 import type { Quote } from "../lib/types.ts";
 
@@ -49,6 +49,118 @@ test("invalid quote fields return field-level messages", () => {
 test("non-finite discount returns the discount range message", () => {
   const errors = validateQuote({ discount: Number.NaN });
   assert.equal(errors.discount, "折扣必须在 0%–100% 之间");
+});
+
+test("submitting a valid new quote creates version 1 pending manager approval", () => {
+  const salesUser = USERS.find((user) => user.role === "sales");
+  assert.ok(salesUser);
+
+  const quote = submitQuote(
+    {
+      customerId: "customer-kopi",
+      brandId: "brand-kopi-kenangan",
+      placementMode: "building",
+      placementIds: ["building-pacific-place"],
+      weeks: 4,
+      spots: 160,
+      bonus: 16,
+      discount: 50,
+      basePrice: 128_000,
+    },
+    undefined,
+    salesUser,
+  );
+
+  assert.equal(quote.version, 1);
+  assert.equal(quote.status, "pending_manager");
+  assert.equal(quote.salesId, salesUser.id);
+  assert.match(quote.id, /^quote-demo-/);
+  assert.match(quote.quoteNumber, /^DEMO-Q-/);
+  assert.equal(quote.approvalHistory.length, 1);
+  assert.deepEqual(quote.approvalHistory[0], {
+    id: `${quote.id}-v1-submitted`,
+    role: "sales",
+    action: "submitted",
+    actorId: salesUser.id,
+    actorName: salesUser.name,
+    createdAt: quote.createdAt,
+    version: 1,
+  });
+});
+
+test("resubmitting a returned executive-discount quote preserves history and returns to manager", () => {
+  const salesUser = USERS.find((user) => user.role === "sales");
+  const returnedQuote = SEEDED_QUOTES.find((quote) => quote.status === "returned");
+  assert.ok(salesUser);
+  assert.ok(returnedQuote);
+
+  const resubmitted = submitQuote(
+    {
+      customerId: returnedQuote.customerId,
+      brandId: returnedQuote.brandId,
+      placementMode: returnedQuote.placementMode,
+      placementIds: returnedQuote.placementIds,
+      weeks: returnedQuote.weeks,
+      spots: returnedQuote.spots,
+      bonus: returnedQuote.bonus,
+      discount: 75,
+      basePrice: returnedQuote.pricing.basePrice,
+    },
+    returnedQuote,
+    salesUser,
+  );
+
+  assert.equal(resubmitted.id, returnedQuote.id);
+  assert.equal(resubmitted.quoteNumber, returnedQuote.quoteNumber);
+  assert.equal(resubmitted.createdAt, returnedQuote.createdAt);
+  assert.equal(resubmitted.version, returnedQuote.version + 1);
+  assert.equal(resubmitted.status, "pending_manager");
+  assert.deepEqual(
+    resubmitted.approvalHistory.slice(0, -1),
+    returnedQuote.approvalHistory,
+  );
+  assert.deepEqual(resubmitted.approvalHistory.at(-1), {
+    id: `${returnedQuote.id}-v2-resubmitted`,
+    role: "sales",
+    action: "resubmitted",
+    actorId: salesUser.id,
+    actorName: salesUser.name,
+    createdAt: resubmitted.updatedAt,
+    version: 2,
+  });
+});
+
+test("submitting a saved draft is its first submission and keeps version 1", () => {
+  const salesUser = USERS.find((user) => user.role === "sales");
+  assert.ok(salesUser);
+  const draft: Quote = {
+    ...SEEDED_QUOTES[0],
+    id: "quote-draft-demo",
+    quoteNumber: "DEMO-DRAFT-001",
+    status: "draft",
+    version: 1,
+    approvalHistory: [],
+  };
+
+  const submitted = submitQuote(
+    {
+      customerId: draft.customerId,
+      brandId: draft.brandId,
+      placementMode: draft.placementMode,
+      placementIds: draft.placementIds,
+      weeks: draft.weeks,
+      spots: draft.spots,
+      bonus: draft.bonus,
+      discount: draft.discount,
+      basePrice: draft.pricing.basePrice,
+    },
+    draft,
+    salesUser,
+  );
+
+  assert.equal(submitted.id, draft.id);
+  assert.equal(submitted.version, 1);
+  assert.equal(submitted.approvalHistory.at(-1)?.action, "submitted");
 });
 
 test("sales only receives quotations assigned to that salesperson", () => {

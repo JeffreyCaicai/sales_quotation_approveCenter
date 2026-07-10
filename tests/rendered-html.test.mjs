@@ -41,11 +41,12 @@ test("server-renders the quotation workspace role entry", async () => {
 });
 
 test("replaces the disposable starter with the quotation workspace", async () => {
-  const [page, layout, packageJson, quotationApp, appShell, dashboard, ui, css] = await Promise.all([
+  const [page, layout, packageJson, quotationApp, quoteWizard, appShell, dashboard, ui, css] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
     readFile(new URL("../package.json", import.meta.url), "utf8"),
     readFile(new URL("../components/quotation-app.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../components/quote-wizard.tsx", import.meta.url), "utf8"),
     readFile(new URL("../components/app-shell.tsx", import.meta.url), "utf8"),
     readFile(new URL("../components/dashboard-screen.tsx", import.meta.url), "utf8"),
     readFile(new URL("../components/ui.tsx", import.meta.url), "utf8"),
@@ -59,6 +60,13 @@ test("replaces the disposable starter with the quotation workspace", async () =>
   assert.doesNotMatch(layout, /codex-preview|_sites-preview|themeColor|\bViewport\b/);
   assert.doesNotMatch(packageJson, /react-loading-skeleton/);
   assert.match(quotationApp, /loadQuotes/);
+  assert.match(quotationApp, /saveQuotes/);
+  assert.match(quotationApp, /<QuoteWizard/);
+  assert.match(quoteWizard, /export function QuoteWizard/);
+  assert.match(quoteWizard, /validateQuote/);
+  assert.match(quoteWizard, /calculatePricing/);
+  assert.match(quoteWizard, /销售主管 → CEO/);
+  assert.match(quoteWizard, /aria-current=\{index === step \? "step" : undefined\}/);
   assert.match(appShell, /DEMO/);
   assert.match(dashboard, /quotesForRole/);
   assert.match(ui, /export function StatusBadge/);
