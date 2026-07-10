@@ -94,16 +94,17 @@ function configuredSiteOrigin(value: string | undefined): URL | undefined {
 
 function localRequestOrigin(value: string | null): URL | undefined {
   const host = value?.trim();
-  if (!host || host.length > 255 || /[\s,/\\@?#]/.test(host)) {
+  if (
+    !host
+    || host.length > 255
+    || !/^(?:localhost|127\.0\.0\.1|\[::1\])(?::\d{1,5})?$/i.test(host)
+  ) {
     return undefined;
   }
 
   try {
     const origin = new URL(`http://${host}`);
-    const hostname = origin.hostname.toLowerCase();
-    return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "[::1]"
-      ? new URL(origin.origin)
-      : undefined;
+    return new URL(origin.origin);
   } catch {
     return undefined;
   }

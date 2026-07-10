@@ -227,6 +227,15 @@ test("uses only a canonical site origin for public Open Graph and X metadata", a
   const localResponse = await render("http://localhost:3000/");
   assert.match(await localResponse.text(), /<meta(?=[^>]*\bproperty=["']og:image["'])(?=[^>]*http:\/\/localhost:3000\/og\.png)[^>]*>/i);
 
+  for (const nonliteralLoopbackAuthority of ["2130706433", "0x7f000001", "0177.0.0.1"]) {
+    const nonliteralResponse = await render("http://localhost/", {
+      host: nonliteralLoopbackAuthority,
+    });
+    const nonliteralHtml = await nonliteralResponse.text();
+    assert.match(nonliteralHtml, /<meta(?=[^>]*\bproperty=["']og:image["'])(?=[^>]*http:\/\/localhost\/og\.png)[^>]*>/i);
+    assert.doesNotMatch(nonliteralHtml, new RegExp(nonliteralLoopbackAuthority.replaceAll(".", "\\."), "i"));
+  }
+
   const [layout, image] = await Promise.all([
     readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
     readFile(new URL("../public/og.png", import.meta.url)),

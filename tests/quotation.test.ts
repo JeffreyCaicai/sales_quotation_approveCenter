@@ -829,6 +829,112 @@ test("generated manager and CEO transitions survive persistence validation", () 
   });
 });
 
+test("50 and 65 percent submissions finish with manager approval while 75 reaches CEO final approval", () => {
+  const sales = USERS.find((user) => user.role === "sales");
+  const manager = USERS.find((user) => user.role === "manager");
+  const ceo = USERS.find((user) => user.role === "ceo");
+  assert.ok(sales);
+  assert.ok(manager);
+  assert.ok(ceo);
+
+  for (const discount of [50, 65]) {
+    const submitted = submitQuote(validQuoteInput({ discount }), undefined, sales);
+    const approved = approveQuote(submitted, manager);
+    assert.equal(approved.status, "approved");
+    assert.equal(approved.approvalHistory.at(-1)?.role, "manager");
+  }
+
+  const executiveSubmitted = submitQuote(validQuoteInput({ discount: 75 }), undefined, sales);
+  const managerApproved = approveQuote(executiveSubmitted, manager);
+  assert.equal(managerApproved.status, "pending_ceo");
+  const ceoApproved = approveQuote(managerApproved, ceo);
+  assert.equal(ceoApproved.status, "approved");
+  assert.deepEqual(
+    ceoApproved.approvalHistory.map((event) => [event.role, event.action]),
+    [["sales", "submitted"], ["manager", "approved"], ["ceo", "approved"]],
+  );
+});
+
+test("manager return reason stays in history when sales edits and resubmits", () => {
+  const sales = USERS.find((user) => user.role === "sales");
+  const manager = USERS.find((user) => user.role === "manager");
+  assert.ok(sales);
+  assert.ok(manager);
+
+  const submitted = submitQuote(validQuoteInput({ discount: 65 }), undefined, sales);
+  const returned = returnQuote(submitted, manager, "  请补充商业依据  ");
+  const resubmitted = submitQuote(
+    validQuoteInput({ discount: 60, bonus: submitted.bonus + 5 }),
+    returned,
+    sales,
+  );
+
+  assert.equal(resubmitted.status, "pending_manager");
+  assert.equal(resubmitted.version, 2);
+  assert.equal(resubmitted.bonus, submitted.bonus + 5);
+  assert.equal(resubmitted.approvalHistory.at(-2)?.comment, "请补充商业依据");
+  assert.equal(resubmitted.approvalHistory.at(-1)?.action, "resubmitted");
+});
+
+test("CEO return reason stays in history when sales edits and resubmits through manager again", () => {
+  const sales = USERS.find((user) => user.role === "sales");
+  const manager = USERS.find((user) => user.role === "manager");
+  const ceo = USERS.find((user) => user.role === "ceo");
+  assert.ok(sales);
+  assert.ok(manager);
+  assert.ok(ceo);
+
+  const submitted = submitQuote(validQuoteInput({ discount: 75 }), undefined, sales);
+  const pendingCeo = approveQuote(submitted, manager);
+  const returned = returnQuote(pendingCeo, ceo, "请调整高折扣方案");
+  const resubmitted = submitQuote(validQuoteInput({ discount: 70 }), returned, sales);
+
+  assert.equal(resubmitted.status, "pending_manager");
+  assert.equal(resubmitted.version, 2);
+  assert.equal(resubmitted.approvalHistory.at(-2)?.comment, "请调整高折扣方案");
+  assert.equal(resubmitted.approvalHistory.at(-1)?.action, "resubmitted");
+  assert.equal(approveQuote(resubmitted, manager).status, "approved");
+});
+
+test("building and package quotes retain one shared state across role views and storage", () => {
+  const storage = new MemoryStorage();
+  const sales = USERS.find((user) => user.role === "sales");
+  const manager = USERS.find((user) => user.role === "manager");
+  const ceo = USERS.find((user) => user.role === "ceo");
+  assert.ok(sales);
+  assert.ok(manager);
+  assert.ok(ceo);
+
+  const buildingQuote = submitQuote(validQuoteInput({ discount: 50 }), undefined, sales);
+  const salesPackage = PACKAGES[0];
+  const packageInput: QuoteInput = {
+    ...validQuoteInput({ discount: 75 }),
+    placementMode: "package",
+    placementIds: [salesPackage.id],
+    basePrice: salesPackage.priceRmb,
+  };
+  assert.deepEqual(
+    validateQuoteReferences(packageInput, sales.id, { customers: CUSTOMERS, buildings: BUILDINGS, packages: PACKAGES }),
+    {},
+  );
+  const packageQuote = approveQuote(submitQuote(packageInput, undefined, sales), manager);
+
+  withBrowserStorage(storage, () => {
+    saveQuotes([buildingQuote, packageQuote]);
+    const sharedQuotes = loadQuotes();
+    assert.deepEqual(sharedQuotes.map((quote) => quote.placementMode), ["building", "package"]);
+    assert.deepEqual(
+      quotesForRole(sharedQuotes, sales.role, sales.id).map((quote) => quote.id),
+      sharedQuotes.map((quote) => quote.id),
+    );
+    assert.deepEqual(
+      quotesForRole(sharedQuotes, manager.role, manager.id).map((quote) => quote.id),
+      sharedQuotes.map((quote) => quote.id),
+    );
+    assert.deepEqual(quotesForRole(sharedQuotes, ceo.role, ceo.id).map((quote) => quote.id), [packageQuote.id]);
+  });
+});
+
 class MemoryStorage implements Storage {
   readonly #values = new Map<string, string>();
 
@@ -875,7 +981,7 @@ function withBrowserStorage(storage: Storage, callback: () => void) {
   }
 }
 
-function validQuoteInput(): QuoteInput {
+function validQuoteInput(overrides: Partial<QuoteInput> = {}): QuoteInput {
   return {
     customerId: "customer-kopi",
     brandId: "brand-kopi-kenangan",
@@ -886,5 +992,6 @@ function validQuoteInput(): QuoteInput {
     bonus: 0,
     discount: 50,
     basePrice: 128_000,
+    ...overrides,
   };
 }
