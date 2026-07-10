@@ -41,7 +41,7 @@ test("server-renders the quotation workspace role entry", async () => {
 });
 
 test("replaces the disposable starter with the quotation workspace", async () => {
-  const [page, layout, packageJson, quotationApp, appShell, dashboard, ui] = await Promise.all([
+  const [page, layout, packageJson, quotationApp, appShell, dashboard, ui, css] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
     readFile(new URL("../package.json", import.meta.url), "utf8"),
@@ -49,6 +49,7 @@ test("replaces the disposable starter with the quotation workspace", async () =>
     readFile(new URL("../components/app-shell.tsx", import.meta.url), "utf8"),
     readFile(new URL("../components/dashboard-screen.tsx", import.meta.url), "utf8"),
     readFile(new URL("../components/ui.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
   ]);
 
   assert.match(page, /export const metadata:\s*Metadata/);
@@ -63,6 +64,16 @@ test("replaces the disposable starter with the quotation workspace", async () =>
   assert.match(ui, /export function StatusBadge/);
   assert.match(ui, /export function Money/);
   assert.match(ui, /export function Modal/);
+  assert.match(ui, /<dialog/);
+  assert.match(ui, /showModal\(\)/);
+  assert.match(ui, /onCancel=/);
+  assert.match(ui, /autoFocus/);
+  assert.match(ui, /restoreFocusRef\.current\?\.focus\(\)/);
+  assert.match(appShell, /aria-label="移动端切换角色"/);
+  assert.match(appShell, /aria-label="打开移动端账户菜单"/);
+  assert.match(appShell, /退出当前角色/);
+  assert.doesNotMatch(appShell, /onClick=\{onLogout\}><UserIcon \/>我的/);
+  assert.match(css, /@media \(forced-colors: active\)/);
 
   await assert.rejects(access(new URL("app/_sites-preview/SkeletonPreview.tsx", templateRoot)));
   await assert.rejects(access(new URL("app/_sites-preview/preview.css", templateRoot)));

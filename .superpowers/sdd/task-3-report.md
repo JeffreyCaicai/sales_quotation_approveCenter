@@ -143,3 +143,82 @@ Port 3000 was already occupied, so vinext selected 3001. A local HTTP request re
 1. The Browser plugin was present but reported no registered browser backends (`agent.browsers.list()` returned `[]`). Per the frontend testing skill, no standalone browser was substituted. Production SSR, live dev response, responsive source review, build, lint, and automated tests are verified, but screenshot-based desktop/mobile and client click-through QA remains unperformed.
 2. `npx tsc --noEmit` is not a configured project script and currently fails on pre-existing project configuration issues: missing `cloudflare:workers` / Worker globals and existing `.ts` import extensions without `allowImportingTsExtensions`. The requested vinext build and ESLint checks both pass, and no Task 3 component error is reported before those baseline failures.
 3. New quote, record navigation, edit, review, and approval controls intentionally stop at a clearly labeled placeholder modal because those workflows belong to later tasks.
+
+---
+
+## Accessibility and Mobile Account Follow-up
+
+### Requested fixes
+
+- Make the shared modal fully keyboard accessible with concrete native-dialog focus semantics.
+- Preserve role switching and account controls on mobile instead of mapping the bottom `我的` item directly to logout.
+- Make mobile logout explicit enough to avoid accidental exit.
+- Restore a robust visible focus outline, including Windows/high-contrast forced-colors handling.
+
+### Follow-up RED evidence
+
+Added source/smoke assertions before production changes for:
+
+- native `<dialog>` usage and `showModal()`;
+- Escape/cancel handling through `onCancel`;
+- an initially focused control through `autoFocus`;
+- trigger restoration through `restoreFocusRef.current?.focus()`;
+- explicit `移动端切换角色` and `打开移动端账户菜单` labels;
+- explicit `退出当前角色` copy and removal of the direct `我的` → `onLogout` mapping;
+- a `forced-colors: active` focus treatment.
+
+Command:
+
+```text
+npm test
+```
+
+Observed result:
+
+```text
+vinext build: exit 0
+✔ server-renders the quotation workspace role entry
+✖ replaces the disposable starter with the quotation workspace
+tests 2; pass 1; fail 1
+AssertionError: components/ui.tsx did not match /<dialog/
+```
+
+The failure was the intended missing accessibility behavior, after a successful production build.
+
+### Follow-up implementation
+
+- `Modal` now renders a native modal `<dialog>`. Calling `showModal()` supplies browser-managed background inertness and Tab containment.
+- The native `cancel` event prevents implicit dismissal and routes Escape through React state cleanup.
+- The close control has `autoFocus`; the element focused before opening is captured and restored after close/unmount.
+- Backdrop pointer dismissal only occurs when the dialog element itself is the event target.
+- Mobile `账户` opens a compact account popover containing identity, a labeled three-role selector, reset, and explicit `退出当前角色`.
+- Removed blanket `outline: none`; all interactive controls receive an outline plus focus ring, with a system-color outline under forced colors.
+
+### Follow-up GREEN evidence
+
+First GREEN command:
+
+```text
+npm test
+```
+
+Result:
+
+```text
+vinext build: exit 0
+✔ server-renders the quotation workspace role entry
+✔ replaces the disposable starter with the quotation workspace
+tests 2; pass 2; fail 0
+```
+
+Additional checks:
+
+```text
+npm run test:logic  # 14 pass, 0 fail
+npm run lint        # exit 0, no findings
+git diff --check    # exit 0
+```
+
+### Follow-up concerns
+
+- As in the initial Task 3 report, the Browser plugin exposes no registered browser backend, so native-dialog keyboard interaction and the mobile account popover could not be screenshot/click-through tested in this environment. The semantics are covered by source assertions, and production build/lint/regression checks pass.

@@ -84,7 +84,34 @@ export function AppShell({
       <nav className="mobile-nav" aria-label="移动端导航">
         <button className="mobile-nav__active" type="button"><DashboardIcon />工作台</button>
         <button type="button" onClick={() => onPlaceholder("报价记录")}><DocumentIcon />报价</button>
-        <button type="button" onClick={onLogout}><UserIcon />我的</button>
+        <details className="mobile-account">
+          <summary aria-label="打开移动端账户菜单"><UserIcon />账户</summary>
+          <div className="mobile-account__popover">
+            <div className="mobile-account__identity">
+              <span className="avatar" aria-hidden="true">{user.name.slice(0, 1)}</span>
+              <span><strong>{user.name}</strong><small>{user.title}</small></span>
+            </div>
+            <label className="mobile-role-switcher">
+              <span>当前角色</span>
+              <select
+                aria-label="移动端切换角色"
+                value={user.id}
+                onChange={(event) => {
+                  const nextUser = USERS.find((item) => item.id === event.target.value);
+                  if (nextUser) onSwitchUser(nextUser);
+                }}
+              >
+                {USERS.map((item) => (
+                  <option value={item.id} key={item.id}>{roleLabel(item)}</option>
+                ))}
+              </select>
+            </label>
+            <button type="button" onClick={onReset}>重置演示数据</button>
+            <button className="mobile-account__logout" type="button" onClick={onLogout}>
+              退出当前角色
+            </button>
+          </div>
+        </details>
       </nav>
     </div>
   );

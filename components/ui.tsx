@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 
 import type { QuoteStatus } from "@/lib/types";
 
@@ -41,30 +41,56 @@ interface ModalProps {
 }
 
 export function Modal({ open, title, children, onClose }: ModalProps) {
-  if (!open) return null;
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  const restoreFocusRef = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    if (!open || !dialog) return;
+
+    restoreFocusRef.current = document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null;
+    if (!dialog.open) dialog.showModal();
+
+    return () => {
+      if (dialog.open) dialog.close();
+      restoreFocusRef.current?.focus();
+    };
+  }, [open]);
 
   return (
-    <div className="modal-backdrop" role="presentation" onMouseDown={onClose}>
-      <section
-        className="modal"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="modal-title"
-        onMouseDown={(event) => event.stopPropagation()}
-      >
-        <div className="modal__header">
-          <h2 id="modal-title">{title}</h2>
-          <button className="icon-button" type="button" onClick={onClose} aria-label="关闭弹窗">
-            ×
-          </button>
-        </div>
-        <div className="modal__body">{children}</div>
-        <div className="modal__footer">
-          <button className="button button--primary" type="button" onClick={onClose}>
-            知道了
-          </button>
-        </div>
-      </section>
-    </div>
+    <dialog
+      ref={dialogRef}
+      className="modal"
+      aria-labelledby="modal-title"
+      aria-describedby="modal-description"
+      onCancel={(event) => {
+        event.preventDefault();
+        onClose();
+      }}
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <div className="modal__header">
+        <h2 id="modal-title">{title}</h2>
+        <button
+          autoFocus
+          className="icon-button"
+          type="button"
+          onClick={onClose}
+          aria-label="关闭弹窗"
+        >
+          ×
+        </button>
+      </div>
+      <div className="modal__body" id="modal-description">{children}</div>
+      <div className="modal__footer">
+        <button className="button button--primary" type="button" onClick={onClose}>
+          知道了
+        </button>
+      </div>
+    </dialog>
   );
 }

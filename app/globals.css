@@ -48,15 +48,11 @@ select {
   font: inherit;
 }
 
-button,
-summary,
-select {
-  outline: none;
-}
-
 button:focus-visible,
 summary:focus-visible,
 select:focus-visible {
+  outline: 3px solid #0a8f85;
+  outline-offset: 3px;
   box-shadow: 0 0 0 3px var(--surface), 0 0 0 6px #0a8f85;
 }
 
@@ -594,16 +590,8 @@ button {
 .empty-state { display: grid; place-items: center; min-height: 210px; padding: 30px; text-align: center; }
 .empty-state span { margin-top: 5px; color: var(--ink-soft); font-size: 13px; }
 
-.modal-backdrop {
-  position: fixed;
-  z-index: 50;
-  inset: 0;
-  display: grid;
-  place-items: center;
-  padding: 20px;
-  background: rgba(14, 27, 39, .55);
-}
-.modal { width: min(440px, 100%); border: 1px solid var(--line); border-radius: 16px; background: var(--surface); box-shadow: 0 30px 90px rgba(0,0,0,.22); }
+.modal { width: min(440px, calc(100% - 40px)); padding: 0; border: 1px solid var(--line); border-radius: 16px; background: var(--surface); color: var(--ink); box-shadow: 0 30px 90px rgba(0,0,0,.22); }
+.modal::backdrop { background: rgba(14, 27, 39, .55); }
 .modal__header { display: flex; align-items: center; justify-content: space-between; padding: 20px 22px; border-bottom: 1px solid var(--line); }
 .modal__header h2 { margin: 0; font-size: 18px; }
 .icon-button { display: grid; place-items: center; width: 32px; height: 32px; border: 0; border-radius: 8px; background: var(--surface-soft); font-size: 20px; cursor: pointer; }
@@ -683,8 +671,33 @@ button {
     box-shadow: 0 16px 45px rgba(21,38,56,.16);
     backdrop-filter: blur(16px);
   }
-  .mobile-nav button { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 5px; border: 0; border-radius: 9px; background: transparent; color: #788188; font-size: 9px; font-weight: 800; }
+  .mobile-nav > button,
+  .mobile-account > summary { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 5px; border: 0; border-radius: 9px; background: transparent; color: #788188; font-size: 9px; font-weight: 800; cursor: pointer; list-style: none; }
+  .mobile-account > summary::-webkit-details-marker { display: none; }
   .mobile-nav button.mobile-nav__active { background: var(--teal-soft); color: var(--teal-dark); }
+  .mobile-account { position: relative; }
+  .mobile-account__popover {
+    position: absolute;
+    right: -1px;
+    bottom: calc(100% + 15px);
+    display: grid;
+    width: min(278px, calc(100vw - 28px));
+    padding: 10px;
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    background: var(--surface);
+    box-shadow: 0 20px 55px rgba(21,38,56,.2);
+  }
+  .mobile-account__identity { display: flex; align-items: center; gap: 10px; padding: 6px 7px 13px; border-bottom: 1px solid var(--line); }
+  .mobile-account__identity > span:last-child { display: grid; text-align: left; }
+  .mobile-account__identity strong { font-size: 13px; }
+  .mobile-account__identity small { color: var(--ink-soft); font-size: 10px; }
+  .mobile-role-switcher { display: grid; gap: 5px; padding: 12px 7px; text-align: left; }
+  .mobile-role-switcher > span { color: var(--ink-soft); font-size: 10px; font-weight: 800; }
+  .mobile-role-switcher select { width: 100%; min-height: 40px; padding: 7px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--ink); font-weight: 700; }
+  .mobile-account__popover > button { min-height: 40px; padding: 8px 9px; border: 0; border-radius: 8px; background: transparent; text-align: left; font-size: 12px; font-weight: 700; cursor: pointer; }
+  .mobile-account__popover > button:hover { background: var(--surface-soft); }
+  .mobile-account__popover > .mobile-account__logout { color: var(--coral); }
 }
 
 @media (max-width: 410px) {
@@ -697,4 +710,13 @@ button {
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; transition-duration: 0.01ms !important; }
+}
+
+@media (forced-colors: active) {
+  button:focus-visible,
+  summary:focus-visible,
+  select:focus-visible {
+    outline: 3px solid ButtonText;
+    box-shadow: none;
+  }
 }
