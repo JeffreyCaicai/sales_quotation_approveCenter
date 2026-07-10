@@ -170,6 +170,69 @@ test("draft creation normalizes non-finite numerics without changing mode select
   });
 });
 
+test("draft creation clears stale base pricing when an invalid period normalizes to zero", () => {
+  const salesUser = USERS.find((user) => user.role === "sales");
+  assert.ok(salesUser);
+  const draft = createDraftQuote(
+    {
+      placementMode: "building",
+      placementIds: ["building-pacific-place"],
+      weeks: 1.5,
+      spots: 0,
+      bonus: 0,
+      discount: 50,
+      basePrice: 64_000,
+    },
+    undefined,
+    salesUser,
+  );
+
+  assert.equal(draft.weeks, 0);
+  assert.deepEqual(draft.pricing, {
+    basePrice: 0,
+    discountAmount: 0,
+    netPrice: 0,
+    tax: 0,
+    total: 0,
+  });
+});
+
+test("a valid priced draft retains the same total after storage round-trip", () => {
+  const salesUser = USERS.find((user) => user.role === "sales");
+  assert.ok(salesUser);
+  const draft = createDraftQuote(
+    {
+      customerId: "",
+      brandId: "",
+      placementMode: "building",
+      placementIds: ["building-pacific-place"],
+      weeks: 4,
+      spots: 0,
+      bonus: 0,
+      discount: 50,
+      basePrice: 128_000,
+    },
+    undefined,
+    salesUser,
+  );
+
+  assert.deepEqual(draft.pricing, {
+    basePrice: 128_000,
+    discountAmount: 64_000,
+    netPrice: 64_000,
+    tax: 3_840,
+    total: 67_840,
+  });
+
+  const storage = new MemoryStorage();
+  withBrowserStorage(storage, () => {
+    saveQuotes([draft]);
+    const [reopened] = loadQuotes();
+    assert.equal(reopened.pricing.basePrice, draft.pricing.basePrice);
+    assert.equal(reopened.pricing.total, draft.pricing.total);
+  });
+});
+
 test("reference validation rejects a customer outside the active salesperson portfolio", () => {
   const foreignCustomer = { ...CUSTOMERS[0], id: "customer-foreign", salesId: "sales-other" };
   const errors = validateQuoteReferences(

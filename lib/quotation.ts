@@ -76,16 +76,19 @@ export function validateQuote(input: QuoteInput): Record<string, string> {
 export function createDraftQuote(input: QuoteInput, previousQuote: Quote | undefined, actor: User): Quote {
   const now = new Date().toISOString();
   const identifier = now.replace(/\D/g, "");
+  const placementIds = [...(input.placementIds ?? [])];
+  const weeks = normalizeDraftInteger(input.weeks);
+  const hasPricedPlacement = Boolean(input.placementMode && placementIds.length > 0 && weeks > 0);
   const normalizedInput: QuoteInput = {
     ...input,
     customerId: input.customerId ?? "",
     brandId: input.brandId ?? "",
-    placementIds: [...(input.placementIds ?? [])],
-    weeks: normalizeDraftInteger(input.weeks),
+    placementIds,
+    weeks,
     spots: normalizeDraftInteger(input.spots),
     bonus: normalizeDraftInteger(input.bonus),
     discount: normalizeDraftDiscount(input.discount),
-    basePrice: normalizeDraftAmount(input.basePrice),
+    basePrice: hasPricedPlacement ? normalizeDraftAmount(input.basePrice) : 0,
     taxRate: normalizeDraftTaxRate(input.taxRate),
   };
 

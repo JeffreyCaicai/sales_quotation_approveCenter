@@ -124,3 +124,19 @@ The previously recorded browser-backend limitation still applies; no live screen
 - `git diff --check`: PASS.
 
 The browser-backend and standalone-TypeScript configuration concerns documented above are unchanged.
+
+## Draft Pricing Consistency Fix
+
+### RED / GREEN Evidence
+
+- RED: a draft with `weeks: 1.5` and a finite raw `basePrice: 64_000` normalized to zero weeks but incorrectly retained ¥64,000 base / ¥33,920 total.
+- GREEN: draft construction now prices only when placement mode, at least one placement ID, and a positive normalized period are all present. Otherwise base price and all derived pricing clear to zero.
+- Added a positive regression showing a valid four-week Pacific Place draft retains ¥128,000 base and ¥67,840 total after local-storage round-trip, matching both reopened summary and dashboard amount.
+
+### Verification
+
+- `npm run test:logic`: PASS — 30/30 tests.
+- `node --test tests/rendered-html.test.mjs`: PASS — 2/2 tests.
+- `npm run lint`: PASS.
+- `npm run build`: PASS.
+- `git diff --check`: PASS.
