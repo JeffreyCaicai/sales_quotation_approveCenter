@@ -1,5 +1,5 @@
 import { SEEDED_QUOTES, USERS } from "./mock-data.ts";
-import type { ApprovalAction, Quote, QuoteStatus, Role } from "./types.ts";
+import type { ApprovalAction, ApprovalEvent, Quote, QuoteStatus, Role } from "./types.ts";
 
 const STORAGE_KEY = "quotation-prototype-v1";
 const ROLES: Role[] = ["sales", "manager", "ceo"];
@@ -78,14 +78,12 @@ function isQuoteArray(value: unknown): value is Quote[] {
 function isQuote(value: unknown): value is Quote {
   if (!isRecord(value) || !isRecord(value.pricing) || !Array.isArray(value.approvalHistory)) return false;
   const status = value.status as QuoteStatus;
-  const hasConsistentApprovalStatus = status !== "pending_ceo"
-    || (isFiniteNumber(value.discount) && value.discount > 70);
   const isEditable = status === "draft" || status === "returned";
   const hasValidPlacementMode = value.placementMode === "building"
     || value.placementMode === "package"
     || (isEditable && value.placementMode === undefined);
 
-  return (
+  const hasValidShape = (
     isString(value.id) &&
     isString(value.quoteNumber) &&
     isString(value.salesId) &&
@@ -99,14 +97,29 @@ function isQuote(value: unknown): value is Quote {
     isFiniteNumber(value.discount) && value.discount >= 0 && value.discount <= 100 &&
     isPricing(value.pricing) &&
     STATUSES.includes(status) &&
-    hasConsistentApprovalStatus &&
     isPositiveInteger(value.version) &&
-    value.approvalHistory.every((event) => isApprovalEvent(event, value.version as number)) &&
     isIsoTimestamp(value.createdAt) &&
     isIsoTimestamp(value.updatedAt) &&
     value.isDemoData === true &&
     (value.approvedAt === undefined || isIsoTimestamp(value.approvedAt))
   );
+
+  if (!hasValidShape) return false;
+
+  const owner = USERS.find((user) => user.id === value.salesId);
+  if (!owner || owner.role !== "sales") return false;
+  if (!value.approvalHistory.every((event) => isApprovalEvent(event, value.version as number))) {
+    return false;
+  }
+
+  return isCurrentVersionWorkflowValid({
+    status,
+    discount: value.discount as number,
+    version: value.version as number,
+    salesId: value.salesId as string,
+    approvedAt: value.approvedAt as string | undefined,
+    history: value.approvalHistory as ApprovalEvent[],
+  });
 }
 
 function isPricing(value: Record<string, unknown>): boolean {
@@ -114,8 +127,10 @@ function isPricing(value: Record<string, unknown>): boolean {
   return amounts.every((amount) => isFiniteNumber(amount) && amount >= 0);
 }
 
-function isApprovalEvent(value: unknown, quoteVersion: number): boolean {
+function isApprovalEvent(value: unknown, quoteVersion: number): value is ApprovalEvent {
   if (!isRecord(value)) return false;
+
+  const actor = USERS.find((user) => user.id === value.actorId);
 
   const hasCommonFields = (
     isString(value.id) &&
@@ -125,7 +140,8 @@ function isApprovalEvent(value: unknown, quoteVersion: number): boolean {
     isString(value.actorName) &&
     isIsoTimestamp(value.createdAt) &&
     isPositiveInteger(value.version) && value.version <= quoteVersion &&
-    (value.comment === undefined || isString(value.comment))
+    (value.comment === undefined || isString(value.comment)) &&
+    actor !== undefined && actor.role === value.role && actor.name === value.actorName
   );
 
   if (!hasCommonFields) return false;
@@ -138,6 +154,72 @@ function isApprovalEvent(value: unknown, quoteVersion: number): boolean {
       && value.comment.trim().length > 0;
   }
   return value.role === "manager" || value.role === "ceo";
+}
+
+function isCurrentVersionWorkflowValid({
+  status,
+  discount,
+  version,
+  salesId,
+  approvedAt,
+  history,
+}: {
+  status: QuoteStatus;
+  discount: number;
+  version: number;
+  salesId: string;
+  approvedAt?: string;
+  history: ApprovalEvent[];
+}): boolean {
+  if (!isChronological(history)) return false;
+
+  const current = history.filter((event) => event.version === version);
+  if (status === "draft") return current.length === 0 && approvedAt === undefined;
+  if (approvedAt !== undefined && status !== "approved") return false;
+  if (current.length === 0 || history.at(-1) !== current.at(-1)) return false;
+
+  const submissionAction = version === 1 ? "submitted" : "resubmitted";
+  const submission = current[0];
+  if (
+    submission.role !== "sales"
+    || submission.action !== submissionAction
+    || submission.actorId !== salesId
+  ) {
+    return false;
+  }
+
+  const managerApproved = current[1]?.role === "manager" && current[1].action === "approved";
+  const managerReturned = current[1]?.role === "manager" && current[1].action === "returned";
+  const ceoApproved = current[2]?.role === "ceo" && current[2].action === "approved";
+  const ceoReturned = current[2]?.role === "ceo" && current[2].action === "returned";
+
+  if (status === "pending_manager") {
+    return current.length === 1 && approvedAt === undefined;
+  }
+  if (status === "pending_ceo") {
+    return discount > 70 && current.length === 2 && managerApproved && approvedAt === undefined;
+  }
+  if (status === "returned") {
+    return approvedAt === undefined && (
+      (current.length === 2 && managerReturned)
+      || (discount > 70 && current.length === 3 && managerApproved && ceoReturned)
+    );
+  }
+
+  const finalApproval = current.at(-1);
+  if (!finalApproval || approvedAt !== finalApproval.createdAt) return false;
+  if (discount <= 70) return current.length === 2 && managerApproved;
+  return current.length === 3 && managerApproved && ceoApproved;
+}
+
+function isChronological(history: ApprovalEvent[]): boolean {
+  for (let index = 1; index < history.length; index += 1) {
+    if (Date.parse(history[index - 1].createdAt) > Date.parse(history[index].createdAt)) {
+      return false;
+    }
+    if (history[index - 1].version > history[index].version) return false;
+  }
+  return true;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

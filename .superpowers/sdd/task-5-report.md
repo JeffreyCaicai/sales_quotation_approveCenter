@@ -34,7 +34,7 @@ Implemented Task 5 only. Manager and CEO approval workflows are connected to the
 
 ### GREEN
 
-- `npm run test:logic`: 38 passed, 0 failed.
+- `npm run test:logic`: 44 passed, 0 failed.
 - `npm test`: production build succeeded and 2 rendered/source smoke tests passed.
 - `npm run lint`: passed with no findings.
 - `npm run build`: passed.
@@ -54,6 +54,23 @@ Implemented Task 5 only. Manager and CEO approval workflows are connected to the
   - approval eligibility is now centralized in `canApproveQuote`, including the CEO discount boundary, and the UI and transition guard share it;
   - stored `pending_ceo` quotes must have an executive discount, timestamps must be canonical valid ISO values, and approval-event versions must be positive integers no newer than the quote version.
 - Added RED/GREEN coverage for the shared eligibility rule and malformed persisted workflow/history metadata.
+
+## Persistence-boundary follow-up
+
+- Added failing tests before implementation for three forged-payload classes:
+  - skipped or mismatched current-version workflows, including CEO routing without manager approval and final executive approval without CEO approval;
+  - missing/mismatched final `approvedAt` and `approvedAt` leaked onto non-final states;
+  - unknown event actors or known actors with forged role/name metadata.
+- Persisted quotes now require an exact current-version sequence:
+  - `pending_manager`: Sales submission/resubmission only;
+  - `pending_ceo`: Sales submission/resubmission then Manager approval, only above 70%;
+  - final approval through 70%: Sales submission/resubmission then Manager approval;
+  - final approval above 70%: Sales submission/resubmission, Manager approval, then CEO approval;
+  - return: Manager return, or Manager approval followed by CEO return for the executive path.
+- The latest current-version event must be the latest history entry and must correspond to quote status. History timestamps and versions must be nondecreasing.
+- Final `approved` records require `approvedAt` to equal the final approval event timestamp; all non-final states reject `approvedAt`.
+- Every event actor must resolve to `USERS` with the exact stored role and name, and the submission actor must own the quote.
+- Added exact 70% manager-final coverage, source-quote immutability coverage, and a generated Manager → CEO → final persistence round trip.
 
 ## Verification constraints and concerns
 

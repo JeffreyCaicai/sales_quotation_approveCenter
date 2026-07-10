@@ -423,6 +423,18 @@ test("manager approval routes a 75 percent quote to CEO", () => {
   assert.equal(approved.approvalHistory.at(-1)?.role, "manager");
 });
 
+test("manager approval finalizes a quote at the exact 70 percent boundary", () => {
+  const manager = USERS.find((user) => user.role === "manager");
+  const pendingQuote = SEEDED_QUOTES.find((quote) => quote.status === "pending_manager");
+  assert.ok(manager);
+  assert.ok(pendingQuote);
+
+  const approved = approveQuote({ ...pendingQuote, discount: 70 }, manager);
+
+  assert.equal(approved.status, "approved");
+  assert.equal(approved.approvedAt, approved.approvalHistory.at(-1)?.createdAt);
+});
+
 test("CEO approval finalizes a 75 percent quote", () => {
   const ceo = USERS.find((user) => user.role === "ceo");
   const pendingQuote = SEEDED_QUOTES.find((quote) => quote.status === "pending_ceo");
@@ -501,6 +513,25 @@ test("approval eligibility uses the same role, status, and discount guards as tr
   assert.equal(canApproveQuote(ceoPending, ceo), true);
   assert.equal(canApproveQuote({ ...ceoPending, discount: 70 }, ceo), false);
   assert.equal(canApproveQuote(ceoPending, sales), false);
+});
+
+test("approval and return transitions do not mutate their source quotes", () => {
+  const manager = USERS.find((user) => user.role === "manager");
+  const ceo = USERS.find((user) => user.role === "ceo");
+  const managerPending = SEEDED_QUOTES.find((quote) => quote.status === "pending_manager");
+  const ceoPending = SEEDED_QUOTES.find((quote) => quote.status === "pending_ceo");
+  assert.ok(manager);
+  assert.ok(ceo);
+  assert.ok(managerPending);
+  assert.ok(ceoPending);
+  const managerSnapshot = structuredClone(managerPending);
+  const ceoSnapshot = structuredClone(ceoPending);
+
+  approveQuote(managerPending, manager);
+  returnQuote(ceoPending, ceo, "请修改");
+
+  assert.deepEqual(managerPending, managerSnapshot);
+  assert.deepEqual(ceoPending, ceoSnapshot);
 });
 
 test("sales only receives quotations assigned to that salesperson", () => {
@@ -596,9 +627,11 @@ test("server-side quote loading returns a fresh deep clone of the seeds", () => 
 
 test("browser persistence round-trips valid quotes and falls back on invalid data", () => {
   const storage = new MemoryStorage();
+  const approvedSeed = SEEDED_QUOTES.find((quote) => quote.status === "approved");
+  assert.ok(approvedSeed);
 
   withBrowserStorage(storage, () => {
-    const changed = [{ ...SEEDED_QUOTES[0], status: "approved" as const }];
+    const changed = [{ ...approvedSeed, bonus: approvedSeed.bonus + 1 }];
     saveQuotes(changed);
     const loaded = loadQuotes();
     assert.deepEqual(loaded, changed);
@@ -674,6 +707,125 @@ test("browser persistence rejects inconsistent approval states and malformed his
       saveQuotes([invalid]);
       assert.deepEqual(loadQuotes(), valid);
     }
+  });
+});
+
+test("browser persistence rejects forged or skipped current-version workflow paths", () => {
+  const storage = new MemoryStorage();
+  const managerPending = SEEDED_QUOTES.find((quote) => quote.status === "pending_manager");
+  const ceoPending = SEEDED_QUOTES.find((quote) => quote.status === "pending_ceo");
+  assert.ok(managerPending);
+  assert.ok(ceoPending);
+  const managerApproval = ceoPending.approvalHistory.at(-1);
+  assert.ok(managerApproval);
+
+  withBrowserStorage(storage, () => {
+    const valid = [structuredClone(ceoPending)];
+    saveQuotes(valid);
+
+    const invalidQuotes: Quote[] = [
+      { ...ceoPending, approvalHistory: [ceoPending.approvalHistory[0]] },
+      {
+        ...ceoPending,
+        status: "approved",
+        approvedAt: managerApproval.createdAt,
+      },
+      {
+        ...managerPending,
+        status: "approved",
+        approvedAt: managerPending.approvalHistory[0].createdAt,
+      },
+      { ...ceoPending, status: "pending_manager" },
+      { ...ceoPending, status: "returned" },
+    ];
+
+    for (const invalid of invalidQuotes) {
+      saveQuotes([invalid]);
+      assert.deepEqual(loadQuotes(), valid);
+    }
+  });
+});
+
+test("browser persistence requires approvedAt to match final approval only", () => {
+  const storage = new MemoryStorage();
+  const approved = SEEDED_QUOTES.find((quote) => quote.status === "approved");
+  const ceoPending = SEEDED_QUOTES.find((quote) => quote.status === "pending_ceo");
+  assert.ok(approved);
+  assert.ok(ceoPending);
+
+  withBrowserStorage(storage, () => {
+    const valid = [structuredClone(approved)];
+    saveQuotes(valid);
+
+    const invalidQuotes: Quote[] = [
+      { ...approved, approvedAt: undefined },
+      { ...approved, approvedAt: approved.createdAt },
+      { ...ceoPending, approvedAt: ceoPending.approvalHistory.at(-1)?.createdAt },
+    ];
+
+    for (const invalid of invalidQuotes) {
+      saveQuotes([invalid]);
+      assert.deepEqual(loadQuotes(), valid);
+    }
+  });
+});
+
+test("browser persistence rejects approval events with forged actor identity", () => {
+  const storage = new MemoryStorage();
+  const ceoPending = SEEDED_QUOTES.find((quote) => quote.status === "pending_ceo");
+  assert.ok(ceoPending);
+
+  withBrowserStorage(storage, () => {
+    const valid = [structuredClone(ceoPending)];
+    saveQuotes(valid);
+    const [submission, managerApproval] = ceoPending.approvalHistory;
+
+    const invalidQuotes: Quote[] = [
+      {
+        ...ceoPending,
+        approvalHistory: [
+          { ...submission, actorId: "sales-forged" },
+          managerApproval,
+        ],
+      },
+      {
+        ...ceoPending,
+        approvalHistory: [
+          { ...submission, role: "manager" } as Quote["approvalHistory"][number],
+          managerApproval,
+        ],
+      },
+      {
+        ...ceoPending,
+        approvalHistory: [
+          submission,
+          { ...managerApproval, actorName: "伪造姓名" },
+        ],
+      },
+    ];
+
+    for (const invalid of invalidQuotes) {
+      saveQuotes([invalid]);
+      assert.deepEqual(loadQuotes(), valid);
+    }
+  });
+});
+
+test("generated manager and CEO transitions survive persistence validation", () => {
+  const storage = new MemoryStorage();
+  const manager = USERS.find((user) => user.role === "manager");
+  const ceo = USERS.find((user) => user.role === "ceo");
+  const managerPending = SEEDED_QUOTES.find((quote) => quote.status === "pending_manager");
+  assert.ok(manager);
+  assert.ok(ceo);
+  assert.ok(managerPending);
+  const executiveQuote = { ...managerPending, discount: 75 };
+  const pendingCeo = approveQuote(executiveQuote, manager);
+  const approved = approveQuote(pendingCeo, ceo);
+
+  withBrowserStorage(storage, () => {
+    saveQuotes([approved]);
+    assert.deepEqual(loadQuotes(), [approved]);
   });
 });
 
