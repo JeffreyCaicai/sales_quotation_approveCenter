@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { access, readFile } from "node:fs/promises";
 import test from "node:test";
 
@@ -6,14 +7,20 @@ const developmentPreviewMeta =
   /<meta(?=[^>]*\bname=["']codex-preview["'])(?=[^>]*\bcontent=["']development["'])[^>]*>/i;
 const templateRoot = new URL("../", import.meta.url);
 
-async function render() {
+async function render(url = "http://localhost/", additionalHeaders = {}) {
+  const origin = new URL(url);
   const workerUrl = new URL("../dist/server/index.js", import.meta.url);
   workerUrl.searchParams.set("test", `${process.pid}-${Date.now()}`);
   const { default: worker } = await import(workerUrl.href);
 
   return worker.fetch(
-    new Request("http://localhost/", {
-      headers: { accept: "text/html" },
+    new Request(url, {
+      headers: {
+        accept: "text/html",
+        host: origin.host,
+        "x-forwarded-proto": origin.protocol.slice(0, -1),
+        ...additionalHeaders,
+      },
     }),
     {
       ASSETS: {
@@ -62,8 +69,8 @@ test("replaces the disposable starter with the quotation workspace", async () =>
   assert.match(page, /<QuotationApp \/>/);
   assert.doesNotMatch(page, /codex-preview|_sites-preview|SkeletonPreview/);
   assert.doesNotMatch(layout, /title:\s*"Starter Project"/);
-  assert.match(layout, /title:\s*"报价审批中心"/);
-  assert.match(layout, /description:\s*"[^"]*楼宇报价与折扣审批[^"]*"/);
+  assert.match(layout, /SITE_TITLE\s*=\s*"报价审批中心"/);
+  assert.match(layout, /SITE_DESCRIPTION\s*=\s*"[^"]*楼宇报价与折扣审批[^"]*"/);
   assert.doesNotMatch(layout, /codex-preview|_sites-preview|themeColor|\bViewport\b/);
   assert.doesNotMatch(packageJson, /react-loading-skeleton/);
   assert.match(quotationApp, /loadQuotes/);
@@ -149,4 +156,58 @@ test("includes the approved-only printable quotation experience", async () => {
 
   assert.match(quotationScreen, /export function QuotationScreen/);
   assert.match(quotationScreen, /quote\.status !== "approved"/);
+});
+
+test("uses the incoming request origin for Open Graph and X metadata", async () => {
+  const response = await render("https://quotes.example.test/");
+  assert.equal(response.status, 200);
+
+  const html = await response.text();
+  assert.match(html, /<meta(?=[^>]*\bproperty=["']og:title["'])(?=[^>]*\bcontent=["']报价审批中心["'])[^>]*>/i);
+  assert.match(html, /<meta(?=[^>]*\bproperty=["']og:description["'])(?=[^>]*楼宇报价与折扣审批)[^>]*>/i);
+  assert.match(html, /<meta(?=[^>]*\bproperty=["']og:image["'])(?=[^>]*\bcontent=["']https:\/\/quotes\.example\.test\/og\.png["'])[^>]*>/i);
+  assert.match(html, /<meta(?=[^>]*\bproperty=["']og:image:width["'])(?=[^>]*\bcontent=["']1672["'])[^>]*>/i);
+  assert.match(html, /<meta(?=[^>]*\bproperty=["']og:image:height["'])(?=[^>]*\bcontent=["']941["'])[^>]*>/i);
+  assert.match(html, /<meta(?=[^>]*\bname=["']twitter:card["'])(?=[^>]*\bcontent=["']summary_large_image["'])[^>]*>/i);
+  assert.match(html, /<meta(?=[^>]*\bname=["']twitter:title["'])(?=[^>]*\bcontent=["']报价审批中心["'])[^>]*>/i);
+  assert.match(html, /<meta(?=[^>]*\bname=["']twitter:description["'])(?=[^>]*楼宇报价与折扣审批)[^>]*>/i);
+  assert.match(html, /<meta(?=[^>]*\bname=["']twitter:image["'])(?=[^>]*\bcontent=["']https:\/\/quotes\.example\.test\/og\.png["'])[^>]*>/i);
+
+  const poisonedResponse = await render("https://quotes.example.test/", {
+    "x-forwarded-host": "evil.example",
+    "x-forwarded-proto": "http",
+  });
+  const poisonedHtml = await poisonedResponse.text();
+  assert.match(poisonedHtml, /<meta(?=[^>]*\bproperty=["']og:image["'])(?=[^>]*https:\/\/quotes\.example\.test\/og\.png)[^>]*>/i);
+  assert.doesNotMatch(poisonedHtml, /evil\.example/);
+
+  const malformedHostResponse = await render("https://quotes.example.test/", {
+    host: "quotes.example.test@evil.example",
+  });
+  const malformedHostHtml = await malformedHostResponse.text();
+  assert.match(malformedHostHtml, /<meta(?=[^>]*\bproperty=["']og:image["'])(?=[^>]*http:\/\/localhost\/og\.png)[^>]*>/i);
+  assert.doesNotMatch(malformedHostHtml, /evil\.example/);
+
+  const defaultPortResponse = await render("http://quotes.example.test/", {
+    host: "quotes.example.test:80",
+  });
+  assert.match(await defaultPortResponse.text(), /<meta(?=[^>]*\bproperty=["']og:image["'])(?=[^>]*http:\/\/quotes\.example\.test\/og\.png)[^>]*>/i);
+
+  const loopbackLookalikeResponse = await render("https://127.0.0.1.evil.example/", {
+    "x-forwarded-proto": "invalid",
+  });
+  assert.match(await loopbackLookalikeResponse.text(), /<meta(?=[^>]*\bproperty=["']og:image["'])(?=[^>]*https:\/\/127\.0\.0\.1\.evil\.example\/og\.png)[^>]*>/i);
+
+  const [layout, image] = await Promise.all([
+    readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../public/og.png", import.meta.url)),
+  ]);
+  assert.match(layout, /export async function generateMetadata/);
+  assert.match(layout, /headers\(\)/);
+  assert.match(layout, /requestHeaders\.get\("host"\)/);
+  assert.match(layout, /openGraph:/);
+  assert.match(layout, /twitter:/);
+  assert.equal(image.readUInt32BE(16), 1672);
+  assert.equal(image.readUInt32BE(20), 941);
+  assert.equal(createHash("sha256").update(image).digest("hex"), "0ac727aa08b0c3dc6dee98246666616a3a0ebcb9cac9b0524250bc899bde3b33");
 });
