@@ -13,6 +13,53 @@ export type QuoteStatus =
 
 export type ApprovalAction = "submitted" | "resubmitted" | "approved" | "returned";
 
+export interface DemoRecord {
+  isDemoData: true;
+}
+
+export interface User extends DemoRecord {
+  id: string;
+  name: string;
+  role: Role;
+  title: string;
+}
+
+export interface Brand extends DemoRecord {
+  id: string;
+  name: string;
+  category: string;
+}
+
+export interface Customer extends DemoRecord {
+  id: string;
+  name: string;
+  industry: string;
+  salesId: string;
+  brands: Brand[];
+}
+
+export interface Building extends DemoRecord {
+  id: string;
+  name: string;
+  location: string;
+  category: string;
+  traffic: number;
+  impressions: number;
+  priceRmb: number;
+}
+
+export interface SalesPackage extends DemoRecord {
+  id: string;
+  name: string;
+  description: string;
+  buildingIds: string[];
+  location: string;
+  category: string;
+  traffic: number;
+  impressions: number;
+  priceRmb: number;
+}
+
 export interface ApprovalEvent {
   id: string;
   role: Role;
@@ -63,4 +110,6 @@ export interface Quote {
   approvalHistory: ApprovalEvent[];
   createdAt: string;
   updatedAt: string;
+  isDemoData: true;
+  approvedAt?: string;
 }
