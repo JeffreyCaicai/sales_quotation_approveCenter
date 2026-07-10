@@ -102,6 +102,14 @@ test("replaces the disposable starter with the quotation workspace", async () =>
   assert.match(quoteWizard, /validateQuoteReferences/);
   assert.match(quoteWizard, /calculatePricing/);
   assert.match(quoteWizard, /销售主管 → CEO/);
+  assert.match(
+    quoteWizard,
+    /if \(discount > 60\) \{[\s\S]*?label: "较高折扣 · 销售主管审批"[\s\S]*?tone: "elevated"[\s\S]*?description: "折扣处于关注区间，请在提交前确认商业依据。"/,
+  );
+  assert.match(
+    quoteWizard,
+    /<div className=\{`approval-callout approval-callout--\$\{approval\.tone\}`\} role="status" aria-live="polite">[\s\S]*?<strong>\{approval\.label\}<\/strong>[\s\S]*?<p>\{approval\.description\}<\/p>/,
+  );
   assert.match(quoteWizard, /aria-current=\{index === step \? "step" : undefined\}/);
   assert.match(quoteWizard, /aria-invalid=\{Boolean\(error\)\}/);
   assert.match(quoteWizard, /id="bonus"[\s\S]*error=\{errors\.bonus\}/);
@@ -151,6 +159,10 @@ test("replaces the disposable starter with the quotation workspace", async () =>
   assert.match(appShell, /退出当前角色/);
   assert.doesNotMatch(appShell, /onClick=\{onLogout\}><UserIcon \/>我的/);
   assert.match(css, /@media \(forced-colors: active\)/);
+  assert.match(
+    css,
+    /\.back-button\s*\{(?=[^}]*\bdisplay:\s*inline-flex)(?=[^}]*\balign-items:\s*center)(?=[^}]*\bmin-height:\s*(?:2[4-9]|[3-9]\d)px)(?=[^}]*\bpadding:\s*(?!0(?:\s|;))[^;}]+)[^}]*\}/,
+  );
   assert.match(css, /@page\s*\{[\s\S]*size:\s*A4/);
   assert.match(css, /@media print[\s\S]*\.app-header[\s\S]*display:\s*none/);
   assert.match(css, /@media print[\s\S]*\.quotation-pricing\s*\{[^}]*break-inside:\s*avoid[^}]*page-break-inside:\s*avoid/);
@@ -226,6 +238,12 @@ test("uses only a canonical site origin for public Open Graph and X metadata", a
 
   const localResponse = await render("http://localhost:3000/");
   assert.match(await localResponse.text(), /<meta(?=[^>]*\bproperty=["']og:image["'])(?=[^>]*http:\/\/localhost:3000\/og\.png)[^>]*>/i);
+
+  const ipv4LoopbackResponse = await render("http://localhost/", { host: "127.0.0.1:4173" });
+  assert.match(await ipv4LoopbackResponse.text(), /<meta(?=[^>]*\bproperty=["']og:image["'])(?=[^>]*http:\/\/127\.0\.0\.1:4173\/og\.png)[^>]*>/i);
+
+  const ipv6LoopbackResponse = await render("http://localhost/", { host: "[::1]:4173" });
+  assert.match(await ipv6LoopbackResponse.text(), /<meta(?=[^>]*\bproperty=["']og:image["'])(?=[^>]*http:\/\/\[::1\]:4173\/og\.png)[^>]*>/i);
 
   for (const nonliteralLoopbackAuthority of ["2130706433", "0x7f000001", "0177.0.0.1"]) {
     const nonliteralResponse = await render("http://localhost/", {

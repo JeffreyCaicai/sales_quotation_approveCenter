@@ -605,7 +605,19 @@ button {
 }
 .wizard-heading h1 { margin: 0; font-size: clamp(30px, 4vw, 44px); line-height: 1.1; letter-spacing: -.045em; }
 .wizard-heading div > p:last-child { margin: 9px 0 0; color: var(--ink-soft); }
-.back-button { margin: 0 0 22px; padding: 0; border: 0; background: transparent; color: var(--ink-soft); font-size: 12px; font-weight: 800; cursor: pointer; }
+.back-button {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  margin: 0 0 22px;
+  padding: 4px 2px;
+  border: 0;
+  background: transparent;
+  color: var(--ink-soft);
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+}
 .back-button:hover { color: var(--teal-dark); }
 
 .wizard-steps { margin-bottom: 22px; overflow-x: auto; scrollbar-width: thin; }
