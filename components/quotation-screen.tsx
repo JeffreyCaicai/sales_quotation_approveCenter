@@ -99,7 +99,7 @@ export function QuotationScreen({ quote, onBack, onPrint }: QuotationScreenProps
           <div className="quotation-table-wrap">
             <table className="quotation-table">
               <thead>
-                <tr><th>项目</th><th>类型 / 区域</th><th>周期</th><th className="align-right">Rate Card</th></tr>
+                <tr><th>项目</th><th>类型 / 区域</th><th>周期</th><th className="align-right">投放金额</th></tr>
               </thead>
               <tbody>
                 {resources.map((resource) => (

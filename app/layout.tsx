@@ -20,7 +20,7 @@ const FALLBACK_ORIGIN = "http://localhost";
 
 export async function generateMetadata(): Promise<Metadata> {
   const requestHeaders = await headers();
-  const origin = requestOrigin(requestHeaders);
+  const origin = metadataOrigin(requestHeaders);
   const socialImageUrl = new URL(SOCIAL_IMAGE_PATH, origin).toString();
 
   return {
@@ -57,47 +57,56 @@ export async function generateMetadata(): Promise<Metadata> {
   };
 }
 
-function requestOrigin(requestHeaders: Headers): URL {
-  const host = validHost(requestHeaders.get("host"));
-  if (!host) {
-    return new URL(FALLBACK_ORIGIN);
-  }
-
-  const forwardedHost = validHost(firstForwardedValue(requestHeaders.get("x-forwarded-host")) ?? null);
-  const forwardingIsConsistent = !requestHeaders.has("x-forwarded-host")
-    || forwardedHost?.toLowerCase() === host.toLowerCase();
-  const forwardedProtocol = forwardingIsConsistent
-    ? firstForwardedValue(requestHeaders.get("x-forwarded-proto"))
-    : undefined;
-  const protocol = forwardedProtocol === "http" || forwardedProtocol === "https"
-    ? forwardedProtocol
-    : isLocalHost(host) ? "http" : "https";
-
-  return new URL(`${protocol}://${host}`);
+function metadataOrigin(requestHeaders: Headers): URL {
+  return configuredSiteOrigin(process.env.SITE_ORIGIN)
+    ?? localRequestOrigin(requestHeaders.get("host"))
+    ?? new URL(FALLBACK_ORIGIN);
 }
 
-function validHost(value: string | null): string | undefined {
+function configuredSiteOrigin(value: string | undefined): URL | undefined {
+  const candidate = value?.trim();
+  if (
+    !candidate
+    || /[\u0000-\u0020\u007f]/.test(candidate)
+    || !/^https?:\/\/[^/?#\\]+\/?$/i.test(candidate)
+  ) {
+    return undefined;
+  }
+
+  try {
+    const origin = new URL(candidate);
+    if (
+      (origin.protocol !== "http:" && origin.protocol !== "https:")
+      || origin.username
+      || origin.password
+      || origin.pathname !== "/"
+      || origin.search
+      || origin.hash
+    ) {
+      return undefined;
+    }
+
+    return new URL(origin.origin);
+  } catch {
+    return undefined;
+  }
+}
+
+function localRequestOrigin(value: string | null): URL | undefined {
   const host = value?.trim();
   if (!host || host.length > 255 || /[\s,/\\@?#]/.test(host)) {
     return undefined;
   }
 
   try {
-    const parsed = new URL(`http://${host}`);
-    return parsed.hostname ? host : undefined;
+    const origin = new URL(`http://${host}`);
+    const hostname = origin.hostname.toLowerCase();
+    return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "[::1]"
+      ? new URL(origin.origin)
+      : undefined;
   } catch {
     return undefined;
   }
-}
-
-function firstForwardedValue(value: string | null): string | undefined {
-  const first = value?.split(",", 1)[0].trim();
-  return first || undefined;
-}
-
-function isLocalHost(host: string) {
-  const hostname = new URL(`http://${host}`).hostname.toLowerCase();
-  return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "[::1]";
 }
 
 export default function RootLayout({

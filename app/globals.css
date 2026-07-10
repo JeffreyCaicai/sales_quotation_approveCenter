@@ -1126,6 +1126,7 @@ button {
   .quotation-terms,
   .quotation-document__footer { break-inside: avoid; }
   .quotation-section > header { break-after: avoid; }
+  .quotation-pricing { break-inside: avoid; page-break-inside: avoid; }
   .quotation-total { break-inside: avoid; }
   .quotation-table { font-size: 8.5pt; }
   .quotation-table tr { break-inside: avoid; break-after: auto; }
