@@ -1,4 +1,4 @@
-import { SEEDED_QUOTES } from "./mock-data.ts";
+import { SEEDED_QUOTES, USERS } from "./mock-data.ts";
 import type { ApprovalAction, Quote, QuoteStatus, Role } from "./types.ts";
 
 const STORAGE_KEY = "quotation-prototype-v1";
@@ -47,7 +47,10 @@ export function resetQuotes(): Quote[] {
 export function quotesForRole(quotes: Quote[], role: Role, userId: string): Quote[] {
   if (role === "sales") return quotes.filter((quote) => quote.salesId === userId);
   if (role === "ceo") return quotes.filter((quote) => quote.status === "pending_ceo");
-  return [...quotes];
+
+  const manager = USERS.find((user) => user.role === "manager" && user.id === userId);
+  const teamMemberIds = manager?.teamMemberIds ?? [];
+  return quotes.filter((quote) => teamMemberIds.includes(quote.salesId));
 }
 
 function getStorage(): Storage | undefined {

@@ -68,14 +68,26 @@ test("sales only receives quotations assigned to that salesperson", () => {
   assert.ok(!visible.some((quote) => quote.id === otherSalesQuote.id));
 });
 
-test("manager receives all team quotations", () => {
+test("manager receives team quotations and excludes outside-team owners", () => {
   const manager = USERS.find((user) => user.role === "manager");
   assert.ok(manager);
+  const outsideTeamQuote: Quote = {
+    ...SEEDED_QUOTES[0],
+    id: "quote-outside-manager-team",
+    quoteNumber: "DEMO-OUTSIDE-MANAGER-TEAM",
+    salesId: "sales-outside-team",
+  };
 
   assert.deepEqual(
-    quotesForRole(SEEDED_QUOTES, manager.role, manager.id).map((quote) => quote.id),
+    quotesForRole([...SEEDED_QUOTES, outsideTeamQuote], manager.role, manager.id).map(
+      (quote) => quote.id,
+    ),
     SEEDED_QUOTES.map((quote) => quote.id),
   );
+});
+
+test("unknown manager receives no team quotations", () => {
+  assert.deepEqual(quotesForRole(SEEDED_QUOTES, "manager", "manager-unknown"), []);
 });
 
 test("CEO action queue contains only quotations pending CEO approval", () => {
@@ -136,8 +148,12 @@ test("browser persistence round-trips valid quotes and falls back on invalid dat
   withBrowserStorage(storage, () => {
     const changed = [{ ...SEEDED_QUOTES[0], status: "approved" as const }];
     saveQuotes(changed);
-    assert.deepEqual(loadQuotes(), changed);
-    assert.notEqual(loadQuotes(), changed);
+    const loaded = loadQuotes();
+    assert.deepEqual(loaded, changed);
+    assert.notEqual(loaded, changed);
+    assert.notEqual(loaded[0], changed[0]);
+    assert.notEqual(loaded[0].pricing, changed[0].pricing);
+    assert.notEqual(loaded[0].approvalHistory, changed[0].approvalHistory);
 
     storage.setItem("quotation-prototype-v1", "not JSON");
     assert.deepEqual(loadQuotes(), SEEDED_QUOTES);

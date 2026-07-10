@@ -22,6 +22,7 @@ export interface User extends DemoRecord {
   name: string;
   role: Role;
   title: string;
+  teamMemberIds?: string[];
 }
 
 export interface Brand extends DemoRecord {
