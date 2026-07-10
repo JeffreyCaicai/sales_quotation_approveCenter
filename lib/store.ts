@@ -78,6 +78,8 @@ function isQuoteArray(value: unknown): value is Quote[] {
 function isQuote(value: unknown): value is Quote {
   if (!isRecord(value) || !isRecord(value.pricing) || !Array.isArray(value.approvalHistory)) return false;
   const status = value.status as QuoteStatus;
+  const hasConsistentApprovalStatus = status !== "pending_ceo"
+    || (isFiniteNumber(value.discount) && value.discount > 70);
   const isEditable = status === "draft" || status === "returned";
   const hasValidPlacementMode = value.placementMode === "building"
     || value.placementMode === "package"
@@ -97,12 +99,13 @@ function isQuote(value: unknown): value is Quote {
     isFiniteNumber(value.discount) && value.discount >= 0 && value.discount <= 100 &&
     isPricing(value.pricing) &&
     STATUSES.includes(status) &&
+    hasConsistentApprovalStatus &&
     isPositiveInteger(value.version) &&
-    value.approvalHistory.every(isApprovalEvent) &&
-    isString(value.createdAt) &&
-    isString(value.updatedAt) &&
+    value.approvalHistory.every((event) => isApprovalEvent(event, value.version as number)) &&
+    isIsoTimestamp(value.createdAt) &&
+    isIsoTimestamp(value.updatedAt) &&
     value.isDemoData === true &&
-    (value.approvedAt === undefined || isString(value.approvedAt))
+    (value.approvedAt === undefined || isIsoTimestamp(value.approvedAt))
   );
 }
 
@@ -111,19 +114,30 @@ function isPricing(value: Record<string, unknown>): boolean {
   return amounts.every((amount) => isFiniteNumber(amount) && amount >= 0);
 }
 
-function isApprovalEvent(value: unknown): boolean {
+function isApprovalEvent(value: unknown, quoteVersion: number): boolean {
   if (!isRecord(value)) return false;
 
-  return (
+  const hasCommonFields = (
     isString(value.id) &&
     ROLES.includes(value.role as Role) &&
     ACTIONS.includes(value.action as ApprovalAction) &&
     isString(value.actorId) &&
     isString(value.actorName) &&
-    isString(value.createdAt) &&
-    isFiniteNumber(value.version) &&
+    isIsoTimestamp(value.createdAt) &&
+    isPositiveInteger(value.version) && value.version <= quoteVersion &&
     (value.comment === undefined || isString(value.comment))
   );
+
+  if (!hasCommonFields) return false;
+  if (value.action === "submitted" || value.action === "resubmitted") {
+    return value.role === "sales" && value.comment === undefined;
+  }
+  if (value.action === "returned") {
+    return (value.role === "manager" || value.role === "ceo")
+      && isString(value.comment)
+      && value.comment.trim().length > 0;
+  }
+  return value.role === "manager" || value.role === "ceo";
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -132,6 +146,16 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function isString(value: unknown): value is string {
   return typeof value === "string";
+}
+
+function isIsoTimestamp(value: unknown): value is string {
+  if (!isString(value)) return false;
+
+  try {
+    return new Date(value).toISOString() === value;
+  } catch {
+    return false;
+  }
 }
 
 function isStringArray(value: unknown): value is string[] {

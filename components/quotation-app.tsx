@@ -3,11 +3,19 @@
 import { useState } from "react";
 
 import { BUILDINGS, CUSTOMERS, PACKAGES } from "@/lib/mock-data";
-import { createDraftQuote, submitQuote, validateQuote, validateQuoteReferences } from "@/lib/quotation";
+import {
+  approveQuote,
+  createDraftQuote,
+  returnQuote,
+  submitQuote,
+  validateQuote,
+  validateQuoteReferences,
+} from "@/lib/quotation";
 import { loadQuotes, resetQuotes, saveQuotes } from "@/lib/store";
 import type { Quote, QuoteInput, User } from "@/lib/types";
 
 import { AppShell } from "./app-shell";
+import { ApprovalScreen } from "./approval-screen";
 import { DashboardScreen } from "./dashboard-screen";
 import { LoginScreen } from "./login-screen";
 import { QuoteWizard } from "./quote-wizard";
@@ -27,6 +35,7 @@ export function QuotationApp() {
   const [quotes, setQuotes] = useState<Quote[]>(() => loadQuotes());
   const [placeholder, setPlaceholder] = useState<PlaceholderState | null>(null);
   const [wizard, setWizard] = useState<WizardSession | null>(null);
+  const [approvalQuoteId, setApprovalQuoteId] = useState<string | null>(null);
 
   if (!user) return <LoginScreen onLogin={setUser} />;
 
@@ -42,6 +51,7 @@ export function QuotationApp() {
   const handleReset = () => {
     setQuotes(resetQuotes());
     setWizard(null);
+    setApprovalQuoteId(null);
     setPlaceholder({ title: "演示数据已重置", message: "所有报价已恢复为初始演示状态。" });
   };
 
@@ -56,6 +66,14 @@ export function QuotationApp() {
   const handleDashboardAction = (label: string, quote?: Quote) => {
     if (user.role === "sales" && (label === "新建报价" || (quote && (quote.status === "draft" || quote.status === "returned")))) {
       setWizard({ initialQuote: quote });
+      return;
+    }
+
+    if (quote && (
+      (user.role === "manager" && quote.status === "pending_manager")
+      || (user.role === "ceo" && quote.status === "pending_ceo")
+    )) {
+      setApprovalQuoteId(quote.id);
       return;
     }
 
@@ -85,21 +103,59 @@ export function QuotationApp() {
     });
   };
 
+  const approvalQuote = approvalQuoteId
+    ? quotes.find((quote) => quote.id === approvalQuoteId)
+    : undefined;
+
+  const handleApprove = () => {
+    if (!approvalQuote) return;
+    const nextQuote = approveQuote(approvalQuote, user);
+    persistQuote(nextQuote, approvalQuote);
+    setApprovalQuoteId(null);
+    setPlaceholder({
+      title: nextQuote.status === "pending_ceo" ? "已提交 CEO 审批" : "报价已批准",
+      message: nextQuote.status === "pending_ceo"
+        ? `${nextQuote.quoteNumber} 已完成主管审批，现进入 CEO 最终审批。`
+        : `${nextQuote.quoteNumber} 已完成最终审批。`,
+    });
+  };
+
+  const handleReturn = (reason: string) => {
+    if (!approvalQuote) return;
+    const nextQuote = returnQuote(approvalQuote, user, reason);
+    persistQuote(nextQuote, approvalQuote);
+    setApprovalQuoteId(null);
+    setPlaceholder({
+      title: "报价已退回",
+      message: `${nextQuote.quoteNumber} 已退回销售修改，原因已写入审批记录。`,
+    });
+  };
+
   return (
     <AppShell
       user={user}
       onSwitchUser={(nextUser) => {
         setUser(nextUser);
         setWizard(null);
+        setApprovalQuoteId(null);
       }}
       onReset={handleReset}
       onLogout={() => {
         setUser(null);
         setWizard(null);
+        setApprovalQuoteId(null);
       }}
       onPlaceholder={openPlaceholder}
     >
-      {wizard && user.role === "sales" ? (
+      {approvalQuote && (user.role === "manager" || user.role === "ceo") ? (
+        <ApprovalScreen
+          quote={approvalQuote}
+          actor={user}
+          onApprove={handleApprove}
+          onReturn={handleReturn}
+          onBack={() => setApprovalQuoteId(null)}
+        />
+      ) : wizard && user.role === "sales" ? (
         <QuoteWizard
           initialQuote={wizard.initialQuote}
           salesUser={user}

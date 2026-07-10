@@ -163,6 +163,8 @@ export function validateQuoteReferences(
 }
 
 export function submitQuote(input: QuoteInput, previousQuote: Quote | undefined, actor: User): Quote {
+  if (actor.role !== "sales") throw new Error("只有销售可以提交报价");
+
   const errors = validateQuote(input);
   if (Object.keys(errors).length > 0) {
     throw new Error(Object.values(errors).join("；"));
@@ -194,7 +196,7 @@ export function submitQuote(input: QuoteInput, previousQuote: Quote | undefined,
       ...(previousQuote?.approvalHistory ?? []),
       {
         id: `${id}-v${version}-${action}`,
-        role: "sales",
+        role: actor.role,
         action,
         actorId: actor.id,
         actorName: actor.name,
@@ -206,6 +208,85 @@ export function submitQuote(input: QuoteInput, previousQuote: Quote | undefined,
     updatedAt: now,
     isDemoData: true,
   };
+}
+
+export function approveQuote(quote: Quote, actor: User): Quote {
+  assertApprovalTransition(quote, actor);
+
+  const now = new Date().toISOString();
+  const status = actor.role === "manager" && quote.discount > 70
+    ? "pending_ceo"
+    : "approved";
+  const eventNumber = quote.approvalHistory.length + 1;
+
+  return {
+    ...quote,
+    status,
+    approvalHistory: [
+      ...quote.approvalHistory,
+      {
+        id: `${quote.id}-v${quote.version}-approved-${eventNumber}`,
+        role: actor.role,
+        action: "approved",
+        actorId: actor.id,
+        actorName: actor.name,
+        createdAt: now,
+        version: quote.version,
+      },
+    ],
+    updatedAt: now,
+    approvedAt: status === "approved" ? now : undefined,
+  };
+}
+
+export function canApproveQuote(quote: Quote, actor: User): boolean {
+  if (actor.role === "manager") return quote.status === "pending_manager";
+  if (actor.role === "ceo") return quote.status === "pending_ceo" && quote.discount > 70;
+  return false;
+}
+
+export function returnQuote(quote: Quote, actor: User, reason: string): Quote {
+  assertApprovalTransition(quote, actor);
+
+  const comment = reason.trim();
+  if (!comment) throw new Error("请填写退回原因");
+
+  const now = new Date().toISOString();
+  const eventNumber = quote.approvalHistory.length + 1;
+
+  return {
+    ...quote,
+    status: "returned",
+    approvalHistory: [
+      ...quote.approvalHistory,
+      {
+        id: `${quote.id}-v${quote.version}-returned-${eventNumber}`,
+        role: actor.role,
+        action: "returned",
+        actorId: actor.id,
+        actorName: actor.name,
+        createdAt: now,
+        version: quote.version,
+        comment,
+      },
+    ],
+    updatedAt: now,
+    approvedAt: undefined,
+  };
+}
+
+function assertApprovalTransition(quote: Quote, actor: User): asserts actor is User & { role: "manager" | "ceo" } {
+  if (actor.role !== "manager" && actor.role !== "ceo") {
+    throw new Error("当前角色无权审批报价");
+  }
+
+  if (actor.role === "manager" && !canApproveQuote(quote, actor)) {
+    throw new Error("报价状态不允许主管审批");
+  }
+
+  if (actor.role === "ceo" && !canApproveQuote(quote, actor)) {
+    throw new Error("报价状态不允许 CEO 审批");
+  }
 }
 
 function normalizeDraftInteger(value: number | undefined): number {

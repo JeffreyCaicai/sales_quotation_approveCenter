@@ -227,7 +227,8 @@ function QuoteTable({
 
 function actionFor(role: Role, quote: Quote): { label: string; primary: boolean } {
   if (role === "sales") {
-    if (quote.status === "draft" || quote.status === "returned") return { label: "继续编辑", primary: true };
+    if (quote.status === "returned") return { label: "修改并重新提交", primary: true };
+    if (quote.status === "draft") return { label: "继续编辑", primary: true };
     if (quote.status === "approved") return { label: "查看报价", primary: false };
     return { label: "查看进度", primary: false };
   }

@@ -2,10 +2,13 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { BUILDINGS, CUSTOMERS, PACKAGES, SEEDED_QUOTES, USERS } from "../lib/mock-data.ts";
 import {
+  approveQuote,
   calculatePricing,
+  canApproveQuote,
   createDraftQuote,
   getDiscountBand,
   getNextApproval,
+  returnQuote,
   submitQuote,
   validateQuote,
   validateQuoteReferences,
@@ -393,6 +396,113 @@ test("submitting a saved draft is its first submission and keeps version 1", () 
   assert.equal(submitted.approvalHistory.at(-1)?.action, "submitted");
 });
 
+test("manager approval finalizes a 50 percent quote", () => {
+  const manager = USERS.find((user) => user.role === "manager");
+  const pendingQuote = SEEDED_QUOTES.find((quote) => quote.status === "pending_manager");
+  assert.ok(manager);
+  assert.ok(pendingQuote);
+
+  const approved = approveQuote(pendingQuote, manager);
+
+  assert.equal(approved.status, "approved");
+  assert.equal(approved.approvedAt, approved.updatedAt);
+  assert.equal(approved.approvalHistory.at(-1)?.action, "approved");
+  assert.equal(approved.approvalHistory.at(-1)?.actorId, manager.id);
+});
+
+test("manager approval routes a 75 percent quote to CEO", () => {
+  const manager = USERS.find((user) => user.role === "manager");
+  const pendingQuote = SEEDED_QUOTES.find((quote) => quote.status === "pending_manager");
+  assert.ok(manager);
+  assert.ok(pendingQuote);
+
+  const approved = approveQuote({ ...pendingQuote, discount: 75 }, manager);
+
+  assert.equal(approved.status, "pending_ceo");
+  assert.equal(approved.approvedAt, undefined);
+  assert.equal(approved.approvalHistory.at(-1)?.role, "manager");
+});
+
+test("CEO approval finalizes a 75 percent quote", () => {
+  const ceo = USERS.find((user) => user.role === "ceo");
+  const pendingQuote = SEEDED_QUOTES.find((quote) => quote.status === "pending_ceo");
+  assert.ok(ceo);
+  assert.ok(pendingQuote);
+
+  const approved = approveQuote(pendingQuote, ceo);
+
+  assert.equal(approved.status, "approved");
+  assert.equal(approved.approvedAt, approved.updatedAt);
+  assert.equal(approved.approvalHistory.at(-1)?.role, "ceo");
+});
+
+test("returning a quote requires a nonblank reason", () => {
+  const manager = USERS.find((user) => user.role === "manager");
+  const pendingQuote = SEEDED_QUOTES.find((quote) => quote.status === "pending_manager");
+  assert.ok(manager);
+  assert.ok(pendingQuote);
+
+  assert.throws(() => returnQuote(pendingQuote, manager, "  \n "), /退回原因/);
+});
+
+test("returning a quote preserves its commercial details and exact trimmed reason", () => {
+  const ceo = USERS.find((user) => user.role === "ceo");
+  const pendingQuote = SEEDED_QUOTES.find((quote) => quote.status === "pending_ceo");
+  assert.ok(ceo);
+  assert.ok(pendingQuote);
+
+  const returned = returnQuote(pendingQuote, ceo, "  请确认客户预算  ");
+
+  assert.equal(returned.status, "returned");
+  assert.deepEqual(returned.pricing, pendingQuote.pricing);
+  assert.equal(returned.placementMode, pendingQuote.placementMode);
+  assert.deepEqual(returned.placementIds, pendingQuote.placementIds);
+  assert.deepEqual(returned.approvalHistory.at(-1), {
+    id: `${pendingQuote.id}-v${pendingQuote.version}-returned-${pendingQuote.approvalHistory.length + 1}`,
+    role: "ceo",
+    action: "returned",
+    actorId: ceo.id,
+    actorName: ceo.name,
+    createdAt: returned.updatedAt,
+    version: pendingQuote.version,
+    comment: "请确认客户预算",
+  });
+});
+
+test("approval transitions reject the wrong role and wrong status", () => {
+  const sales = USERS.find((user) => user.role === "sales");
+  const manager = USERS.find((user) => user.role === "manager");
+  const ceoPending = SEEDED_QUOTES.find((quote) => quote.status === "pending_ceo");
+  const approved = SEEDED_QUOTES.find((quote) => quote.status === "approved");
+  assert.ok(sales);
+  assert.ok(manager);
+  assert.ok(ceoPending);
+  assert.ok(approved);
+
+  assert.throws(() => approveQuote(ceoPending, manager), /状态/);
+  assert.throws(() => approveQuote(approved, manager), /状态/);
+  assert.throws(() => returnQuote(ceoPending, sales, "需要修改"), /无权/);
+});
+
+test("approval eligibility uses the same role, status, and discount guards as transitions", () => {
+  const sales = USERS.find((user) => user.role === "sales");
+  const manager = USERS.find((user) => user.role === "manager");
+  const ceo = USERS.find((user) => user.role === "ceo");
+  const managerPending = SEEDED_QUOTES.find((quote) => quote.status === "pending_manager");
+  const ceoPending = SEEDED_QUOTES.find((quote) => quote.status === "pending_ceo");
+  assert.ok(sales);
+  assert.ok(manager);
+  assert.ok(ceo);
+  assert.ok(managerPending);
+  assert.ok(ceoPending);
+
+  assert.equal(canApproveQuote(managerPending, manager), true);
+  assert.equal(canApproveQuote(managerPending, ceo), false);
+  assert.equal(canApproveQuote(ceoPending, ceo), true);
+  assert.equal(canApproveQuote({ ...ceoPending, discount: 70 }, ceo), false);
+  assert.equal(canApproveQuote(ceoPending, sales), false);
+});
+
 test("sales only receives quotations assigned to that salesperson", () => {
   const salesUser = USERS.find((user) => user.role === "sales");
   assert.ok(salesUser);
@@ -521,6 +631,45 @@ test("browser persistence refuses invalid numeric quotes without overwriting val
       { ...valid[0], spots: -1 },
       { ...valid[0], discount: 101 },
     ];
+    for (const invalid of invalidQuotes) {
+      saveQuotes([invalid]);
+      assert.deepEqual(loadQuotes(), valid);
+    }
+  });
+});
+
+test("browser persistence rejects inconsistent approval states and malformed history metadata", () => {
+  const storage = new MemoryStorage();
+  const pendingCeo = SEEDED_QUOTES.find((quote) => quote.status === "pending_ceo");
+  assert.ok(pendingCeo);
+
+  withBrowserStorage(storage, () => {
+    const valid = [structuredClone(pendingCeo)];
+    saveQuotes(valid);
+
+    const invalidQuotes: Quote[] = [
+      { ...pendingCeo, discount: 70 },
+      { ...pendingCeo, updatedAt: "not-a-timestamp" },
+      {
+        ...pendingCeo,
+        approvalHistory: pendingCeo.approvalHistory.map((event, index) =>
+          index === 0 ? { ...event, createdAt: "not-a-timestamp" } : event,
+        ),
+      },
+      {
+        ...pendingCeo,
+        approvalHistory: pendingCeo.approvalHistory.map((event, index) =>
+          index === 0 ? { ...event, version: 0 } : event,
+        ),
+      },
+      {
+        ...pendingCeo,
+        approvalHistory: pendingCeo.approvalHistory.map((event, index) =>
+          index === 0 ? { ...event, version: pendingCeo.version + 1 } : event,
+        ),
+      },
+    ];
+
     for (const invalid of invalidQuotes) {
       saveQuotes([invalid]);
       assert.deepEqual(loadQuotes(), valid);

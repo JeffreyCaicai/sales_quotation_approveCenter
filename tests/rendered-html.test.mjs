@@ -41,12 +41,13 @@ test("server-renders the quotation workspace role entry", async () => {
 });
 
 test("replaces the disposable starter with the quotation workspace", async () => {
-  const [page, layout, packageJson, quotationApp, quoteWizard, appShell, dashboard, ui, css] = await Promise.all([
+  const [page, layout, packageJson, quotationApp, quoteWizard, approvalScreen, appShell, dashboard, ui, css] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
     readFile(new URL("../package.json", import.meta.url), "utf8"),
     readFile(new URL("../components/quotation-app.tsx", import.meta.url), "utf8"),
     readFile(new URL("../components/quote-wizard.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../components/approval-screen.tsx", import.meta.url), "utf8").catch(() => ""),
     readFile(new URL("../components/app-shell.tsx", import.meta.url), "utf8"),
     readFile(new URL("../components/dashboard-screen.tsx", import.meta.url), "utf8"),
     readFile(new URL("../components/ui.tsx", import.meta.url), "utf8"),
@@ -62,6 +63,9 @@ test("replaces the disposable starter with the quotation workspace", async () =>
   assert.match(quotationApp, /loadQuotes/);
   assert.match(quotationApp, /saveQuotes/);
   assert.match(quotationApp, /<QuoteWizard/);
+  assert.match(quotationApp, /<ApprovalScreen/);
+  assert.match(quotationApp, /approveQuote/);
+  assert.match(quotationApp, /returnQuote/);
   assert.match(quoteWizard, /export function QuoteWizard/);
   assert.match(quoteWizard, /validateQuote/);
   assert.match(quoteWizard, /validateQuoteReferences/);
@@ -71,6 +75,13 @@ test("replaces the disposable starter with the quotation workspace", async () =>
   assert.match(quoteWizard, /aria-invalid=\{Boolean\(error\)\}/);
   assert.match(quoteWizard, /id="bonus"[\s\S]*error=\{errors\.bonus\}/);
   assert.match(quoteWizard, /const handleSave = \(\) => \{\s*onSave\(input\);\s*\}/);
+  assert.match(approvalScreen, /export function ApprovalScreen/);
+  assert.match(approvalScreen, /客户与品牌/);
+  assert.match(approvalScreen, /投放资源/);
+  assert.match(approvalScreen, /计算明细/);
+  assert.match(approvalScreen, /审批时间线/);
+  assert.match(approvalScreen, /<dialog/);
+  assert.match(approvalScreen, /请填写退回原因/);
   assert.match(appShell, /DEMO/);
   assert.match(dashboard, /quotesForRole/);
   assert.match(ui, /export function StatusBadge/);

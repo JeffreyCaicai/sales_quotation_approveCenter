@@ -61,16 +61,36 @@ export interface SalesPackage extends DemoRecord {
   priceRmb: number;
 }
 
-export interface ApprovalEvent {
+interface ApprovalEventBase {
   id: string;
-  role: Role;
-  action: ApprovalAction;
   actorId: string;
   actorName: string;
   createdAt: string;
   version: number;
+}
+
+export interface SubmissionApprovalEvent extends ApprovalEventBase {
+  role: "sales";
+  action: "submitted" | "resubmitted";
+  comment?: never;
+}
+
+export interface ApprovedApprovalEvent extends ApprovalEventBase {
+  role: "manager" | "ceo";
+  action: "approved";
   comment?: string;
 }
+
+export interface ReturnedApprovalEvent extends ApprovalEventBase {
+  role: "manager" | "ceo";
+  action: "returned";
+  comment: string;
+}
+
+export type ApprovalEvent =
+  | SubmissionApprovalEvent
+  | ApprovedApprovalEvent
+  | ReturnedApprovalEvent;
 
 export interface QuoteInput {
   customerId?: string;
