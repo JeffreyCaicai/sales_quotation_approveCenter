@@ -163,6 +163,7 @@ class OrderedRepository implements ImportJobRepository {
   async cleanupUploadAttempt() { return "failed" as const; }
   async recordStorageSyncWarning() {}
   async listExpiredUploadAttemptIds() { return []; }
+  async listStorageSyncWarningAttemptIds() { return []; }
   async reconcileUploadAttempt() { return "skipped" as const; }
 }
 
@@ -201,6 +202,7 @@ describe("pending object reconciliation", () => {
     store.failDeletes = 3;
     const repository = {
       listExpiredUploadAttemptIds: vi.fn(async () => []),
+      listStorageSyncWarningAttemptIds: vi.fn(async () => []),
       reconcileUploadAttempt: vi.fn(async (attemptId: string, _now: Date, _objects: PendingObject[], operations: import("@/lib/imports/contracts").UploadReconciliationOperations) => {
         if (attemptId === "a") { await operations.commit(); return "committed" as const; }
         await operations.cleanup(); return "failed" as const;

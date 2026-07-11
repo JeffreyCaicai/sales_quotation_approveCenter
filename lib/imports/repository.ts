@@ -192,6 +192,16 @@ export class PostgresImportJobRepository implements ImportJobRepository {
     return rows.flatMap(({ attemptId }) => attemptId ? [attemptId] : []);
   }
 
+  async listStorageSyncWarningAttemptIds(): Promise<string[]> {
+    const rows = await getDb().select({ attemptId: importJobs.uploadAttemptId })
+      .from(importJobs)
+      .where(and(
+        eq(importJobs.state, "uploaded"),
+        eq(importJobs.failureSummary, "IMPORT_STORAGE_SYNC_PENDING"),
+      ));
+    return rows.flatMap(({ attemptId }) => attemptId ? [attemptId] : []);
+  }
+
   async reconcileUploadAttempt(
     attemptId: string,
     now: Date,
@@ -212,12 +222,11 @@ export class PostgresImportJobRepository implements ImportJobRepository {
         await operations.cleanup();
         return "missing" as const;
       }
-      const [reference] = await tx.select({ id: importFiles.id })
+      const references = await tx.select({ key: importFiles.objectStorageKey })
         .from(importFiles)
-        .where(eq(importFiles.importJobId, job.id))
-        .limit(1);
-      if (job.state === "uploaded" || reference) {
-        await operations.commit();
+        .where(eq(importFiles.importJobId, job.id));
+      if (job.state === "uploaded" || references.length > 0) {
+        await operations.commitReferencedKeys(references.map(({ key }) => key));
         await tx.update(importJobs).set({
           failureSummary: null,
           updatedAt: now,

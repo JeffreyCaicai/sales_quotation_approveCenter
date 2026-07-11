@@ -136,6 +136,7 @@ class FakeRepository implements ImportJobRepository {
   async recordStorageSyncWarning() {}
 
   async listExpiredUploadAttemptIds() { return [] as string[]; }
+  async listStorageSyncWarningAttemptIds() { return [] as string[]; }
   async reconcileUploadAttempt(
     _attemptId: string,
     _now: Date,

@@ -24,7 +24,7 @@ export async function cleanupPendingWithRetry(
 
 export async function reconcilePendingObjects(
   store: ObjectStore,
-  repository: Pick<ImportJobRepository, "listExpiredUploadAttemptIds" | "reconcileUploadAttempt">,
+  repository: Pick<ImportJobRepository, "listExpiredUploadAttemptIds" | "listStorageSyncWarningAttemptIds" | "reconcileUploadAttempt">,
   options: { maxAttempts?: number; now?: Date } = {},
 ): Promise<{ committed: number; deleted: number; failed: number; skipped: number }> {
   let committed = 0;
@@ -41,6 +41,7 @@ export async function reconcilePendingObjects(
   const attemptIds = new Set([
     ...groups.keys(),
     ...await repository.listExpiredUploadAttemptIds(now),
+    ...await repository.listStorageSyncWarningAttemptIds(),
   ]);
   for (const attemptId of attemptIds) {
     const objects = groups.get(attemptId) ?? [];
@@ -52,6 +53,15 @@ export async function reconcilePendingObjects(
         commit: async () => {
           for (const object of objects) {
             await retry(() => store.commitPending(object), options.maxAttempts ?? 3);
+            committed += 1;
+          }
+        },
+        commitReferencedKeys: async (keys) => {
+          for (const key of keys) {
+            await retry(
+              () => store.commitPending({ key, attemptId }),
+              options.maxAttempts ?? 3,
+            );
             committed += 1;
           }
         },

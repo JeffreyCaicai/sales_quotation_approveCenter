@@ -91,6 +91,7 @@ export interface ImportJobRepository {
     cleanup: () => Promise<void>,
   ): Promise<"failed" | "referenced" | "missing">;
   listExpiredUploadAttemptIds(now: Date): Promise<string[]>;
+  listStorageSyncWarningAttemptIds(): Promise<string[]>;
   reconcileUploadAttempt(
     attemptId: string,
     now: Date,
@@ -119,6 +120,7 @@ export interface FinalizeUploadInput {
 
 export interface UploadReconciliationOperations {
   commit: () => Promise<void>;
+  commitReferencedKeys: (keys: readonly string[]) => Promise<void>;
   cleanup: () => Promise<void>;
 }
 

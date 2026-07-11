@@ -68,8 +68,9 @@ describe("durable upload lease orchestration", () => {
       finalizeUpload: vi.fn(async () => "uploaded"), cleanupUploadAttempt: vi.fn(),
       recordStorageSyncWarning: vi.fn(async () => undefined),
       listExpiredUploadAttemptIds: vi.fn(async () => []),
+      listStorageSyncWarningAttemptIds: vi.fn(async () => []),
       reconcileUploadAttempt: vi.fn(async (_attemptId: string, _now: Date, _objects: PendingObject[], operations: import("@/lib/imports/contracts").UploadReconciliationOperations) => {
-        await operations.commit();
+        await operations.commitReferencedKeys(["imports/one", "imports/two", "imports/three", "imports/four"]);
         return "committed" as const;
       }),
     };
@@ -84,7 +85,44 @@ describe("durable upload lease orchestration", () => {
     expect(repository.cleanupUploadAttempt).not.toHaveBeenCalled();
     expect(repository.recordStorageSyncWarning).toHaveBeenCalledWith(expect.any(String), "IMPORT_STORAGE_SYNC_PENDING");
     store.listPendingObjects = vi.fn(async () => [pending[1]]);
+    await expect(reconcilePendingObjects(store, repository as never)).resolves.toEqual({ committed: 4, deleted: 0, failed: 0, skipped: 0 });
+    expect(store.cleanupPending).not.toHaveBeenCalled();
+  });
+
+  test("processes a DB storage warning even when S3 discovery is empty", async () => {
+    const store = {
+      listPendingObjects: vi.fn(async () => []),
+      commitPending: vi.fn(async () => undefined), cleanupPending: vi.fn(),
+    } as unknown as ObjectStore;
+    const repository = {
+      listExpiredUploadAttemptIds: vi.fn(async () => []),
+      listStorageSyncWarningAttemptIds: vi.fn(async () => ["warning-attempt"]),
+      reconcileUploadAttempt: vi.fn(async (_id: string, _now: Date, _objects: PendingObject[], operations: import("@/lib/imports/contracts").UploadReconciliationOperations) => {
+        await operations.commitReferencedKeys(["imports/db-key"]);
+        return "committed" as const;
+      }),
+    };
     await expect(reconcilePendingObjects(store, repository as never)).resolves.toEqual({ committed: 1, deleted: 0, failed: 0, skipped: 0 });
+    expect(store.commitPending).toHaveBeenCalledWith({ key: "imports/db-key", attemptId: "warning-attempt" });
+  });
+
+  test("fails a warning attempt when any DB-referenced key is missing and never cleans it", async () => {
+    const store = {
+      listPendingObjects: vi.fn(async () => []),
+      commitPending: vi.fn(async ({ key }: PendingObject) => {
+        if (key === "imports/missing") throw new Error("STORAGE_SYNC_FAILED");
+      }),
+      cleanupPending: vi.fn(),
+    } as unknown as ObjectStore;
+    const repository = {
+      listExpiredUploadAttemptIds: vi.fn(async () => []),
+      listStorageSyncWarningAttemptIds: vi.fn(async () => ["warning-attempt"]),
+      reconcileUploadAttempt: vi.fn(async (_id: string, _now: Date, _objects: PendingObject[], operations: import("@/lib/imports/contracts").UploadReconciliationOperations) => {
+        await operations.commitReferencedKeys(["imports/ok", "imports/missing"]);
+        return "committed" as const;
+      }),
+    };
+    await expect(reconcilePendingObjects(store, repository as never, { maxAttempts: 1 })).rejects.toThrow("STORAGE_SYNC_FAILED");
     expect(store.cleanupPending).not.toHaveBeenCalled();
   });
 
@@ -96,6 +134,7 @@ describe("durable upload lease orchestration", () => {
     } as unknown as ObjectStore;
     const repository = {
       listExpiredUploadAttemptIds: vi.fn(async () => []),
+      listStorageSyncWarningAttemptIds: vi.fn(async () => []),
       reconcileUploadAttempt: vi.fn(async () => "skipped"),
     };
     await expect(reconcilePendingObjects(store, repository as never, { now: new Date("2026-07-11T00:00:00Z") })).resolves.toEqual({ committed: 0, deleted: 0, failed: 0, skipped: 1 });

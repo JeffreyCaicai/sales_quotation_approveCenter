@@ -98,12 +98,12 @@ describe("Postgres atomic duplicate gate", () => {
       "00000000-0000-4000-8000-000000000003",
       new Date("2026-07-11T00:10:00Z"),
       [],
-      { cleanup, commit: vi.fn() },
+      { cleanup, commit: vi.fn(), commitReferencedKeys: vi.fn() },
     );
     expect(result).toBe(expected);
     expect(cleanup).toHaveBeenCalledTimes(cleans ? 1 : 0);
     expect(events[0]).toBe("attempt-lock");
-    if (cleans) expect(events).toEqual(["attempt-lock", "load-state", "check-references", "cleanup-s3", "mark-failed"]);
+    if (cleans) expect(events).toEqual(["attempt-lock", "load-state", "cleanup-s3", "mark-failed"]);
   });
 
   test("reconciler-first expiry makes a later finalizer stale without creating a missing reference", async () => {
@@ -113,7 +113,7 @@ describe("Postgres atomic duplicate gate", () => {
     const cleanup = vi.fn();
     await expect(repository.reconcileUploadAttempt(
       "00000000-0000-4000-8000-000000000003", new Date("2026-07-11T00:00:00Z"), [],
-      { cleanup, commit: vi.fn() },
+      { cleanup, commit: vi.fn(), commitReferencedKeys: vi.fn() },
     )).resolves.toBe("failed");
     const commit = vi.fn();
     await expect(repository.finalizeUpload({
@@ -135,7 +135,7 @@ describe("Postgres atomic duplicate gate", () => {
     const commit = vi.fn();
     await expect(repository.reconcileUploadAttempt(
       "00000000-0000-4000-8000-000000000003", new Date("2026-07-11T00:20:00Z"), [],
-      { cleanup, commit },
+      { cleanup, commit, commitReferencedKeys: async () => { await commit(); } },
     )).resolves.toBe("committed");
     expect(state).toMatchObject({ jobState: "uploaded", references: true });
     expect(commit).toHaveBeenCalledTimes(1);
@@ -148,7 +148,7 @@ describe("Postgres atomic duplicate gate", () => {
     mocks.getDb.mockReturnValue(statefulLeaseDatabase(state));
     await expect(new PostgresImportJobRepository().reconcileUploadAttempt(
       "00000000-0000-4000-8000-000000000003", new Date(), [],
-      { cleanup: vi.fn(), commit: vi.fn(async () => { throw new Error("tag timeout"); }) },
+      { cleanup: vi.fn(), commit: vi.fn(), commitReferencedKeys: vi.fn(async () => { throw new Error("tag timeout"); }) },
     )).rejects.toThrow("tag timeout");
     expect(state.failureSummary).toBe("IMPORT_STORAGE_SYNC_PENDING");
   });
@@ -160,11 +160,13 @@ function statefulLeaseDatabase(state: { jobState: string; lease: Date | null; re
       let selects = 0;
       const tx = {
         execute: async () => undefined,
-        select: () => ({ from: () => ({ where: () => ({ limit: async () => {
+        select: () => ({ from: () => ({ where: () => {
           selects += 1;
-          if (selects === 1) return [{ id: record.id, state: state.jobState, lease: state.lease }];
-          return state.references ? [{ id: "reference" }] : [];
-        } }) }) }),
+          const rows = selects === 1
+            ? [{ id: record.id, state: state.jobState, lease: state.lease }]
+            : state.references ? [{ id: "reference", key: "imports/key" }] : [];
+          return Object.assign(Promise.resolve(rows), { limit: async () => rows });
+        } }) }),
         insert: () => ({ values: async () => { state.references = true; } }),
         update: () => ({ set: (values: { state?: string; uploadLeaseExpiresAt?: Date | null; failureSummary?: string | null }) => ({ where: async () => {
           if (values.state) state.jobState = values.state;
