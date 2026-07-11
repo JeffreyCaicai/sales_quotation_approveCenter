@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import {
@@ -20,11 +21,30 @@ test("English is the default when storage is unavailable or empty", () => {
   });
 });
 
-test("valid stored Chinese is restored", () => {
+test("the preference restoration helper returns valid stored Chinese", () => {
   const storage = new MemoryStorage();
   storage.setItem("quotation-locale-v1", "zh-CN");
 
   withStorage(storage, () => assert.equal(loadLocale(), "zh-CN"));
+});
+
+test("the provider renders deterministic English before restoring storage after mount", () => {
+  const providerSource = readFileSync(
+    new URL("../components/locale-provider.tsx", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(providerSource, /useState<Locale>\("en"\)/);
+  assert.doesNotMatch(providerSource, /useState<Locale>\(loadLocale\)/);
+  assert.match(
+    providerSource,
+    /useEffect\(\(\) => \{\s*const storedLocale = loadLocale\(\);\s*setLocaleState\(\(currentLocale\) => currentLocale === storedLocale \? currentLocale : storedLocale\);\s*}, \[\]\);/,
+  );
+  assert.equal(providerSource.match(/\bsaveLocale\(/g)?.length, 1);
+  assert.match(
+    providerSource,
+    /useCallback\(\(nextLocale: Locale\) => \{\s*setLocaleState\(nextLocale\);\s*saveLocale\(nextLocale\);/,
+  );
 });
 
 test("invalid and inaccessible stored preferences fall back to English", () => {

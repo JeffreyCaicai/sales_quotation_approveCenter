@@ -34,7 +34,14 @@ interface LocaleContextValue {
 const LocaleContext = createContext<LocaleContextValue | undefined>(undefined);
 
 export function LocaleProvider({ children }: { children: ReactNode }) {
-  const [locale, setLocaleState] = useState<Locale>(loadLocale);
+  const [locale, setLocaleState] = useState<Locale>("en");
+
+  /* eslint-disable react-hooks/set-state-in-effect -- Client-only storage must restore after hydration. */
+  useEffect(() => {
+    const storedLocale = loadLocale();
+    setLocaleState((currentLocale) => currentLocale === storedLocale ? currentLocale : storedLocale);
+  }, []);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   useEffect(() => {
     document.documentElement.lang = locale;
