@@ -5,7 +5,6 @@ import { AuthError, requirePermission } from "@/lib/auth/session";
 import { ImportError, permissionForDataType } from "@/lib/imports/contracts";
 import { createImportJob } from "@/lib/imports/create-job";
 import { parseImportMultipart } from "@/lib/imports/multipart";
-import { processImport } from "@/lib/imports/process-import";
 
 export const runtime = "nodejs";
 
@@ -27,7 +26,7 @@ export async function POST(request: Request): Promise<NextResponse> {
     const permission = permissionForDataType(rawDataType);
     const actor = await requirePermission(permission);
     const { templateVersion, files } = await parseImportMultipart(request);
-    const uploaded = await createImportJob(
+    const result = await createImportJob(
       {
         dataType: rawDataType as ImportDataType,
         templateVersion,
@@ -35,7 +34,6 @@ export async function POST(request: Request): Promise<NextResponse> {
       },
       actor,
     );
-    const result = await processImport(uploaded.jobId, actor);
     return NextResponse.json(result, { status: 201 });
   } catch (error) {
     return errorResponse(error);

@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Connect the production import lifecycle and close every final-review correctness, concurrency, identity, template, schema, and tooling finding without weakening protected boundaries.
+**Goal:** Connect the IRIS Building and Rate Card portion of the production import lifecycle and close its final-review correctness, concurrency, identity, template, schema, and tooling findings without weakening protected boundaries.
 
 **Architecture:** Add a state-checked orchestration service that reads immutable originals through the object-store abstraction, parses the canonical v2 contract, validates against durable database snapshots, and atomically stages either building differences or a Rate Card draft. Route publication through a dispatcher to focused transactional building and Rate Card publishers, with live permission and locked-reference rechecks inside PostgreSQL transactions.
 
@@ -13,7 +13,7 @@
 - Canonical template version is exactly `TMN-IMPORT-2`; callers cannot select a persisted version.
 - Building Type and Grade Resource values must come from an explicit injected or durable active snapshot; absent configuration fails closed.
 - Validation failure stores stable structured errors and writes no business rows.
-- Upload, processing, staging, and publication are retry-safe and state-checked; publication remains an explicit authenticated action.
+- Building/Rate Card processing, staging, and publication are retry-safe and state-checked; publication remains an explicit authenticated action. Customer/brand, package, and rollback work remains in the original Stage 2 plan.
 - Rate Card publication locks every referenced building and rechecks packages, version uniqueness, job state, actor permission, and `IDR` inside one transaction.
 - Preserve immutable uploads, authentication, template authorization, untracked `exports/`, hosting configuration, and the hosted demo.
 

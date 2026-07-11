@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 
-import { assertRateCardPublicationSnapshot } from "@/lib/imports/publish-rate-card";
+import { assertRateCardPublicationSnapshot, jakartaMidnight, rateCardAuditMetadata } from "@/lib/imports/publish-rate-card";
 import type { RateCardImport } from "@/lib/imports/template-v2";
 
 const input: RateCardImport = {
@@ -45,5 +45,38 @@ describe("Rate Card publication transaction preflight", () => {
       buildingPrices: [{ rowNumber: 2, irisBuildingId: undefined as unknown as string, priceIdr: "100" }],
     }, [], []))
       .toThrowError(expect.objectContaining({ key: "IMPORT_CHANGE_INVALID" }));
+  });
+
+  test("rejects a completely empty Rate Card", () => {
+    expect(() => assertRateCardPublicationSnapshot({
+      ...input, buildingPrices: [], packagePrices: [], packageBuildings: [],
+    }, [], [])).toThrowError(expect.objectContaining({ key: "IMPORT_CHANGE_INVALID" }));
+  });
+
+  test.each([
+    [{ ...input, packageBuildings: [] }, "price without membership"],
+    [{ ...input, packagePrices: [] }, "membership without price"],
+  ])("rejects package cross-sheet incompleteness: %s", (incomplete, _label) => {
+    void _label;
+    expect(() => assertRateCardPublicationSnapshot(incomplete,
+      [{ id: "building-uuid", irisBuildingId: "B1", status: "active" }],
+      [{ id: "package-uuid", packageCode: "P1", status: "active" }],
+    )).toThrowError(expect.objectContaining({ key: "IMPORT_RATE_CARD_PACKAGE_REFERENCE_INVALID" }));
+  });
+
+  test("uses Jakarta midnight for an effective date", () => {
+    expect(jakartaMidnight("2026-08-01").toISOString()).toBe("2026-07-31T17:00:00.000Z");
+  });
+
+  test("audits the effective date and exact resolved UUID payloads", () => {
+    expect(rateCardAuditMetadata(input, {
+      buildingIdByIris: new Map([["B1", "building-uuid"]]),
+      packageIdByCode: new Map([["P1", "package-uuid"]]),
+    })).toMatchObject({
+      effectiveDate: "2026-08-01",
+      buildingPrices: [{ irisBuildingId: "B1", buildingId: "building-uuid", priceIdr: "100" }],
+      packageConfigs: [{ packageCode: "P1", packageId: "package-uuid", priceIdr: "200" }],
+      packageMemberships: [{ packageId: "package-uuid", buildingId: "building-uuid" }],
+    });
   });
 });

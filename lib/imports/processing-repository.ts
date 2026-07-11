@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, lte } from "drizzle-orm";
 
 import { getDb } from "@/db";
 import { buildingControlledValues, buildings, importChanges, importErrors, importFiles, importJobs, rateCardVersions, salesPackages, userPermissions, users } from "@/db/schema";
@@ -7,27 +7,57 @@ import type { ImportChange } from "@/lib/imports/diff";
 import type { ImportValidationError } from "@/lib/imports/errors";
 import type { ImportProcessingRepository } from "@/lib/imports/process-import";
 import type { BuildingImport, RateCardImport } from "@/lib/imports/template-v2";
+import { ImportProcessingError } from "@/lib/imports/processing-errors";
+
+export const PROCESSING_STALE_AFTER_MS = 15 * 60 * 1000;
+
+export function processingClaimIsStale(updatedAt: Date, now: Date): boolean {
+  return updatedAt.getTime() <= now.getTime() - PROCESSING_STALE_AFTER_MS;
+}
+
+const processingPermission = {
+  customer_brand: "data.import.customer_brand",
+  building: "data.import.building",
+  package: "data.import.package",
+  rate_card: "rate_card.upload",
+} as const;
 
 export class PostgresImportProcessingRepository implements ImportProcessingRepository {
-  async claim(jobId: string, actor: SessionUser) {
+  async claim(jobId: string, actor: SessionUser, now: Date) {
     return getDb().transaction(async (tx) => {
-      const [candidate] = await tx.select({ dataType: importJobs.dataType, state: importJobs.state })
-        .from(importJobs).where(eq(importJobs.id, jobId)).limit(1).for("update");
-      if (!candidate) throw new Error("IMPORT_JOB_NOT_FOUND");
-      if (candidate.state !== "uploaded") return { kind: "terminal" as const, state: candidate.state };
-      if (candidate.dataType !== "building" && candidate.dataType !== "rate_card") throw new Error("IMPORT_DATA_TYPE_UNSUPPORTED");
-      const permission = candidate.dataType === "building" ? "data.import.building" : "rate_card.upload";
+      const [candidate] = await tx.select({ dataType: importJobs.dataType })
+        .from(importJobs).where(eq(importJobs.id, jobId)).limit(1);
+      if (!candidate) {
+        const [activeActor] = await tx.select({ id: users.id }).from(users)
+          .where(and(eq(users.id, actor.id), eq(users.status, "active"))).limit(1);
+        if (!activeActor) throw new ImportProcessingError("PERMISSION_DENIED", 403);
+        throw new ImportProcessingError("IMPORT_JOB_NOT_FOUND", 404);
+      }
+      const permission = processingPermission[candidate.dataType];
       const [authorized] = await tx.select({ id: users.id }).from(users)
         .innerJoin(userPermissions, and(eq(userPermissions.userId, users.id), eq(userPermissions.permissionKey, permission)))
         .where(and(eq(users.id, actor.id), eq(users.status, "active"))).limit(1);
-      if (!authorized) throw new Error("PERMISSION_DENIED");
-      await tx.update(importJobs).set({ state: "validating", updatedAt: new Date() })
-        .where(and(eq(importJobs.id, jobId), eq(importJobs.state, "uploaded")));
-      const [job] = await tx.select({ id: importJobs.id, dataType: importJobs.dataType, templateVersion: importJobs.templateVersion })
-        .from(importJobs).where(eq(importJobs.id, jobId)).limit(1);
+      if (!authorized) throw new ImportProcessingError("PERMISSION_DENIED", 403);
+      if (candidate.dataType !== "building" && candidate.dataType !== "rate_card") {
+        return { kind: "unsupported" as const, dataType: candidate.dataType };
+      }
+
+      const [job] = await tx.select({ id: importJobs.id, dataType: importJobs.dataType, templateVersion: importJobs.templateVersion, state: importJobs.state, updatedAt: importJobs.updatedAt })
+        .from(importJobs).where(eq(importJobs.id, jobId)).limit(1).for("update");
+      if (!job) throw new ImportProcessingError("IMPORT_JOB_NOT_FOUND", 404);
+      const reclaiming = job.state === "validating" && processingClaimIsStale(job.updatedAt, now);
+      if (job.state !== "uploaded" && !reclaiming) return { kind: "terminal" as const, state: job.state };
+
+      const staleBefore = new Date(now.getTime() - PROCESSING_STALE_AFTER_MS);
+      const stateCondition = reclaiming
+        ? and(eq(importJobs.state, "validating"), lte(importJobs.updatedAt, staleBefore))
+        : eq(importJobs.state, "uploaded");
+      const [claimed] = await tx.update(importJobs).set({ state: "validating", updatedAt: now })
+        .where(and(eq(importJobs.id, jobId), stateCondition)).returning({ id: importJobs.id });
+      if (!claimed) throw new ImportProcessingError("IMPORT_JOB_PROCESSING", 409);
       const files = await tx.select({ objectStorageKey: importFiles.objectStorageKey, originalFilename: importFiles.originalFilename, checksum: importFiles.checksum })
         .from(importFiles).where(eq(importFiles.importJobId, jobId));
-      return { kind: "claimed" as const, job: { ...job!, dataType: job!.dataType as "building" | "rate_card", files } };
+      return { kind: "claimed" as const, job: { id: job.id, dataType: job.dataType as "building" | "rate_card", templateVersion: job.templateVersion, claimToken: now.toISOString(), files } };
     });
   }
 
@@ -54,36 +84,50 @@ export class PostgresImportProcessingRepository implements ImportProcessingRepos
     return { ...buildingSnapshot, packages: packages.map((item) => ({ ...item, status: item.status as "active" | "inactive" })), versionCodes: versions.map((item) => item.versionCode) };
   }
 
-  async completeBuilding(jobId: string, normalized: BuildingImport, changes: ImportChange[]) {
+  async completeBuilding(jobId: string, claimToken: string, normalized: BuildingImport, changes: ImportChange[]) {
     await getDb().transaction(async (tx) => {
+      const [updated] = await tx.update(importJobs).set({ state: "ready_to_publish", normalizedPayload: normalized, totalRows: normalized.rows.length, validRows: normalized.rows.length, invalidRows: 0, failureSummary: null, updatedAt: new Date() })
+        .where(and(eq(importJobs.id, jobId), eq(importJobs.state, "validating"), eq(importJobs.updatedAt, new Date(claimToken)))).returning({ id: importJobs.id });
+      if (!updated) throw new ImportProcessingError("IMPORT_JOB_PROCESSING", 409);
       await tx.delete(importErrors).where(eq(importErrors.importJobId, jobId));
       await tx.delete(importChanges).where(eq(importChanges.importJobId, jobId));
       if (changes.length) await tx.insert(importChanges).values(changes.map((change) => ({ importJobId: jobId, entityType: "building", entityId: change.before?.id ?? null, changeType: change.type, beforeValue: change.before, afterValue: change.after })));
-      const [updated] = await tx.update(importJobs).set({ state: "ready_to_publish", normalizedPayload: normalized, totalRows: normalized.rows.length, validRows: normalized.rows.length, invalidRows: 0, failureSummary: null, updatedAt: new Date() })
-        .where(and(eq(importJobs.id, jobId), eq(importJobs.state, "validating"))).returning({ id: importJobs.id });
-      if (!updated) throw new Error("IMPORT_JOB_NOT_PROCESSABLE");
     });
   }
 
-  async completeRateCard(jobId: string, normalized: RateCardImport) {
+  async completeRateCard(jobId: string, claimToken: string, normalized: RateCardImport) {
     await getDb().transaction(async (tx) => {
+      const totalRows = normalized.buildingPrices.length + normalized.packagePrices.length + normalized.packageBuildings.length;
+      const [updated] = await tx.update(importJobs).set({ state: "draft", normalizedPayload: normalized, totalRows, validRows: totalRows, invalidRows: 0, failureSummary: null, updatedAt: new Date() })
+        .where(and(eq(importJobs.id, jobId), eq(importJobs.state, "validating"), eq(importJobs.updatedAt, new Date(claimToken)))).returning({ id: importJobs.id });
+      if (!updated) throw new ImportProcessingError("IMPORT_JOB_PROCESSING", 409);
       await tx.delete(importErrors).where(eq(importErrors.importJobId, jobId));
       await tx.delete(importChanges).where(eq(importChanges.importJobId, jobId));
       await tx.insert(importChanges).values({ importJobId: jobId, entityType: "rate_card", changeType: "added", beforeValue: null, afterValue: normalized });
-      const totalRows = normalized.buildingPrices.length + normalized.packagePrices.length + normalized.packageBuildings.length;
-      const [updated] = await tx.update(importJobs).set({ state: "draft", normalizedPayload: normalized, totalRows, validRows: totalRows, invalidRows: 0, failureSummary: null, updatedAt: new Date() })
-        .where(and(eq(importJobs.id, jobId), eq(importJobs.state, "validating"))).returning({ id: importJobs.id });
-      if (!updated) throw new Error("IMPORT_JOB_NOT_PROCESSABLE");
     });
   }
 
-  async fail(jobId: string, errors: ImportValidationError[]) {
+  async fail(jobId: string, claimToken: string, errors: ImportValidationError[]) {
     await getDb().transaction(async (tx) => {
+      const [updated] = await tx.update(importJobs).set({ state: "validation_failed", invalidRows: new Set(errors.map((error) => error.rowNumber).filter(Boolean)).size, validRows: 0, failureSummary: errors[0]?.key ?? "import.error.file_invalid", updatedAt: new Date() })
+        .where(and(eq(importJobs.id, jobId), eq(importJobs.state, "validating"), eq(importJobs.updatedAt, new Date(claimToken)))).returning({ id: importJobs.id });
+      if (!updated) throw new ImportProcessingError("IMPORT_JOB_PROCESSING", 409);
       await tx.delete(importChanges).where(eq(importChanges.importJobId, jobId));
       await tx.delete(importErrors).where(eq(importErrors.importJobId, jobId));
       if (errors.length) await tx.insert(importErrors).values(errors.map((error) => ({ importJobId: jobId, sheetName: error.sheet, rowNumber: error.rowNumber, columnName: error.column, errorKey: error.key, localizedParameters: error.params })));
-      await tx.update(importJobs).set({ state: "validation_failed", invalidRows: new Set(errors.map((error) => error.rowNumber).filter(Boolean)).size, validRows: 0, failureSummary: errors[0]?.key ?? "import.error.file_invalid", updatedAt: new Date() })
-        .where(and(eq(importJobs.id, jobId), eq(importJobs.state, "validating")));
     });
+  }
+
+  async retry(jobId: string, claimToken: string, failureSummary: string) {
+    const [updated] = await getDb().update(importJobs).set({
+      state: "uploaded",
+      failureSummary: `IMPORT_PROCESSING_RETRYABLE:${failureSummary}`,
+      updatedAt: new Date(),
+    }).where(and(
+      eq(importJobs.id, jobId),
+      eq(importJobs.state, "validating"),
+      eq(importJobs.updatedAt, new Date(claimToken)),
+    )).returning({ id: importJobs.id });
+    if (!updated) throw new ImportProcessingError("IMPORT_JOB_PROCESSING", 409);
   }
 }

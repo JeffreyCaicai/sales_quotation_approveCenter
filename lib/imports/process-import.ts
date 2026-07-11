@@ -10,11 +10,16 @@ import { RateCardBuildingResolutionError, resolveRateCardBuildingReferences } fr
 import { ImportParseError, type BuildingImport, type RateCardImport } from "@/lib/imports/template-v2";
 import { validateBuildingRows, type BuildingValidationSnapshot } from "@/lib/imports/validate";
 import { S3ObjectStore } from "@/lib/storage/s3-object-store";
+import { TEMPLATE_VERSION_V2 } from "@/lib/imports/template-v2";
+import { ImportProcessingError } from "@/lib/imports/processing-errors";
+
+export { ImportProcessingError } from "@/lib/imports/processing-errors";
 
 export interface ProcessingJob {
   id: string;
   dataType: Extract<ImportDataType, "building" | "rate_card">;
   templateVersion: string;
+  claimToken: string;
   files: Array<{ objectStorageKey: string; originalFilename: string; checksum: string }>;
 }
 
@@ -24,15 +29,17 @@ export interface RateCardProcessingSnapshot extends BuildingValidationSnapshot {
 }
 
 export interface ImportProcessingRepository {
-  claim(jobId: string, actor: SessionUser): Promise<
+  claim(jobId: string, actor: SessionUser, now: Date): Promise<
     | { kind: "claimed"; job: ProcessingJob }
     | { kind: "terminal"; state: ImportState }
+    | { kind: "unsupported"; dataType: Exclude<ImportDataType, "building" | "rate_card"> }
   >;
   buildingSnapshot(): Promise<BuildingValidationSnapshot & BuildingDiffSnapshot>;
   rateCardSnapshot(): Promise<RateCardProcessingSnapshot>;
-  completeBuilding(jobId: string, normalized: BuildingImport, changes: ImportChange[]): Promise<void>;
-  completeRateCard(jobId: string, normalized: RateCardImport): Promise<void>;
-  fail(jobId: string, errors: ImportValidationError[]): Promise<void>;
+  completeBuilding(jobId: string, claimToken: string, normalized: BuildingImport, changes: ImportChange[]): Promise<void>;
+  completeRateCard(jobId: string, claimToken: string, normalized: RateCardImport): Promise<void>;
+  fail(jobId: string, claimToken: string, errors: ImportValidationError[]): Promise<void>;
+  retry(jobId: string, claimToken: string, failureSummary: string): Promise<void>;
 }
 
 interface ProcessingObjectStore {
@@ -42,6 +49,7 @@ interface ProcessingObjectStore {
 export interface ProcessImportDependencies {
   repository: ImportProcessingRepository;
   objectStore: ProcessingObjectStore;
+  now?: () => Date;
 }
 
 export async function processImport(
@@ -51,16 +59,26 @@ export async function processImport(
     repository: new PostgresImportProcessingRepository(),
     objectStore: S3ObjectStore.fromEnv(),
   },
-): Promise<{ jobId: string; state: "ready_to_publish" | "draft" | "validation_failed" }> {
-  const claimed = await dependencies.repository.claim(jobId, actor);
+): Promise<{ jobId: string; state: "uploaded" | "ready_to_publish" | "draft" | "validation_failed" }> {
+  const claimed = await dependencies.repository.claim(jobId, actor, dependencies.now?.() ?? new Date());
+  if (claimed.kind === "unsupported") {
+    throw new ImportProcessingError("IMPORT_PROCESSOR_NOT_IMPLEMENTED", 501);
+  }
   if (claimed.kind === "terminal") {
     if (claimed.state === "ready_to_publish" || claimed.state === "draft" || claimed.state === "validation_failed") {
       return { jobId, state: claimed.state };
     }
-    throw new Error("IMPORT_JOB_NOT_PROCESSABLE");
+    if (claimed.state === "validating") throw new ImportProcessingError("IMPORT_JOB_PROCESSING", 409);
+    throw new ImportProcessingError("IMPORT_JOB_NOT_PROCESSABLE", 409);
   }
 
   const { job } = claimed;
+  if (job.templateVersion !== TEMPLATE_VERSION_V2) {
+    return fail(jobId, job.claimToken, [{
+      sheet: "File", rowNumber: 0, column: "Template Version",
+      key: "import.error.template_version", params: {},
+    }], dependencies.repository);
+  }
   try {
     const files = await Promise.all(job.files.map(async (file) => ({
       filename: file.originalFilename,
@@ -70,35 +88,41 @@ export async function processImport(
       const normalized = await parseImportFiles("building", files);
       const snapshot = await dependencies.repository.buildingSnapshot();
       const errors = validateBuildingRows(normalized.rows, snapshot);
-      if (errors.length > 0) return fail(jobId, errors, dependencies.repository);
+      if (errors.length > 0) return fail(jobId, job.claimToken, errors, dependencies.repository);
       const changes = calculateBuildingDiff(normalized.rows, snapshot);
-      await dependencies.repository.completeBuilding(jobId, normalized, changes);
+      await dependencies.repository.completeBuilding(jobId, job.claimToken, normalized, changes);
       return { jobId, state: "ready_to_publish" };
     }
 
     const normalized = await parseImportFiles("rate_card", files);
     const snapshot = await dependencies.repository.rateCardSnapshot();
-    const errors = validateRateCard(normalized, snapshot);
-    if (errors.length > 0) return fail(jobId, errors, dependencies.repository);
-    await dependencies.repository.completeRateCard(jobId, normalized);
+    const errors = validateRateCardForProcessing(normalized, snapshot);
+    if (errors.length > 0) return fail(jobId, job.claimToken, errors, dependencies.repository);
+    await dependencies.repository.completeRateCard(jobId, job.claimToken, normalized);
     return { jobId, state: "draft" };
   } catch (error) {
     const errors = processingErrors(error);
-    await dependencies.repository.fail(jobId, errors);
-    return { jobId, state: "validation_failed" };
+    if (errors) return fail(jobId, job.claimToken, errors, dependencies.repository);
+    await dependencies.repository.retry(
+      jobId,
+      job.claimToken,
+      error instanceof Error ? error.message.slice(0, 500) : "IMPORT_PROCESSING_TRANSIENT_FAILURE",
+    );
+    return { jobId, state: "uploaded" };
   }
 }
 
 async function fail(
   jobId: string,
+  claimToken: string,
   errors: ImportValidationError[],
   repository: ImportProcessingRepository,
 ): Promise<{ jobId: string; state: "validation_failed" }> {
-  await repository.fail(jobId, sortImportValidationErrors(errors));
+  await repository.fail(jobId, claimToken, sortImportValidationErrors(errors));
   return { jobId, state: "validation_failed" };
 }
 
-function processingErrors(error: unknown): ImportValidationError[] {
+function processingErrors(error: unknown): ImportValidationError[] | null {
   if (error instanceof RateCardBuildingResolutionError) return error.errors;
   if (error instanceof ImportParseError) {
     return [{
@@ -110,14 +134,17 @@ function processingErrors(error: unknown): ImportValidationError[] {
         typeof value === "string" || typeof value === "number")) as Record<string, string | number>,
     }];
   }
-  return [{ sheet: "File", rowNumber: 0, column: "", key: "import.error.file_invalid", params: {} }];
+  return null;
 }
 
-function validateRateCard(
+export function validateRateCardForProcessing(
   input: RateCardImport,
   snapshot: RateCardProcessingSnapshot,
 ): ImportValidationError[] {
   const errors: ImportValidationError[] = [];
+  if (input.buildingPrices.length + input.packagePrices.length + input.packageBuildings.length === 0) {
+    errors.push({ sheet: "Metadata", rowNumber: 0, column: "", key: "import.error.rate_card_empty", params: {} });
+  }
   try {
     resolveRateCardBuildingReferences(input, snapshot);
   } catch (error) {
@@ -133,6 +160,14 @@ function validateRateCard(
     } else if (!activePackages.has(row.packageCode)) {
       errors.push({ sheet, rowNumber: row.rowNumber, column: "Package Code", key: "import.error.package_inactive", params: { packageCode: row.packageCode } });
     }
+  }
+  const pricedPackages = new Set(input.packagePrices.map((row) => row.packageCode.trim()));
+  const memberPackages = new Set(input.packageBuildings.map((row) => row.packageCode.trim()));
+  for (const row of input.packagePrices) {
+    if (!memberPackages.has(row.packageCode.trim())) errors.push({ sheet: "Package Prices", rowNumber: row.rowNumber, column: "Package Code", key: "import.error.package_price_missing_membership", params: { packageCode: row.packageCode.trim() } });
+  }
+  for (const row of input.packageBuildings) {
+    if (!pricedPackages.has(row.packageCode.trim())) errors.push({ sheet: "Package Buildings", rowNumber: row.rowNumber, column: "Package Code", key: "import.error.package_membership_missing_price", params: { packageCode: row.packageCode.trim() } });
   }
   if (!input.versionCode || snapshot.versionCodes.includes(input.versionCode)) {
     errors.push({ sheet: "Metadata", rowNumber: 2, column: "Version Code", key: "import.error.rate_card_version_invalid", params: { versionCode: input.versionCode } });

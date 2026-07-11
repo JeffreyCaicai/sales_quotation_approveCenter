@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
 import { AuthError } from "@/lib/auth/session";
+import { ImportProcessingError } from "@/lib/imports/process-import";
 
 const mocks = vi.hoisted(() => ({
   requireSession: vi.fn(),
@@ -12,7 +13,10 @@ vi.mock("@/lib/auth/session", async (importActual) => ({
   ...(await importActual<typeof import("@/lib/auth/session")>()),
   requireSession: mocks.requireSession,
 }));
-vi.mock("@/lib/imports/process-import", () => ({ processImport: mocks.processImport }));
+vi.mock("@/lib/imports/process-import", async (importActual) => ({
+  ...(await importActual<typeof import("@/lib/imports/process-import")>()),
+  processImport: mocks.processImport,
+}));
 vi.mock("@/lib/imports/publish", async (importActual) => ({
   ...(await importActual<typeof import("@/lib/imports/publish")>()),
   publishImport: mocks.publishImport,
@@ -40,6 +44,14 @@ describe("import lifecycle route authorization", () => {
     const response = await processRoute(new Request("https://test/api/imports/job-1/process", { method: "POST" }), context);
     expect(mocks.processImport).toHaveBeenCalledWith("job-1", actor);
     await expect(response.json()).resolves.toEqual({ jobId: "job-1", state: "draft" });
+  });
+
+  test("returns not implemented for an authenticated unsupported processor", async () => {
+    mocks.requireSession.mockResolvedValue({ id: "actor" });
+    mocks.processImport.mockRejectedValue(new ImportProcessingError("IMPORT_PROCESSOR_NOT_IMPLEMENTED", 501));
+    const response = await processRoute(new Request("https://test/api/imports/job-1/process", { method: "POST" }), context);
+    expect(response.status).toBe(501);
+    await expect(response.json()).resolves.toEqual({ error: "IMPORT_PROCESSOR_NOT_IMPLEMENTED" });
   });
 
   test("publishes only through the authenticated explicit endpoint", async () => {

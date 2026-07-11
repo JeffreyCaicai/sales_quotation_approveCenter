@@ -15,6 +15,9 @@ async function seed(status: "active" | "inactive" = "active") {
   const actor = (await pool.query<{ id: string }>(`
     insert into users (email, password_hash, display_name) values ($1, 'hash', 'Rate Publisher') returning id
   `, [`rate-${suffix}@example.test`])).rows[0];
+  const uploader = (await pool.query<{ id: string }>(`
+    insert into users (email, password_hash, display_name) values ($1, 'hash', 'Rate Uploader') returning id
+  `, [`uploader-${suffix}@example.test`])).rows[0];
   await pool.query(`insert into user_permissions (user_id, permission_key) values ($1, 'rate_card.publish')`, [actor.id]);
   const building = (await pool.query<{ id: string }>(`
     insert into buildings (iris_building_id, name, building_type, grade_resource, address, status)
@@ -32,10 +35,10 @@ async function seed(status: "active" | "inactive" = "active") {
   const job = (await pool.query<{ id: string }>(`
     insert into import_jobs (data_type, template_version, checksum, state, normalized_payload, uploaded_by)
     values ('rate_card', 'TMN-IMPORT-2', $1, 'draft', $2, $3) returning id
-  `, [randomUUID(), payload, actor.id])).rows[0];
+  `, [randomUUID(), payload, uploader.id])).rows[0];
   return {
     actor: { id: actor.id, email: `rate-${suffix}@example.test`, displayName: "Rate Publisher", status: "active" as const, permissions: ["rate_card.publish" as const] },
-    buildingId: building.id, packageId: packageRow.id, jobId: job.id, versionCode: payload.versionCode,
+    uploaderId: uploader.id, buildingId: building.id, packageId: packageRow.id, jobId: job.id, versionCode: payload.versionCode,
   };
 }
 
@@ -50,13 +53,13 @@ describe("native PostgreSQL Rate Card publication", () => {
     const seedData = await seed();
     await expect(publishImport(seedData.jobId, seedData.actor)).resolves.toMatchObject({ state: "published", publishedChanges: 4 });
     const rows = await pool.query(`
-      select r.status, r.currency, j.state,
+      select r.status, r.currency, r.uploaded_by, r.published_by, r.effective_at, j.state,
         (select count(*)::int from rate_card_building_prices where rate_card_version_id = r.id) building_prices,
         (select count(*)::int from rate_card_package_configs where rate_card_version_id = r.id) package_configs,
         (select count(*)::int from rate_card_package_buildings where rate_card_version_id = r.id) memberships
       from rate_card_versions r join import_jobs j on j.id = r.import_job_id where r.import_job_id = $1
     `, [seedData.jobId]);
-    expect(rows.rows[0]).toMatchObject({ status: "published", currency: "IDR", state: "published", building_prices: 1, package_configs: 1, memberships: 1 });
+    expect(rows.rows[0]).toMatchObject({ status: "published", currency: "IDR", uploaded_by: seedData.uploaderId, published_by: seedData.actor.id, effective_at: new Date("2026-07-31T17:00:00.000Z"), state: "published", building_prices: 1, package_configs: 1, memberships: 1 });
   });
 
   test("rolls back every Rate Card row when a locked building is inactive", async () => {

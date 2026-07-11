@@ -57,6 +57,13 @@
       "when": 1783830000000,
       "tag": "0007_import_lifecycle_controls",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1783833600000,
+      "tag": "0008_normalize_controlled_values",
+      "breakpoints": true
     }
   ]
 }

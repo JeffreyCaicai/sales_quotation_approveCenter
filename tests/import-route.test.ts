@@ -30,11 +30,10 @@ describe("imports route authorization boundary", () => {
     expect(mocks.createImportJob).not.toHaveBeenCalled();
   });
 
-  test("requires the exact permission and returns the uploaded job", async () => {
+  test("requires the exact permission and returns the uploaded job without synchronous processing", async () => {
     const user = { id: "user", permissions: ["data.import.building"] };
     mocks.requirePermission.mockResolvedValue(user);
     mocks.createImportJob.mockResolvedValue({ jobId: "job", state: "uploaded" });
-    mocks.processImport.mockResolvedValue({ jobId: "job", state: "ready_to_publish" });
     const form = new FormData();
     form.set("templateVersion", "TMN-IMPORT-2");
     form.append("files", new File([new Uint8Array([1])], "building.csv", { type: "text/csv" }));
@@ -45,8 +44,8 @@ describe("imports route authorization boundary", () => {
       user,
     );
     expect(response.status).toBe(201);
-    expect(mocks.processImport).toHaveBeenCalledWith("job", user);
-    await expect(response.json()).resolves.toEqual({ jobId: "job", state: "ready_to_publish" });
+    expect(mocks.processImport).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toEqual({ jobId: "job", state: "uploaded" });
   });
 
   test("does not consume multipart bytes before authentication succeeds", async () => {
@@ -61,6 +60,23 @@ describe("imports route authorization boundary", () => {
     const response = await POST(request);
     expect(response.status).toBe(401);
     expect(request.bodyUsed).toBe(false);
+  });
+
+  test.each([
+    ["customer_brand", "data.import.customer_brand"],
+    ["package", "data.import.package"],
+  ] as const)("keeps %s upload asynchronous without requiring an implemented processor", async (dataType, permission) => {
+    const user = { id: "user", permissions: [permission] };
+    mocks.requirePermission.mockResolvedValue(user);
+    mocks.createImportJob.mockResolvedValue({ jobId: `job-${dataType}`, state: "uploaded" });
+    const form = new FormData();
+    form.set("templateVersion", "TMN-IMPORT-2");
+    form.append("files", new File(["header\nvalue"], `${dataType}.csv`, { type: "text/csv" }));
+    const response = await POST(new Request(`https://quotation.test/api/imports?dataType=${dataType}`, { method: "POST", body: form }));
+    expect(mocks.requirePermission).toHaveBeenCalledWith(permission);
+    expect(response.status).toBe(201);
+    await expect(response.json()).resolves.toEqual({ jobId: `job-${dataType}`, state: "uploaded" });
+    expect(mocks.processImport).not.toHaveBeenCalled();
   });
 
   test("cancels an unknown-length stream immediately after the aggregate limit", async () => {

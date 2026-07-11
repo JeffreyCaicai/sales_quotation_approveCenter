@@ -227,6 +227,7 @@ export const buildingControlledValues = pgTable(
   (table) => [
     check("building_controlled_values_field_check", sql`${table.field} in ('building_type', 'grade_resource')`),
     check("building_controlled_values_value_not_blank_check", sql`btrim(${table.value}) <> ''`),
+    check("building_controlled_values_value_trimmed_check", sql`${table.value} = regexp_replace(${table.value}, '^\\s+|\\s+$', '', 'g')`),
     unique("building_controlled_values_field_value_unique").on(table.field, table.value),
   ],
 );

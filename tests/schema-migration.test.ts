@@ -492,6 +492,27 @@ describe("generated PostgreSQL migration", () => {
     ).rejects.toThrow(/users\.email is immutable/);
   });
 
+  test("normalizes controlled-value codes and reproduces the published-parent child guard", async () => {
+    db = new PGlite();
+    await applyMigrations(db);
+    const controlled = await db.query<{ value: string }>(`
+      insert into building_controlled_values (field, value)
+      values ('building_type', E'  Office\t') returning value
+    `);
+    expect(controlled.rows[0].value).toBe("Office");
+    await expect(db.query(`
+      insert into building_controlled_values (field, value)
+      values ('grade_resource', E' \t ')
+    `)).rejects.toThrow(/building_controlled_values_value_not_blank_check/i);
+
+    const seed = await seedDraftRateCard(db);
+    await db.query(`update rate_card_versions set status = 'published' where id = '${seed.versionId}'`);
+    await expect(db.query(`
+      insert into rate_card_building_prices (rate_card_version_id, building_id, price_idr)
+      values ('${seed.versionId}', '${seed.buildingIds[1]}', 2000000)
+    `)).rejects.toThrow(/published rate card child rows are immutable/i);
+  });
+
   test("rejects a Rate Card currency other than IDR", async () => {
     db = new PGlite();
     await applyMigrations(db);

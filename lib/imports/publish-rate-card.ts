@@ -24,13 +24,25 @@ export class RateCardPublicationError extends Error {
 
 interface LockedBuilding { id: string; irisBuildingId: string; status: "active" | "inactive" }
 interface LockedPackage { id: string; packageCode: string; status: "active" | "inactive" }
+export interface ResolvedRateCardPublication {
+  buildingIdByIris: Map<string, string>;
+  packageIdByCode: Map<string, string>;
+}
+const IMPORT_PUBLICATION_LOCK_NAME = "import-publish-data-type-v1";
+
+export function jakartaMidnight(effectiveDate: string): Date {
+  return new Date(`${effectiveDate}T00:00:00+07:00`);
+}
 
 export function assertRateCardPublicationSnapshot(
   input: RateCardImport,
   lockedBuildings: LockedBuilding[],
   lockedPackages: LockedPackage[],
-): { buildingIdByIris: Map<string, string>; packageIdByCode: Map<string, string> } {
+): ResolvedRateCardPublication {
   assertRateCardRows(input);
+  if (input.buildingPrices.length + input.packagePrices.length + input.packageBuildings.length === 0) {
+    throw new RateCardPublicationError("IMPORT_CHANGE_INVALID", 400);
+  }
   const buildingReferences = [...input.buildingPrices.map((row) => row.irisBuildingId.trim()), ...input.packageBuildings.map((row) => row.irisBuildingId.trim())];
   const buildingPriceKeys = input.buildingPrices.map((row) => row.irisBuildingId.trim());
   const memberships = input.packageBuildings.map((row) => `${row.packageCode.trim()}\0${row.irisBuildingId.trim()}`);
@@ -45,9 +57,13 @@ export function assertRateCardPublicationSnapshot(
 
   const packageReferences = [...input.packagePrices.map((row) => row.packageCode.trim()), ...input.packageBuildings.map((row) => row.packageCode.trim())];
   const packagePriceKeys = input.packagePrices.map((row) => row.packageCode.trim());
+  const pricedPackages = new Set(packagePriceKeys);
+  const memberPackages = new Set(input.packageBuildings.map((row) => row.packageCode.trim()));
   const packageIdByCode = new Map(lockedPackages.map((row) => [row.packageCode, row.id]));
   if (
     new Set(packagePriceKeys).size !== packagePriceKeys.length
+    || [...pricedPackages].some((key) => !memberPackages.has(key))
+    || [...memberPackages].some((key) => !pricedPackages.has(key))
     || [...new Set(packageReferences)].some((key) => !key || !packageIdByCode.has(key) || lockedPackages.find((row) => row.packageCode === key)?.status !== "active")
   ) {
     throw new RateCardPublicationError("IMPORT_RATE_CARD_PACKAGE_REFERENCE_INVALID", 409);
@@ -55,9 +71,21 @@ export function assertRateCardPublicationSnapshot(
   return { buildingIdByIris, packageIdByCode };
 }
 
+export function rateCardAuditMetadata(input: RateCardImport, resolved: ResolvedRateCardPublication) {
+  return {
+    versionCode: input.versionCode,
+    effectiveDate: input.effectiveDate,
+    currency: "IDR" as const,
+    buildingPrices: input.buildingPrices.map((row) => ({ irisBuildingId: row.irisBuildingId.trim(), buildingId: resolved.buildingIdByIris.get(row.irisBuildingId.trim())!, priceIdr: row.priceIdr })),
+    packageConfigs: input.packagePrices.map((row) => ({ packageCode: row.packageCode.trim(), packageId: resolved.packageIdByCode.get(row.packageCode.trim())!, priceIdr: row.priceIdr })),
+    packageMemberships: input.packageBuildings.map((row) => ({ packageCode: row.packageCode.trim(), packageId: resolved.packageIdByCode.get(row.packageCode.trim())!, irisBuildingId: row.irisBuildingId.trim(), buildingId: resolved.buildingIdByIris.get(row.irisBuildingId.trim())! })),
+  };
+}
+
 export async function publishRateCardImport(jobId: string, actor: SessionUser): Promise<PublicationResult> {
   return getDb().transaction(async (tx) => {
-    const [job] = await tx.select({ state: importJobs.state, dataType: importJobs.dataType, templateVersion: importJobs.templateVersion, normalizedPayload: importJobs.normalizedPayload })
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`${IMPORT_PUBLICATION_LOCK_NAME}:rate_card`}, 0))`);
+    const [job] = await tx.select({ state: importJobs.state, dataType: importJobs.dataType, templateVersion: importJobs.templateVersion, normalizedPayload: importJobs.normalizedPayload, uploadedBy: importJobs.uploadedBy })
       .from(importJobs).where(eq(importJobs.id, jobId)).limit(1).for("update");
     if (!job) throw new RateCardPublicationError("IMPORT_JOB_NOT_FOUND", 404);
     if (job.dataType !== "rate_card") throw new RateCardPublicationError("IMPORT_CHANGE_INVALID", 400);
@@ -90,13 +118,11 @@ export async function publishRateCardImport(jobId: string, actor: SessionUser): 
     const now = new Date();
     const [version] = await tx.insert(rateCardVersions).values({
       versionCode: input.versionCode,
-      effectiveAt: new Date(`${input.effectiveDate}T00:00:00.000Z`),
+      effectiveAt: jakartaMidnight(input.effectiveDate),
       currency: "IDR",
-      status: "published",
+      status: "draft",
       importJobId: jobId,
-      uploadedBy: actor.id,
-      publishedBy: actor.id,
-      publishedAt: now,
+      uploadedBy: job.uploadedBy,
       updatedAt: now,
     }).returning({ id: rateCardVersions.id });
 
@@ -104,11 +130,17 @@ export async function publishRateCardImport(jobId: string, actor: SessionUser): 
     if (input.packagePrices.length) await tx.insert(rateCardPackageConfigs).values(input.packagePrices.map((row) => ({ rateCardVersionId: version.id, packageId: resolved.packageIdByCode.get(row.packageCode.trim())!, priceIdr: row.priceIdr })));
     if (input.packageBuildings.length) await tx.insert(rateCardPackageBuildings).values(input.packageBuildings.map((row) => ({ rateCardVersionId: version.id, packageId: resolved.packageIdByCode.get(row.packageCode.trim())!, buildingId: resolved.buildingIdByIris.get(row.irisBuildingId.trim())! })));
 
+    const [publishedVersion] = await tx.update(rateCardVersions).set({
+      status: "published", publishedBy: actor.id, publishedAt: now, updatedAt: now,
+    }).where(and(eq(rateCardVersions.id, version.id), eq(rateCardVersions.status, "draft")))
+      .returning({ id: rateCardVersions.id });
+    if (!publishedVersion) throw new RateCardPublicationError("IMPORT_JOB_NOT_READY", 409);
+
     const [published] = await tx.update(importJobs).set({ state: "published", publishedBy: actor.id, publishedAt: now, updatedAt: now })
       .where(and(eq(importJobs.id, jobId), eq(importJobs.state, "draft"))).returning({ id: importJobs.id });
     if (!published) throw new RateCardPublicationError("IMPORT_JOB_NOT_READY", 409);
     await tx.insert(auditEvents).values([
-      { actorUserId: actor.id, action: "import.rate_card.published", entityType: "rate_card_version", entityId: version.id, importJobId: jobId, source: "import", afterMetadata: { versionCode: input.versionCode, currency: "IDR", buildingPrices: input.buildingPrices.length, packageConfigs: input.packagePrices.length, packageMemberships: input.packageBuildings.length }, createdAt: now },
+      { actorUserId: actor.id, action: "import.rate_card.published", entityType: "rate_card_version", entityId: version.id, importJobId: jobId, source: "import", afterMetadata: rateCardAuditMetadata(input, resolved), createdAt: now },
       { actorUserId: actor.id, action: "import.job.published", entityType: "import_job", entityId: jobId, importJobId: jobId, source: "import", beforeMetadata: { state: "draft" }, afterMetadata: { state: "published", rateCardVersionId: version.id }, createdAt: now },
     ]);
     return { jobId, state: "published", publishedChanges: input.buildingPrices.length + input.packagePrices.length + input.packageBuildings.length + 1 };
