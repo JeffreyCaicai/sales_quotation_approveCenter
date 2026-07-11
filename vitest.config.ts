@@ -1,5 +1,5 @@
 import { fileURLToPath } from "node:url";
-import { defineConfig } from "vitest/config";
+import { configDefaults, defineConfig } from "vitest/config";
 
 export default defineConfig({
   resolve: {
@@ -8,6 +8,13 @@ export default defineConfig({
     },
   },
   test: {
-    exclude: ["**/*.integration.test.ts"],
+    exclude: [
+      ...configDefaults.exclude,
+      "exports/**",
+      "**/*.integration.test.ts",
+      "tests/quotation.test.ts",
+      "tests/localization.test.ts",
+      "tests/rendered-html.test.mjs",
+    ],
   },
 });

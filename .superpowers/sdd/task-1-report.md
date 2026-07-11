@@ -125,3 +125,103 @@ Deleted:
 - `npm install` reported 14 dependency audit findings (1 low, 7 moderate, 6 high) and install-script approval warnings. These are pre-existing/transitive dependency hygiene concerns and were not changed with `npm audit fix`, which is outside Task 1.
 - The production build requires network access when the existing `next/font` cache is cold because Geist and Geist Mono are fetched from Google Fonts.
 - The legacy rendered-HTML script was tied to the removed Vinext `test` workflow; the final brief requires the runtime contract, logic, localization, and standard Next build checks, all of which pass.
+
+## Review Fix Follow-up
+
+### Fix Summary
+
+- Preserved Vitest's built-in discovery exclusions with `configDefaults.exclude`.
+- Added explicit exclusions for `exports/**`, `**/*.integration.test.ts`, and the three suites owned by Node's test runner: `tests/quotation.test.ts`, `tests/localization.test.ts`, and `tests/rendered-html.test.mjs`.
+- Kept `tests/runtime-config.test.ts` discoverable by `npm run test:unit`.
+- Rewrote `README.md` for the standard Next.js standalone Node runtime, PostgreSQL `DATABASE_URL`, and the current unit/logic/localization/build commands.
+- Replaced the dangling deleted D1-example comment in `db/schema.ts` with PostgreSQL schema guidance.
+
+### RED: Unit Test Discovery Regression
+
+Exact command:
+
+```sh
+npm run test:unit
+```
+
+Key output before the fix (exit 1):
+
+```text
+Test Files  34 failed | 166 passed (200)
+Tests       1864 passed (1864)
+FAIL  tests/quotation.test.ts [ tests/quotation.test.ts ]
+Error: No test suite found in file .../tests/quotation.test.ts
+FAIL  tests/localization.test.ts [ tests/localization.test.ts ]
+Error: No test suite found in file .../tests/localization.test.ts
+FAIL  tests/rendered-html.test.mjs [ tests/rendered-html.test.mjs ]
+Error: No test suite found in file .../tests/rendered-html.test.mjs
+```
+
+The same run also discovered dependency and local-export test files, confirming that the custom exclusion array had replaced Vitest's defaults.
+
+### GREEN: Focused Unit Discovery
+
+Exact command:
+
+```sh
+npm run test:unit
+```
+
+Output after the fix (exit 0):
+
+```text
+Test Files  1 passed (1)
+Tests       1 passed (1)
+```
+
+Only `tests/runtime-config.test.ts` was discovered.
+
+### Stale Reference Audit
+
+Exact command:
+
+```sh
+if rg -ni 'vinext|cloudflare|\bD1\b|vite\.config|\.openai/hosting|examples/d1|\bnpm test\b' README.md db/schema.ts; then exit 1; else echo 'No stale Vinext/Cloudflare/D1/config/npm-test references in README.md or db/schema.ts'; fi
+```
+
+Output (exit 0):
+
+```text
+No stale Vinext/Cloudflare/D1/config/npm-test references in README.md or db/schema.ts
+```
+
+### Covering Verification
+
+Exact command (run with controlled network access for the existing Google fonts):
+
+```sh
+npm run test:unit && npm run test:logic && npm run test:localization && npm run build && test -f .next/standalone/server.js
+```
+
+Key output (exit 0):
+
+```text
+Test Files  1 passed (1)
+Tests       1 passed (1)
+tests 53
+pass 53
+fail 0
+tests 20
+pass 20
+fail 0
+✓ Compiled successfully
+Finished TypeScript
+✓ Generating static pages using 4 workers (3/3)
+```
+
+The trailing standalone artifact check also exited 0, confirming `.next/standalone/server.js` exists.
+
+### Follow-up Files
+
+- `vitest.config.ts`
+- `README.md`
+- `db/schema.ts`
+- `docs/superpowers/plans/2026-07-11-stage-2-data-import-vps.md`
+- `.superpowers/sdd/task-1-report.md`
+
+`exports/` remains untracked and unstaged.

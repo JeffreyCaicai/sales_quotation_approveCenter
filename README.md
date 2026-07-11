@@ -1,38 +1,58 @@
-# vinext-starter
+# Sales Quotation Prototype
 
-A clean full-stack starter running on
-[vinext](https://github.com/cloudflare/vinext), with optional Cloudflare D1 and
-Drizzle support.
+A Next.js application for creating, reviewing, and approving sales quotations.
+Production builds target the standard Node.js runtime and emit a standalone
+server at `.next/standalone/server.js`.
 
 ## Prerequisites
 
 - Node.js `>=22.13.0`
+- PostgreSQL when database-backed features are enabled
 
 ## Quick Start
 
 ```bash
 npm install
 npm run dev
-npm run build
 ```
 
-This starter does not use `wrangler.jsonc`.
+Create a production build and run it with Next.js:
 
-## Included Shape
+```bash
+npm run build
+npm run start
+```
 
-- edit site code under `app/`
-- `.openai/hosting.json` declares optional Sites D1 and R2 bindings
-- `vite.config.ts` simulates declared bindings for local development
-- `db/schema.ts` starts intentionally empty
-- `examples/d1/` contains an optional D1 example surface
-- `drizzle.config.ts` supports local migration generation when needed
+## Database
+
+Server-side database access uses PostgreSQL through Drizzle and `pg`. Set a
+PostgreSQL connection string before calling `getDb()`:
+
+```bash
+export DATABASE_URL="postgresql://user:password@localhost:5432/quotation"
+```
+
+Add application tables to `db/schema.ts`, then generate migrations with
+`npm run db:generate`. Database connections are pooled and the runtime requires
+`DATABASE_URL` rather than platform-specific bindings.
+
+## Project Shape
+
+- `app/` contains the Next.js App Router entry points.
+- `components/` contains the quotation workflow UI.
+- `lib/` contains quotation rules, localization, display data, and client-side
+  Demo persistence.
+- `db/` contains the PostgreSQL Drizzle factory and schema.
+- `tests/runtime-config.test.ts` checks the Node standalone runtime contract.
+- `tests/quotation.test.ts` and `tests/localization.test.ts` remain dedicated
+  Node test-runner suites.
 
 ## Workspace Auth Headers
 
-OpenAI workspace sites can read the current user's email from
+OpenAI workspace deployments can read the current user's email from
 `oai-authenticated-user-email`.
 
-SIWC-authenticated workspace sites may also receive
+SIWC-authenticated deployments may also receive
 `oai-authenticated-user-full-name` when the user's SIWC profile has a non-empty
 `name` claim. The full-name value is percent-encoded UTF-8 and is accompanied by
 `oai-authenticated-user-full-name-encoding: percent-encoded-utf-8`.
@@ -60,8 +80,8 @@ export default async function Home() {
 
 ## Optional Dispatch-Owned ChatGPT Sign-In
 
-Import the ready-to-use helpers from `app/chatgpt-auth.ts` when the site needs
-optional or required ChatGPT sign-in:
+Import the ready-to-use helpers from `app/chatgpt-auth.ts` when the application
+needs optional or required ChatGPT sign-in:
 
 - Use `getChatGPTUser()` for optional signed-in UI.
 - Use `requireChatGPTUser(returnTo)` for server-rendered pages that should send
@@ -79,20 +99,18 @@ those reserved paths. Routes that do not import and call the helper remain
 anonymous-compatible.
 
 SIWC establishes identity only; it does not prove workspace membership. Use the
-Sites hosting platform's access policy controls for workspace-wide restrictions,
-or enforce explicit server-side membership or allowlist checks.
+hosting layer's access policy controls for workspace-wide restrictions, or
+enforce explicit server-side membership or allowlist checks.
 
-Use SIWC for account pages, user-specific dashboards, saved records, and write
-actions tied to the current ChatGPT user. Leave public content anonymous.
+## Verification Commands
 
-## Useful Commands
-
-- `npm run dev`: start local development
-- `npm run build`: verify the vinext build output
-- `npm test`: build the starter and verify its rendered loading skeleton
-- `npm run db:generate`: generate Drizzle migrations after schema changes
+- `npm run test:unit`: run Vitest-owned unit tests.
+- `npm run test:logic`: run the quotation domain suite with Node's test runner.
+- `npm run test:localization`: run localization and copy audits with Node's test
+  runner.
+- `npm run build`: type-check and create the production Next.js build.
 
 ## Learn More
 
-- [vinext Documentation](https://github.com/cloudflare/vinext)
-- [Drizzle D1 Guide](https://orm.drizzle.team/docs/get-started/d1-new)
+- [Next.js Documentation](https://nextjs.org/docs)
+- [Drizzle PostgreSQL Guide](https://orm.drizzle.team/docs/get-started-postgresql)

@@ -36,6 +36,8 @@
 - Modify: `next.config.ts`
 - Modify: `tsconfig.json`
 - Modify: `db/index.ts`
+- Modify: `db/schema.ts`
+- Modify: `README.md`
 - Delete: `worker/index.ts`
 - Delete: `vite.config.ts`
 - Delete: `build/sites-vite-plugin.ts`
