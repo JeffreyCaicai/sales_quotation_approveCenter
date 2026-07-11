@@ -1,6 +1,8 @@
 import { execFileSync, spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import { describe, expect, test, vi } from "vitest";
 
 import { MAX_IMPORT_FILE_BYTES, MAX_MULTIPART_OVERHEAD_BYTES } from "@/lib/imports/multipart";
@@ -121,10 +123,64 @@ describe("production container packaging", () => {
     }
   });
 
-  test("documents the validator preflight and readable production env permissions", () => {
+  test("gates production startup on immutable image and Compose validation", () => {
+    const temporaryDirectory = mkdtempSync(join(tmpdir(), "quotation-deploy-"));
+    const fakeBin = join(temporaryDirectory, "bin");
+    const dockerLog = join(temporaryDirectory, "docker.log");
+    const envFile = join(temporaryDirectory, "production env");
+    const startup = resolve("deploy/production-up.sh");
+    mkdirSync(fakeBin);
+    writeFileSync(envFile, "APP_IMAGE=provided-by-fake-compose\n");
+    writeFileSync(join(fakeBin, "docker"), `#!/bin/sh
+for argument do printf '<%s>' "$argument"; done >> "$DOCKER_LOG"
+printf '\n' >> "$DOCKER_LOG"
+case " $* " in
+  *" config --images web "*) printf '%s\n' "$FAKE_IMAGE" ;;
+esac
+`);
+    chmodSync(join(fakeBin, "docker"), 0o755);
+    const run = (image: string) => spawnSync(startup, [envFile], {
+      cwd: temporaryDirectory,
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        PATH: `${fakeBin}:${process.env.PATH}`,
+        DOCKER_LOG: dockerLog,
+        FAKE_IMAGE: image,
+      },
+    });
+
+    try {
+      const mutable = run("ghcr.io/example/sales-quotation:latest");
+      expect(mutable.status).not.toBe(0);
+      expect(readFileSync(dockerLog, "utf8")).toContain("<config><--images><web>");
+      expect(readFileSync(dockerLog, "utf8")).not.toContain("<up><-d>");
+
+      writeFileSync(dockerLog, "");
+      const digest = `ghcr.io/example/sales-quotation@sha256:${"a".repeat(64)}`;
+      const immutable = run(digest);
+      const calls = readFileSync(dockerLog, "utf8").trim().split("\n");
+      expect(immutable.status).toBe(0);
+      expect(calls).toHaveLength(3);
+      expect(calls[0]).toContain("<config><--images><web>");
+      expect(calls[1]).toContain("<config><--quiet>");
+      expect(calls[2]).toContain("<up><-d>");
+      for (const call of calls) {
+        expect(call).toContain(`<--project-directory><${process.cwd()}>`);
+        expect(call).toContain(`<--env-file><${envFile}>`);
+        expect(call).toContain(`<--file><${resolve("docker-compose.yml")}>`);
+      }
+    } finally {
+      rmSync(temporaryDirectory, { recursive: true, force: true });
+    }
+  });
+
+  test("documents mandatory startup wrapper and readable production env permissions", () => {
     const deploymentNotes = read("deploy/README.md");
 
-    expect(deploymentNotes).toContain("deploy/validate-app-image.sh");
+    expect(deploymentNotes).toContain("/opt/sales-quotation/current/deploy/production-up.sh");
+    expect(deploymentNotes).not.toContain("deploy/validate-app-image.sh");
+    expect(deploymentNotes).not.toContain("docker compose --env-file");
     expect(deploymentNotes).toContain("root:deploy");
     expect(deploymentNotes).toContain("0640");
     expect(deploymentNotes).not.toContain("0600");
