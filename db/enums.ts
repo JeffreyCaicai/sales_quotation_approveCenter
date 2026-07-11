@@ -17,6 +17,8 @@ export const importStates = [
   "rolled_back",
 ] as const;
 
+export const importSourceTypes = ["manual", "crm"] as const;
+
 export const entityStatuses = ["active", "inactive"] as const;
 export const changeTypes = [
   "added",
@@ -32,3 +34,4 @@ export const filePurposes = [
 
 export type ImportDataType = (typeof importDataTypes)[number];
 export type ImportState = (typeof importStates)[number];
+export type ImportSourceType = (typeof importSourceTypes)[number];

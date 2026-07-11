@@ -74,7 +74,7 @@ export const importJobs = pgTable(
     totalRows: integer("total_rows").notNull().default(0),
     validRows: integer("valid_rows").notNull().default(0),
     invalidRows: integer("invalid_rows").notNull().default(0),
-    sourceType: text("source_type").notNull().default("xlsx"),
+    sourceType: text("source_type").notNull().default("manual"),
     normalizedPayload: jsonb("normalized_payload"),
     uploadedBy: uuid("uploaded_by")
       .notNull()
@@ -86,6 +86,10 @@ export const importJobs = pgTable(
     failureSummary: text("failure_summary"),
   },
   (table) => [
+    check(
+      "import_jobs_source_type_check",
+      sql`${table.sourceType} in ('manual', 'crm')`,
+    ),
     index("import_jobs_state_created_at_idx").on(table.state, table.createdAt),
     index("import_jobs_data_type_published_at_idx").on(
       table.dataType,

@@ -311,6 +311,9 @@ git commit -m "feat: add bootstrap admin permissions"
 ### Task 4: Implement immutable object storage and upload job creation
 
 **Files:**
+- Modify: `db/enums.ts`
+- Modify: `db/schema.ts`
+- Create: `drizzle/0003_import_source_type.sql`
 - Create: `lib/storage/object-store.ts`
 - Create: `lib/storage/s3-object-store.ts`
 - Create: `lib/imports/contracts.ts`
@@ -323,7 +326,7 @@ git commit -m "feat: add bootstrap admin permissions"
 - Produces: `ObjectStore.putImmutable(key, body, contentType, sha256): Promise<void>` and `getSignedDownloadUrl(key, expiresSeconds): Promise<string>`.
 - Produces: `createImportJob(input: CreateImportJobInput, actor: SessionUser): Promise<{ jobId: string; state: "uploaded" }>`.
 - Produces: `submitNormalizedImport(input: NormalizedImport, source: "manual" | "crm", actor: SessionUser): Promise<{ jobId: string }>` as the reusable CRM boundary.
-- Accepts: multipart files totaling at most 25 MiB and at most 10,000 rows per logical dataset.
+- Accepts: multipart files totaling at most 25 MiB. Task 5 enforces at most 10,000 parsed rows per logical dataset before any job can reach a publishable state.
 
 - [ ] **Step 1: Write failing upload-contract tests**
 
@@ -344,6 +347,8 @@ Use `imports/{yyyy}/{mm}/{jobId}/{purpose}/{randomUUID()}`; retain the original 
 Stream each file to a bounded buffer, calculate SHA-256, verify magic bytes/MIME, store the immutable original, then create `import_jobs` and `import_files` rows in one database transaction. For Rate Card CSV, require exactly four named parts: `metadata.csv`, `building-prices.csv`, `package-prices.csv`, and `package-buildings.csv`.
 
 Route both manual parsing and the future CRM source through `submitNormalizedImport`; that service stores `sourceType`, creates the same staging job, and never writes active business tables. Add a contract test proving identical normalized rows produce identical validation/difference inputs for `manual` and `crm` sources.
+
+Correct the existing `import_jobs.source_type` column to the exact values `manual | crm` with default `manual`; file format remains represented by `import_files.mime_type` and filenames, not by `source_type`. Generate an append-only PostgreSQL migration and a PGlite test for this constraint.
 
 - [ ] **Step 5: Verify and commit**
 

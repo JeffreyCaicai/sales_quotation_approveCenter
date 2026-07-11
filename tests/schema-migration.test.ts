@@ -148,6 +148,35 @@ describe("generated PostgreSQL migration", () => {
     expect(journal.dialect).toBe("postgresql");
   });
 
+  test("constrains import source_type to manual or crm with manual as default", async () => {
+    db = new PGlite();
+    await applyMigrations(db);
+    const uploader = await db.query<{ id: string }>(`
+      insert into users (email, password_hash, display_name)
+      values ('source-uploader@example.com', 'test-only-hash', 'Uploader')
+      returning id
+    `);
+    const inserted = await db.query<{ source_type: string }>(`
+      insert into import_jobs (data_type, template_version, checksum, uploaded_by)
+      values ('building', 'v1', '${"a".repeat(64)}', '${uploader.rows[0].id}')
+      returning source_type
+    `);
+    expect(inserted.rows[0].source_type).toBe("manual");
+
+    await expect(
+      db.query(`
+        insert into import_jobs (data_type, template_version, checksum, source_type, uploaded_by)
+        values ('building', 'v1', '${"b".repeat(64)}', 'xlsx', '${uploader.rows[0].id}')
+      `),
+    ).rejects.toThrow(/import_jobs_source_type_check/i);
+    await expect(
+      db.query(`
+        insert into import_jobs (data_type, template_version, checksum, source_type, uploaded_by)
+        values ('building', 'v1', '${"c".repeat(64)}', 'crm', '${uploader.rows[0].id}')
+      `),
+    ).resolves.toBeDefined();
+  });
+
   test("locks both old and new parents before allowing child mutations", async () => {
     db = new PGlite();
     await applyMigrations(db);
