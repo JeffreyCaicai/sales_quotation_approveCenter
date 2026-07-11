@@ -195,6 +195,25 @@ test("quotation workflow components render copy through the locale context", () 
   }
 });
 
+test("English-first metadata contains no Chinese default copy", () => {
+  const metadataSources = [
+    "../app/layout.tsx",
+    "../app/page.tsx",
+  ];
+
+  for (const sourcePath of metadataSources) {
+    const source = readFileSync(new URL(sourcePath, import.meta.url), "utf8");
+    assert.doesNotMatch(source, /[\u3400-\u9fff]/, `${sourcePath} contains Chinese default metadata`);
+  }
+});
+
+test("domain and persistence guards contain no locale-bound error copy", () => {
+  const quotationDomain = readFileSync(new URL("../lib/quotation.ts", import.meta.url), "utf8");
+  const quotationApp = readFileSync(new URL("../components/quotation-app.tsx", import.meta.url), "utf8");
+  assert.doesNotMatch(quotationDomain, /[\u3400-\u9fff]|；/, "quotation domain contains locale-bound error copy");
+  assert.doesNotMatch(quotationApp, /；/, "quotation app joins stable validation keys with locale-bound punctuation");
+});
+
 test("approved progress takes precedence over prior returns and pending fallbacks", () => {
   const source = readFileSync(new URL("../components/quote-progress-screen.tsx", import.meta.url), "utf8");
 

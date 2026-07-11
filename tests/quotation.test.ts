@@ -564,9 +564,9 @@ test("approval transitions reject the wrong role and wrong status", () => {
   assert.ok(ceoPending);
   assert.ok(approved);
 
-  assert.throws(() => approveQuote(ceoPending, manager), /状态/);
-  assert.throws(() => approveQuote(approved, manager), /状态/);
-  assert.throws(() => returnQuote(ceoPending, sales, "需要修改"), /无权/);
+  assert.throws(() => approveQuote(ceoPending, manager), /quotation\.approval\.managerStageRequired/);
+  assert.throws(() => approveQuote(approved, manager), /quotation\.approval\.managerStageRequired/);
+  assert.throws(() => returnQuote(ceoPending, sales, "需要修改"), /quotation\.approval\.roleRequired/);
 });
 
 test("approval eligibility uses the same role, status, and discount guards as transitions", () => {

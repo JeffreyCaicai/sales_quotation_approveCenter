@@ -37,6 +37,13 @@ const VALIDATION = {
   returnReasonRequired: "validation.returnReasonRequired",
 } as const;
 
+const DOMAIN_ERROR = {
+  salesRoleRequired: "quotation.submit.salesRoleRequired",
+  approvalRoleRequired: "quotation.approval.roleRequired",
+  managerStageRequired: "quotation.approval.managerStageRequired",
+  ceoStageRequired: "quotation.approval.ceoStageRequired",
+} as const;
+
 export const VALIDATION_KEYS = Object.values(VALIDATION);
 export type ValidationKey = (typeof VALIDATION)[keyof typeof VALIDATION];
 
@@ -194,11 +201,11 @@ export function validateQuoteReferences(
 }
 
 export function submitQuote(input: QuoteInput, previousQuote: Quote | undefined, actor: User): Quote {
-  if (actor.role !== "sales") throw new Error("只有销售可以提交报价");
+  if (actor.role !== "sales") throw new Error(DOMAIN_ERROR.salesRoleRequired);
 
   const errors = validateQuote(input);
   if (Object.keys(errors).length > 0) {
-    throw new Error(Object.values(errors).join("；"));
+    throw new Error(Object.values(errors).join(","));
   }
 
   const now = new Date().toISOString();
@@ -352,15 +359,15 @@ export function returnQuote(quote: Quote, actor: User, reason: string): Quote {
 
 function assertApprovalTransition(quote: Quote, actor: User): asserts actor is User & { role: "manager" | "ceo" } {
   if (actor.role !== "manager" && actor.role !== "ceo") {
-    throw new Error("当前角色无权审批报价");
+    throw new Error(DOMAIN_ERROR.approvalRoleRequired);
   }
 
   if (actor.role === "manager" && !canApproveQuote(quote, actor)) {
-    throw new Error("报价状态不允许主管审批");
+    throw new Error(DOMAIN_ERROR.managerStageRequired);
   }
 
   if (actor.role === "ceo" && !canApproveQuote(quote, actor)) {
-    throw new Error("报价状态不允许 CEO 审批");
+    throw new Error(DOMAIN_ERROR.ceoStageRequired);
   }
 }
 

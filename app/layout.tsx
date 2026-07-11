@@ -13,8 +13,8 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
-const SITE_TITLE = "报价审批中心";
-const SITE_DESCRIPTION = "面向销售、销售主管与 CEO 的楼宇报价与折扣审批协作工作台。";
+const SITE_TITLE = "Quotation Approval Center";
+const SITE_DESCRIPTION = "Quotation and discount approval workspace for Sales, Sales Managers, and the CEO.";
 const SOCIAL_IMAGE_PATH = "/og.png";
 const FALLBACK_ORIGIN = "http://localhost";
 
@@ -33,7 +33,7 @@ export async function generateMetadata(): Promise<Metadata> {
     },
     openGraph: {
       type: "website",
-      locale: "zh_CN",
+      locale: "en_US",
       url: origin,
       siteName: SITE_TITLE,
       title: SITE_TITLE,
@@ -42,7 +42,7 @@ export async function generateMetadata(): Promise<Metadata> {
         url: socialImageUrl,
         width: 1672,
         height: 941,
-        alt: "报价审批中心楼宇报价与折扣审批工作台预览",
+        alt: "Quotation Approval Center workspace preview",
       }],
     },
     twitter: {
@@ -51,7 +51,7 @@ export async function generateMetadata(): Promise<Metadata> {
       description: SITE_DESCRIPTION,
       images: [{
         url: socialImageUrl,
-        alt: "报价审批中心楼宇报价与折扣审批工作台预览",
+        alt: "Quotation Approval Center workspace preview",
       }],
     },
   };

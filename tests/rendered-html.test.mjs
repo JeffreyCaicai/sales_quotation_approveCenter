@@ -61,7 +61,7 @@ test("server-renders the quotation workspace role entry", async () => {
   assert.match(html, /Sales Representative/);
   assert.match(html, /Sales Manager/);
   assert.match(html, /Chief Executive Officer/);
-  assert.match(html, /楼宇报价与折扣审批/);
+  assert.match(html, /Quotation and discount approval workspace/);
   assert.doesNotMatch(html, developmentPreviewMeta);
 });
 
@@ -89,8 +89,8 @@ test("replaces the disposable starter with the quotation workspace", async () =>
   assert.match(page, /<QuotationApp \/>/);
   assert.doesNotMatch(page, /codex-preview|_sites-preview|SkeletonPreview/);
   assert.doesNotMatch(layout, /title:\s*"Starter Project"/);
-  assert.match(layout, /SITE_TITLE\s*=\s*"报价审批中心"/);
-  assert.match(layout, /SITE_DESCRIPTION\s*=\s*"[^"]*楼宇报价与折扣审批[^"]*"/);
+  assert.match(layout, /SITE_TITLE\s*=\s*"Quotation Approval Center"/);
+  assert.match(layout, /SITE_DESCRIPTION\s*=\s*"[^"]*Quotation and discount approval workspace[^"]*"/);
   assert.doesNotMatch(layout, /codex-preview|_sites-preview|themeColor|\bViewport\b/);
   assert.doesNotMatch(packageJson, /react-loading-skeleton/);
   assert.match(quotationApp, /loadQuotes/);
@@ -267,14 +267,15 @@ test("uses only a canonical site origin for public Open Graph and X metadata", a
   assert.equal(response.status, 200);
 
   const html = await response.text();
-  assert.match(html, /<meta(?=[^>]*\bproperty=["']og:title["'])(?=[^>]*\bcontent=["']报价审批中心["'])[^>]*>/i);
-  assert.match(html, /<meta(?=[^>]*\bproperty=["']og:description["'])(?=[^>]*楼宇报价与折扣审批)[^>]*>/i);
+  assert.match(html, /<meta(?=[^>]*\bproperty=["']og:title["'])(?=[^>]*\bcontent=["']Quotation Approval Center["'])[^>]*>/i);
+  assert.match(html, /<meta(?=[^>]*\bproperty=["']og:description["'])(?=[^>]*Quotation and discount approval workspace)[^>]*>/i);
+  assert.match(html, /<meta(?=[^>]*\bproperty=["']og:locale["'])(?=[^>]*\bcontent=["']en_US["'])[^>]*>/i);
   assert.match(html, /<meta(?=[^>]*\bproperty=["']og:image["'])(?=[^>]*\bcontent=["']https:\/\/quotes\.example\.test\/og\.png["'])[^>]*>/i);
   assert.match(html, /<meta(?=[^>]*\bproperty=["']og:image:width["'])(?=[^>]*\bcontent=["']1672["'])[^>]*>/i);
   assert.match(html, /<meta(?=[^>]*\bproperty=["']og:image:height["'])(?=[^>]*\bcontent=["']941["'])[^>]*>/i);
   assert.match(html, /<meta(?=[^>]*\bname=["']twitter:card["'])(?=[^>]*\bcontent=["']summary_large_image["'])[^>]*>/i);
-  assert.match(html, /<meta(?=[^>]*\bname=["']twitter:title["'])(?=[^>]*\bcontent=["']报价审批中心["'])[^>]*>/i);
-  assert.match(html, /<meta(?=[^>]*\bname=["']twitter:description["'])(?=[^>]*楼宇报价与折扣审批)[^>]*>/i);
+  assert.match(html, /<meta(?=[^>]*\bname=["']twitter:title["'])(?=[^>]*\bcontent=["']Quotation Approval Center["'])[^>]*>/i);
+  assert.match(html, /<meta(?=[^>]*\bname=["']twitter:description["'])(?=[^>]*Quotation and discount approval workspace)[^>]*>/i);
   assert.match(html, /<meta(?=[^>]*\bname=["']twitter:image["'])(?=[^>]*\bcontent=["']https:\/\/quotes\.example\.test\/og\.png["'])[^>]*>/i);
   assert.doesNotMatch(html, /evil\.example/);
 

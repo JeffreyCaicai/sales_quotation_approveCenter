@@ -244,6 +244,6 @@ function assertPersistableQuote(input: QuoteInput, actor: User) {
   };
 
   if (Object.keys(errors).length > 0) {
-    throw new Error(Object.values(errors).join("；"));
+    throw new Error(Object.values(errors).join(","));
   }
 }
