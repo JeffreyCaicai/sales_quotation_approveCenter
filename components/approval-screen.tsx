@@ -4,8 +4,9 @@ import { useEffect, useRef, useState } from "react";
 
 import { BUILDINGS, CUSTOMERS, PACKAGES, USERS } from "@/lib/mock-data";
 import { canApproveQuote, getDiscountBand } from "@/lib/quotation";
-import type { ApprovalEvent, Quote, User } from "@/lib/types";
+import type { Quote, User } from "@/lib/types";
 
+import { QuoteVersionHistory } from "./quote-version-history";
 import { Money, StatusBadge } from "./ui";
 
 interface ApprovalScreenProps {
@@ -17,14 +18,6 @@ interface ApprovalScreenProps {
 }
 
 type Decision = "approve" | "return";
-
-const DATE_TIME_FORMATTER = new Intl.DateTimeFormat("zh-CN", {
-  year: "numeric",
-  month: "short",
-  day: "numeric",
-  hour: "2-digit",
-  minute: "2-digit",
-});
 
 export function ApprovalScreen({ quote, actor, onApprove, onReturn, onBack }: ApprovalScreenProps) {
   const [decision, setDecision] = useState<Decision | null>(null);
@@ -40,9 +33,6 @@ export function ApprovalScreen({ quote, actor, onApprove, onReturn, onBack }: Ap
     : BUILDINGS.filter((item) => quote.placementIds.includes(item.id));
   const band = getDiscountBand(quote.discount);
   const canDecide = canApproveQuote(quote, actor);
-  const history = [...quote.approvalHistory].sort(
-    (left, right) => Date.parse(left.createdAt) - Date.parse(right.createdAt),
-  );
 
   useEffect(() => {
     const dialog = dialogRef.current;
@@ -123,11 +113,9 @@ export function ApprovalScreen({ quote, actor, onApprove, onReturn, onBack }: Ap
           <section className="approval-card" aria-labelledby="approval-timeline-heading">
             <header className="approval-card__heading">
               <span>03</span>
-              <div><h2 id="approval-timeline-heading">审批时间线</h2><p>按发生时间记录，保留全部版本意见</p></div>
+              <div><h2 id="approval-timeline-heading">版本与审批记录</h2><p>按版本核对商业快照与审批时间线</p></div>
             </header>
-            <ol className="approval-timeline">
-              {history.map((event) => <TimelineEvent event={event} key={event.id} />)}
-            </ol>
+            <QuoteVersionHistory quote={quote} />
           </section>
         </main>
 
@@ -231,35 +219,8 @@ function LedgerRow({ label, amount, discount = false, total = false }: {
   );
 }
 
-function TimelineEvent({ event }: { event: ApprovalEvent }) {
-  const labels = {
-    submitted: "提交审批",
-    resubmitted: "重新提交",
-    approved: "批准报价",
-    returned: "退回修改",
-  } as const;
-
-  return (
-    <li>
-      <span className={`approval-timeline__marker approval-timeline__marker--${event.action}`} aria-hidden="true" />
-      <div>
-        <span><strong>{labels[event.action]}</strong><small>V{event.version}</small></span>
-        <p>{event.actorName} · {roleLabel(event.role)}</p>
-        {event.comment ? <blockquote>{event.comment}</blockquote> : null}
-        <time dateTime={event.createdAt}>{DATE_TIME_FORMATTER.format(new Date(event.createdAt))}</time>
-      </div>
-    </li>
-  );
-}
-
 function riskMessage(band: ReturnType<typeof getDiscountBand>) {
   if (band === "executive") return "高于 70%，主管批准后仍需 CEO 最终审批。";
   if (band === "elevated") return "高于标准区间，请重点核对商业依据；主管可最终批准。";
   return "处于标准折扣区间，主管可完成最终审批。";
-}
-
-function roleLabel(role: ApprovalEvent["role"]) {
-  if (role === "sales") return "销售";
-  if (role === "manager") return "销售主管";
-  return "CEO";
 }

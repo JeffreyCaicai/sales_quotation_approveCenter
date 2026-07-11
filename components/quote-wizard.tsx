@@ -75,7 +75,7 @@ export function QuoteWizard({ initialQuote, salesUser, onCancel, onSave, onSubmi
     : 0;
   const traffic = selectedResources.reduce((total, item) => total + item.traffic, 0);
   const impressions = selectedResources.reduce((total, item) => total + item.impressions, 0);
-  const input = toQuoteInput(values, basePrice);
+  const input = toQuoteInput(values, basePrice, traffic, impressions);
   const pricing = calculatePricing({
     ...input,
     discount: Number.isFinite(input.discount) ? input.discount : 0,
@@ -695,7 +695,7 @@ function PricingSummary({
   );
 }
 
-function toQuoteInput(values: WizardValues, basePrice: number): QuoteInput {
+function toQuoteInput(values: WizardValues, basePrice: number, traffic: number, impressions: number): QuoteInput {
   return {
     customerId: values.customerId,
     brandId: values.brandId,
@@ -707,10 +707,12 @@ function toQuoteInput(values: WizardValues, basePrice: number): QuoteInput {
     discount: values.discount,
     basePrice,
     taxRate: DEMO_TAX_RATE,
+    traffic,
+    impressions,
   };
 }
 
-function getValidationErrors(input: QuoteInput, values: WizardValues, salesId: string) {
+function getValidationErrors(input: QuoteInput, values: WizardValues, salesId: string): Record<string, string> {
   const referenceErrors = validateQuoteReferences(input, salesId, QUOTE_REFERENCES);
   const fieldErrors = validateQuote(input);
 

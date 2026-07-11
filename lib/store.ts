@@ -1,5 +1,14 @@
-import { SEEDED_QUOTES, USERS } from "./mock-data.ts";
-import type { ApprovalAction, ApprovalEvent, Quote, QuoteStatus, Role } from "./types.ts";
+import { BUILDINGS, CUSTOMERS, PACKAGES, SEEDED_QUOTES, USERS } from "./mock-data.ts";
+import { calculatePricing } from "./quotation.ts";
+import type {
+  ApprovalAction,
+  ApprovalEvent,
+  PricingSummary,
+  Quote,
+  QuoteStatus,
+  QuoteVersionSnapshot,
+  Role,
+} from "./types.ts";
 
 const STORAGE_KEY = "quotation-prototype-v1";
 const ROLES: Role[] = ["sales", "manager", "ceo"];
@@ -76,7 +85,12 @@ function isQuoteArray(value: unknown): value is Quote[] {
 }
 
 function isQuote(value: unknown): value is Quote {
-  if (!isRecord(value) || !isRecord(value.pricing) || !Array.isArray(value.approvalHistory)) return false;
+  if (
+    !isRecord(value)
+    || !isRecord(value.pricing)
+    || !Array.isArray(value.approvalHistory)
+    || !Array.isArray(value.versionSnapshots)
+  ) return false;
   const status = value.status as QuoteStatus;
   const isEditable = status === "draft" || status === "returned";
   const hasValidPlacementMode = value.placementMode === "building"
@@ -108,8 +122,21 @@ function isQuote(value: unknown): value is Quote {
 
   const owner = USERS.find((user) => user.id === value.salesId);
   if (!owner || owner.role !== "sales") return false;
+  if (!isCurrentCommercialStateValid(value as unknown as Quote, isEditable)) return false;
   if (!value.approvalHistory.every((event) => isApprovalEvent(event, value.version as number))) {
     return false;
+  }
+  if (!isVersionSnapshotArrayValid(
+    value.versionSnapshots,
+    value.version as number,
+    value.salesId as string,
+    status,
+    value.approvalHistory as ApprovalEvent[],
+  )) return false;
+
+  if (!isEditable) {
+    const latestSnapshot = (value.versionSnapshots as QuoteVersionSnapshot[]).at(-1);
+    if (!latestSnapshot || !doesQuoteMatchSnapshot(value as unknown as Quote, latestSnapshot)) return false;
   }
 
   return isCurrentVersionWorkflowValid({
@@ -120,6 +147,150 @@ function isQuote(value: unknown): value is Quote {
     approvedAt: value.approvedAt as string | undefined,
     history: value.approvalHistory as ApprovalEvent[],
   });
+}
+
+function isVersionSnapshotArrayValid(
+  value: unknown[],
+  quoteVersion: number,
+  salesId: string,
+  status: QuoteStatus,
+  history: ApprovalEvent[],
+): value is QuoteVersionSnapshot[] {
+  if (status === "draft") return value.length === 0;
+  if (value.length !== quoteVersion) return false;
+
+  return value.every((snapshot, index) => {
+    if (!isVersionSnapshot(snapshot) || snapshot.version !== index + 1) return false;
+    const customer = CUSTOMERS.find((item) => item.id === snapshot.customerId);
+    if (!customer || customer.salesId !== salesId || !customer.brands.some((brand) => brand.id === snapshot.brandId)) {
+      return false;
+    }
+
+    const resources = snapshot.placementMode === "building" ? BUILDINGS : PACKAGES;
+    if (
+      new Set(snapshot.placementIds).size !== snapshot.placementIds.length
+      || (snapshot.placementMode === "package" && snapshot.placementIds.length !== 1)
+    ) return false;
+    const selected = snapshot.placementIds.map((id) => resources.find((resource) => resource.id === id));
+    if (selected.some((resource) => !resource)) return false;
+
+    const expectedBasePrice = Math.round(
+      selected.reduce((total, resource) => total + (resource?.priceRmb ?? 0), 0)
+      * (snapshot.weeks / 4),
+    );
+    const expectedPricing = calculatePricing({ basePrice: expectedBasePrice, discount: snapshot.discount });
+    const submissionAction = snapshot.version === 1 ? "submitted" : "resubmitted";
+    const submission = history.find((event) =>
+      event.version === snapshot.version
+      && event.role === "sales"
+      && event.action === submissionAction,
+    );
+    const hasValidPriorWorkflow = snapshot.version === quoteVersion
+      || isReturnedVersionWorkflowValid(snapshot, history);
+
+    return (
+      arePricingEqual(snapshot.pricing, expectedPricing)
+      && snapshot.traffic === selected.reduce((total, resource) => total + (resource?.traffic ?? 0), 0)
+      && snapshot.impressions === selected.reduce((total, resource) => total + (resource?.impressions ?? 0), 0)
+      && submission?.createdAt === snapshot.submittedAt
+      && hasValidPriorWorkflow
+    );
+  });
+}
+
+function isReturnedVersionWorkflowValid(
+  snapshot: QuoteVersionSnapshot,
+  history: ApprovalEvent[],
+): boolean {
+  const events = history.filter((event) => event.version === snapshot.version);
+  const submissionAction = snapshot.version === 1 ? "submitted" : "resubmitted";
+  const submitted = events[0]?.role === "sales" && events[0].action === submissionAction;
+  const managerReturned = events[1]?.role === "manager" && events[1].action === "returned";
+  const managerApproved = events[1]?.role === "manager" && events[1].action === "approved";
+  const ceoReturned = events[2]?.role === "ceo" && events[2].action === "returned";
+
+  return submitted && (
+    (events.length === 2 && managerReturned)
+    || (snapshot.discount > 70 && events.length === 3 && managerApproved && ceoReturned)
+  );
+}
+
+function isVersionSnapshot(value: unknown): value is QuoteVersionSnapshot {
+  if (!isRecord(value) || !isRecord(value.pricing)) return false;
+  return (
+    isPositiveInteger(value.version)
+    && isString(value.customerId)
+    && isString(value.brandId)
+    && (value.placementMode === "building" || value.placementMode === "package")
+    && isStringArray(value.placementIds) && value.placementIds.length > 0
+    && isPositiveInteger(value.weeks)
+    && isPositiveInteger(value.spots)
+    && isNonnegativeInteger(value.bonus)
+    && isPricing(value.pricing)
+    && isNonnegativeInteger(value.traffic)
+    && isNonnegativeInteger(value.impressions)
+    && isFiniteNumber(value.discount) && value.discount >= 0 && value.discount <= 100
+    && isIsoTimestamp(value.submittedAt)
+  );
+}
+
+function isCurrentCommercialStateValid(quote: Quote, isEditable: boolean): boolean {
+  const customer = CUSTOMERS.find((item) => item.id === quote.customerId);
+  if (quote.customerId && (!customer || customer.salesId !== quote.salesId)) return false;
+  if (quote.brandId && (!customer || !customer.brands.some((brand) => brand.id === quote.brandId))) return false;
+  if (!isEditable && (!customer || !quote.brandId)) return false;
+
+  if (!quote.placementMode) {
+    return isEditable && quote.placementIds.length === 0 && arePricingEqual(
+      quote.pricing,
+      calculatePricing({ basePrice: 0, discount: quote.discount }),
+    );
+  }
+
+  const resources = quote.placementMode === "building" ? BUILDINGS : PACKAGES;
+  if (
+    new Set(quote.placementIds).size !== quote.placementIds.length
+    || (quote.placementMode === "package" && quote.placementIds.length > 1)
+  ) return false;
+  const selected = quote.placementIds.map((id) => resources.find((resource) => resource.id === id));
+  if (selected.some((resource) => !resource)) return false;
+  if (!isEditable && selected.length === 0) return false;
+
+  const expectedBasePrice = quote.weeks > 0
+    ? Math.round(
+        selected.reduce((total, resource) => total + (resource?.priceRmb ?? 0), 0)
+        * (quote.weeks / 4),
+      )
+    : 0;
+  return arePricingEqual(
+    quote.pricing,
+    calculatePricing({ basePrice: expectedBasePrice, discount: quote.discount }),
+  );
+}
+
+function doesQuoteMatchSnapshot(quote: Quote, snapshot: QuoteVersionSnapshot): boolean {
+  return (
+    quote.customerId === snapshot.customerId
+    && quote.brandId === snapshot.brandId
+    && quote.placementMode === snapshot.placementMode
+    && quote.placementIds.length === snapshot.placementIds.length
+    && quote.placementIds.every((id, index) => id === snapshot.placementIds[index])
+    && quote.weeks === snapshot.weeks
+    && quote.spots === snapshot.spots
+    && quote.bonus === snapshot.bonus
+    && quote.discount === snapshot.discount
+    && arePricingEqual(quote.pricing, snapshot.pricing)
+  );
+}
+
+function arePricingEqual(left: PricingSummary, right: PricingSummary): boolean {
+  return (
+    left.basePrice === right.basePrice
+    && left.discountAmount === right.discountAmount
+    && left.netPrice === right.netPrice
+    && left.tax === right.tax
+    && left.total === right.total
+  );
 }
 
 function isPricing(value: Record<string, unknown>): boolean {

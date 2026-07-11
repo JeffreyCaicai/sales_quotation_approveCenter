@@ -36,6 +36,7 @@ function SalesDashboard({ user, quotes, onAction }: DashboardScreenProps) {
     returned: quotes.filter((quote) => quote.status === "returned").length,
     pending: quotes.filter((quote) => quote.status === "pending_manager" || quote.status === "pending_ceo").length,
     approved: quotes.filter((quote) => quote.status === "approved").length,
+    total: quotes.length,
   };
 
   return (
@@ -46,11 +47,12 @@ function SalesDashboard({ user, quotes, onAction }: DashboardScreenProps) {
         description="今天的报价进度与待处理事项一目了然。"
         action={<button className="button button--primary" type="button" onClick={() => onAction("新建报价")}>＋ 新建报价</button>}
       />
-      <section className="metric-grid" aria-label="报价概览">
+      <section className="metric-grid metric-grid--five" aria-label="报价概览">
         <MetricCard label="草稿" value={counts.draft} tone="navy" note="继续完善后提交" />
         <MetricCard label="已退回" value={counts.returned} tone="coral" note="需要优先处理" />
         <MetricCard label="审批中" value={counts.pending} tone="amber" note="等待管理层审批" />
         <MetricCard label="已批准" value={counts.approved} tone="teal" note="可生成正式报价" />
+        <MetricCard label="全部报价" value={counts.total} tone="navy" note="本人报价总数" />
       </section>
       <QuoteTable
         title="我的报价"

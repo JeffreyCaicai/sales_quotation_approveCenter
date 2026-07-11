@@ -201,6 +201,23 @@ export const SEEDED_QUOTES: Quote[] = [
     pricing: calculatePricing({ basePrice: 246_000, discount: 65, taxRate: DEMO_TAX_RATE }),
     status: "returned",
     version: 1,
+    versionSnapshots: [
+      {
+        version: 1,
+        customerId: "customer-kopi",
+        brandId: "brand-kopi-kenangan",
+        placementMode: "building",
+        placementIds: ["building-pacific-place", "building-kota-kasablanka"],
+        weeks: 4,
+        spots: 160,
+        bonus: 16,
+        discount: 65,
+        pricing: calculatePricing({ basePrice: 246_000, discount: 65, taxRate: DEMO_TAX_RATE }),
+        traffic: 90_000,
+        impressions: 1_630_000,
+        submittedAt: "2026-07-02T02:15:00.000Z",
+      },
+    ],
     approvalHistory: [
       {
         id: "event-returned-submit",
@@ -241,6 +258,23 @@ export const SEEDED_QUOTES: Quote[] = [
     pricing: calculatePricing({ basePrice: 414_000, discount: 50, taxRate: DEMO_TAX_RATE }),
     status: "pending_manager",
     version: 1,
+    versionSnapshots: [
+      {
+        version: 1,
+        customerId: "customer-traveloka",
+        brandId: "brand-traveloka",
+        placementMode: "package",
+        placementIds: ["package-cbd-premium"],
+        weeks: 6,
+        spots: 240,
+        bonus: 24,
+        discount: 50,
+        pricing: calculatePricing({ basePrice: 414_000, discount: 50, taxRate: DEMO_TAX_RATE }),
+        traffic: 73_700,
+        impressions: 1_423_000,
+        submittedAt: "2026-07-05T03:30:00.000Z",
+      },
+    ],
     approvalHistory: [
       {
         id: "event-manager-submit",
@@ -271,6 +305,23 @@ export const SEEDED_QUOTES: Quote[] = [
     pricing: calculatePricing({ basePrice: 772_000, discount: 75, taxRate: DEMO_TAX_RATE }),
     status: "pending_ceo",
     version: 1,
+    versionSnapshots: [
+      {
+        version: 1,
+        customerId: "customer-bank-mandiri",
+        brandId: "brand-livin",
+        placementMode: "package",
+        placementIds: ["package-jakarta-signature"],
+        weeks: 8,
+        spots: 320,
+        bonus: 40,
+        discount: 75,
+        pricing: calculatePricing({ basePrice: 772_000, discount: 75, taxRate: DEMO_TAX_RATE }),
+        traffic: 149_800,
+        impressions: 2_746_000,
+        submittedAt: "2026-07-06T01:10:00.000Z",
+      },
+    ],
     approvalHistory: [
       {
         id: "event-ceo-submit",
@@ -311,6 +362,23 @@ export const SEEDED_QUOTES: Quote[] = [
     pricing: calculatePricing({ basePrice: 248_000, discount: 58, taxRate: DEMO_TAX_RATE }),
     status: "approved",
     version: 1,
+    versionSnapshots: [
+      {
+        version: 1,
+        customerId: "customer-gojek",
+        brandId: "brand-gofood",
+        placementMode: "package",
+        placementIds: ["package-south-lifestyle"],
+        weeks: 4,
+        spots: 180,
+        bonus: 18,
+        discount: 58,
+        pricing: calculatePricing({ basePrice: 248_000, discount: 58, taxRate: DEMO_TAX_RATE }),
+        traffic: 87_500,
+        impressions: 1_596_000,
+        submittedAt: "2026-07-01T02:00:00.000Z",
+      },
+    ],
     approvalHistory: [
       {
         id: "event-approved-submit",

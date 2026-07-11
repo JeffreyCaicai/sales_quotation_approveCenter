@@ -66,13 +66,15 @@ test("server-renders the quotation workspace role entry", async () => {
 });
 
 test("replaces the disposable starter with the quotation workspace", async () => {
-  const [page, layout, packageJson, quotationApp, quoteWizard, approvalScreen, quotationScreen, appShell, dashboard, ui, css, favicon] = await Promise.all([
+  const [page, layout, packageJson, quotationApp, quoteWizard, approvalScreen, quoteProgressScreen, quoteVersionHistory, quotationScreen, appShell, dashboard, ui, css, favicon] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
     readFile(new URL("../package.json", import.meta.url), "utf8"),
     readFile(new URL("../components/quotation-app.tsx", import.meta.url), "utf8"),
     readFile(new URL("../components/quote-wizard.tsx", import.meta.url), "utf8"),
     readFile(new URL("../components/approval-screen.tsx", import.meta.url), "utf8").catch(() => ""),
+    readFile(new URL("../components/quote-progress-screen.tsx", import.meta.url), "utf8").catch(() => ""),
+    readFile(new URL("../components/quote-version-history.tsx", import.meta.url), "utf8").catch(() => ""),
     readFile(new URL("../components/quotation-screen.tsx", import.meta.url), "utf8").catch(() => ""),
     readFile(new URL("../components/app-shell.tsx", import.meta.url), "utf8"),
     readFile(new URL("../components/dashboard-screen.tsx", import.meta.url), "utf8"),
@@ -96,6 +98,8 @@ test("replaces the disposable starter with the quotation workspace", async () =>
   assert.match(quotationApp, /approveQuote/);
   assert.match(quotationApp, /returnQuote/);
   assert.match(quotationApp, /<QuotationScreen/);
+  assert.match(quotationApp, /<QuoteProgressScreen/);
+  assert.match(quotationApp, /setProgressQuoteId\(quote\.id\)/);
   assert.match(quotationApp, /window\.print\(\)/);
   assert.match(quoteWizard, /export function QuoteWizard/);
   assert.match(quoteWizard, /validateQuote/);
@@ -121,6 +125,18 @@ test("replaces the disposable starter with the quotation workspace", async () =>
   assert.match(approvalScreen, /审批时间线/);
   assert.match(approvalScreen, /<dialog/);
   assert.match(approvalScreen, /请填写退回原因/);
+  assert.match(approvalScreen, /<QuoteVersionHistory/);
+  assert.match(quoteProgressScreen, /export function QuoteProgressScreen/);
+  assert.match(quoteProgressScreen, /最新退回原因/);
+  assert.match(quoteProgressScreen, /isReturned \? "需要销售处理" : "上一轮退回意见"/);
+  assert.match(quoteProgressScreen, /修改并重新提交/);
+  assert.match(quoteProgressScreen, /<QuoteVersionHistory/);
+  assert.match(quoteVersionHistory, /版本记录/);
+  assert.match(quoteVersionHistory, /审批时间线/);
+  assert.match(quoteVersionHistory, /quote\.versionSnapshots\.map/);
+  assert.match(quoteVersionHistory, /snapshot\.traffic/);
+  assert.match(quoteVersionHistory, /snapshot\.impressions/);
+  assert.match(quoteVersionHistory, /event\.version === snapshot\.version/);
   assert.match(quotationScreen, /export function QuotationScreen/);
   assert.match(quotationScreen, /quote\.status !== "approved"/);
   assert.match(quotationScreen, /报价编号/);
@@ -146,6 +162,7 @@ test("replaces the disposable starter with the quotation workspace", async () =>
   assert.match(quotationScreen, /审批记录/);
   assert.match(appShell, /DEMO/);
   assert.match(dashboard, /quotesForRole/);
+  assert.match(dashboard, /label="全部报价" value=\{counts\.total\}/);
   assert.match(ui, /export function StatusBadge/);
   assert.match(ui, /export function Money/);
   assert.match(ui, /export function Modal/);

@@ -19,6 +19,7 @@ import { ApprovalScreen } from "./approval-screen";
 import { DashboardScreen } from "./dashboard-screen";
 import { LoginScreen } from "./login-screen";
 import { QuoteWizard } from "./quote-wizard";
+import { QuoteProgressScreen } from "./quote-progress-screen";
 import { QuotationScreen } from "./quotation-screen";
 import { Modal } from "./ui";
 
@@ -37,6 +38,7 @@ export function QuotationApp() {
   const [placeholder, setPlaceholder] = useState<PlaceholderState | null>(null);
   const [wizard, setWizard] = useState<WizardSession | null>(null);
   const [approvalQuoteId, setApprovalQuoteId] = useState<string | null>(null);
+  const [progressQuoteId, setProgressQuoteId] = useState<string | null>(null);
   const [quotationQuoteId, setQuotationQuoteId] = useState<string | null>(null);
 
   if (!user) return <LoginScreen onLogin={setUser} />;
@@ -54,6 +56,7 @@ export function QuotationApp() {
     setQuotes(resetQuotes());
     setWizard(null);
     setApprovalQuoteId(null);
+    setProgressQuoteId(null);
     setQuotationQuoteId(null);
     setPlaceholder({ title: "演示数据已重置", message: "所有报价已恢复为初始演示状态。" });
   };
@@ -67,8 +70,13 @@ export function QuotationApp() {
   };
 
   const handleDashboardAction = (label: string, quote?: Quote) => {
-    if (user.role === "sales" && (label === "新建报价" || (quote && (quote.status === "draft" || quote.status === "returned")))) {
+    if (user.role === "sales" && (label === "新建报价" || quote?.status === "draft")) {
       setWizard({ initialQuote: quote });
+      return;
+    }
+
+    if (user.role === "sales" && quote && (quote.status === "returned" || quote.status === "pending_manager" || quote.status === "pending_ceo")) {
+      setProgressQuoteId(quote.id);
       return;
     }
 
@@ -117,6 +125,9 @@ export function QuotationApp() {
   const quotationQuote = quotationQuoteId
     ? quotes.find((quote) => quote.id === quotationQuoteId)
     : undefined;
+  const progressQuote = progressQuoteId
+    ? quotes.find((quote) => quote.id === progressQuoteId)
+    : undefined;
 
   const handleApprove = () => {
     if (!approvalQuote) return;
@@ -149,6 +160,7 @@ export function QuotationApp() {
         setUser(nextUser);
         setWizard(null);
         setApprovalQuoteId(null);
+        setProgressQuoteId(null);
         setQuotationQuoteId(null);
       }}
       onReset={handleReset}
@@ -156,6 +168,7 @@ export function QuotationApp() {
         setUser(null);
         setWizard(null);
         setApprovalQuoteId(null);
+        setProgressQuoteId(null);
         setQuotationQuoteId(null);
       }}
       onPlaceholder={openPlaceholder}
@@ -165,6 +178,15 @@ export function QuotationApp() {
           quote={quotationQuote}
           onBack={() => setQuotationQuoteId(null)}
           onPrint={() => window.print()}
+        />
+      ) : progressQuote && user.role === "sales" ? (
+        <QuoteProgressScreen
+          quote={progressQuote}
+          onBack={() => setProgressQuoteId(null)}
+          onEdit={() => {
+            setWizard({ initialQuote: progressQuote });
+            setProgressQuoteId(null);
+          }}
         />
       ) : approvalQuote && (user.role === "manager" || user.role === "ceo") ? (
         <ApprovalScreen

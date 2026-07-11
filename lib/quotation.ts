@@ -6,6 +6,7 @@ import type {
   Quote,
   QuoteInput,
   QuoteStatus,
+  QuoteVersionSnapshot,
   SalesPackage,
   User,
 } from "./types.ts";
@@ -69,6 +70,12 @@ export function validateQuote(input: QuoteInput): Record<string, string> {
   if (input.taxRate !== undefined && (!Number.isFinite(input.taxRate) || input.taxRate < 0)) {
     errors.taxRate = "模拟税率必须为有限非负数";
   }
+  if (input.traffic !== undefined && (!Number.isInteger(input.traffic) || input.traffic < 0)) {
+    errors.traffic = "日均流量必须为非负整数";
+  }
+  if (input.impressions !== undefined && (!Number.isInteger(input.impressions) || input.impressions < 0)) {
+    errors.impressions = "月曝光必须为非负整数";
+  }
 
   return errors;
 }
@@ -107,6 +114,7 @@ export function createDraftQuote(input: QuoteInput, previousQuote: Quote | undef
     pricing: calculatePricing(normalizedInput),
     status: previousQuote?.status === "returned" ? "returned" : "draft",
     version: previousQuote?.version ?? 1,
+    versionSnapshots: cloneVersionSnapshots(previousQuote?.versionSnapshots ?? []),
     approvalHistory: [...(previousQuote?.approvalHistory ?? [])],
     createdAt: previousQuote?.createdAt ?? now,
     updatedAt: now,
@@ -176,6 +184,10 @@ export function submitQuote(input: QuoteInput, previousQuote: Quote | undefined,
   const identifier = now.replace(/\D/g, "");
   const id = previousQuote?.id ?? `quote-demo-${identifier}`;
   const action = isResubmission ? "resubmitted" : "submitted";
+  const snapshot = createVersionSnapshot(input, version, now, previousQuote);
+  const previousSnapshots = isResubmission
+    ? cloneVersionSnapshots(previousQuote?.versionSnapshots ?? [])
+    : [];
 
   return {
     id,
@@ -192,6 +204,7 @@ export function submitQuote(input: QuoteInput, previousQuote: Quote | undefined,
     pricing: calculatePricing(input),
     status: "pending_manager",
     version,
+    versionSnapshots: [...previousSnapshots, snapshot],
     approvalHistory: [
       ...(previousQuote?.approvalHistory ?? []),
       {
@@ -208,6 +221,45 @@ export function submitQuote(input: QuoteInput, previousQuote: Quote | undefined,
     updatedAt: now,
     isDemoData: true,
   };
+}
+
+function createVersionSnapshot(
+  input: QuoteInput,
+  version: number,
+  submittedAt: string,
+  previousQuote: Quote | undefined,
+): QuoteVersionSnapshot {
+  const matchingPreviousSnapshot = previousQuote?.versionSnapshots.at(-1);
+  const hasSamePlacement = Boolean(
+    matchingPreviousSnapshot
+    && matchingPreviousSnapshot.placementMode === input.placementMode
+    && matchingPreviousSnapshot.placementIds.length === (input.placementIds?.length ?? 0)
+    && matchingPreviousSnapshot.placementIds.every((id, index) => id === input.placementIds?.[index]),
+  );
+
+  return {
+    version,
+    customerId: input.customerId ?? "",
+    brandId: input.brandId ?? "",
+    placementMode: input.placementMode ?? "building",
+    placementIds: [...(input.placementIds ?? [])],
+    weeks: input.weeks ?? 0,
+    spots: input.spots ?? 0,
+    bonus: input.bonus ?? 0,
+    pricing: calculatePricing(input),
+    traffic: input.traffic ?? (hasSamePlacement ? matchingPreviousSnapshot?.traffic ?? 0 : 0),
+    impressions: input.impressions ?? (hasSamePlacement ? matchingPreviousSnapshot?.impressions ?? 0 : 0),
+    discount: input.discount,
+    submittedAt,
+  };
+}
+
+function cloneVersionSnapshots(snapshots: QuoteVersionSnapshot[]): QuoteVersionSnapshot[] {
+  return snapshots.map((snapshot) => ({
+    ...snapshot,
+    placementIds: [...snapshot.placementIds],
+    pricing: { ...snapshot.pricing },
+  }));
 }
 
 export function approveQuote(quote: Quote, actor: User): Quote {

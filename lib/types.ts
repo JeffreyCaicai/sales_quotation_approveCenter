@@ -103,6 +103,8 @@ export interface QuoteInput {
   discount: number;
   basePrice?: number;
   taxRate?: number;
+  traffic?: number;
+  impressions?: number;
 }
 
 export interface PricingSummary {
@@ -111,6 +113,22 @@ export interface PricingSummary {
   netPrice: number;
   tax: number;
   total: number;
+}
+
+export interface QuoteVersionSnapshot {
+  version: number;
+  customerId: string;
+  brandId: string;
+  placementMode: PlacementMode;
+  placementIds: string[];
+  weeks: number;
+  spots: number;
+  bonus: number;
+  pricing: PricingSummary;
+  traffic: number;
+  impressions: number;
+  discount: number;
+  submittedAt: string;
 }
 
 export interface Quote {
@@ -128,6 +146,7 @@ export interface Quote {
   pricing: PricingSummary;
   status: QuoteStatus;
   version: number;
+  versionSnapshots: QuoteVersionSnapshot[];
   approvalHistory: ApprovalEvent[];
   createdAt: string;
   updatedAt: string;

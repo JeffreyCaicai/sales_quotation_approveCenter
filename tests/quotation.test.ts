@@ -214,6 +214,8 @@ test("a valid priced draft retains the same total after storage round-trip", () 
       bonus: 0,
       discount: 50,
       basePrice: 128_000,
+      traffic: 38_000,
+      impressions: 720_000,
     },
     undefined,
     salesUser,
@@ -299,6 +301,8 @@ test("submitting a valid new quote creates version 1 pending manager approval", 
       bonus: 16,
       discount: 50,
       basePrice: 128_000,
+      traffic: 38_000,
+      impressions: 720_000,
     },
     undefined,
     salesUser,
@@ -310,6 +314,29 @@ test("submitting a valid new quote creates version 1 pending manager approval", 
   assert.match(quote.id, /^quote-demo-/);
   assert.match(quote.quoteNumber, /^DEMO-Q-/);
   assert.equal(quote.approvalHistory.length, 1);
+  assert.deepEqual(quote.versionSnapshots, [
+    {
+      version: 1,
+      customerId: "customer-kopi",
+      brandId: "brand-kopi-kenangan",
+      placementMode: "building",
+      placementIds: ["building-pacific-place"],
+      weeks: 4,
+      spots: 160,
+      bonus: 16,
+      pricing: {
+        basePrice: 128_000,
+        discountAmount: 64_000,
+        netPrice: 64_000,
+        tax: 3_840,
+        total: 67_840,
+      },
+      traffic: 38_000,
+      impressions: 720_000,
+      discount: 50,
+      submittedAt: quote.createdAt,
+    },
+  ]);
   assert.deepEqual(quote.approvalHistory[0], {
     id: `${quote.id}-v1-submitted`,
     role: "sales",
@@ -319,6 +346,52 @@ test("submitting a valid new quote creates version 1 pending manager approval", 
     createdAt: quote.createdAt,
     version: 1,
   });
+});
+
+test("returned draft edits and resubmission keep V1 immutable while appending V2", () => {
+  const sales = USERS.find((user) => user.role === "sales");
+  const manager = USERS.find((user) => user.role === "manager");
+  assert.ok(sales);
+  assert.ok(manager);
+
+  const submitted = submitQuote(validQuoteInput(), undefined, sales);
+  const returned = returnQuote(submitted, manager, "请增加 Bonus 并调整折扣");
+  const lockedV1 = structuredClone(returned.versionSnapshots[0]);
+  const editedInput = validQuoteInput({ bonus: 20, discount: 60 });
+  const editedDraft = createDraftQuote(editedInput, returned, sales);
+
+  assert.equal(editedDraft.status, "returned");
+  assert.equal(editedDraft.bonus, 20);
+  assert.equal(editedDraft.discount, 60);
+  assert.deepEqual(editedDraft.versionSnapshots, [lockedV1]);
+  assert.deepEqual(returned.versionSnapshots, [lockedV1]);
+
+  const resubmitted = submitQuote(editedInput, editedDraft, sales);
+
+  assert.equal(resubmitted.version, 2);
+  assert.equal(resubmitted.versionSnapshots.length, 2);
+  assert.deepEqual(resubmitted.versionSnapshots[0], lockedV1);
+  assert.deepEqual(resubmitted.versionSnapshots[1], {
+    ...lockedV1,
+    version: 2,
+    bonus: 20,
+    discount: 60,
+    pricing: calculatePricing(editedInput),
+    submittedAt: resubmitted.updatedAt,
+  });
+  assert.deepEqual(returned.versionSnapshots, [lockedV1]);
+});
+
+test("approval and return transitions preserve commercial version snapshots", () => {
+  const manager = USERS.find((user) => user.role === "manager");
+  const pending = SEEDED_QUOTES.find((quote) => quote.status === "pending_manager");
+  assert.ok(manager);
+  assert.ok(pending);
+  const snapshots = structuredClone(pending.versionSnapshots);
+
+  assert.deepEqual(approveQuote(pending, manager).versionSnapshots, snapshots);
+  assert.deepEqual(returnQuote(pending, manager, "请调整方案").versionSnapshots, snapshots);
+  assert.deepEqual(pending.versionSnapshots, snapshots);
 });
 
 test("resubmitting a returned executive-discount quote preserves history and returns to manager", () => {
@@ -605,6 +678,8 @@ test("seed data links customers to brands and covers the approval workflow", () 
     new Set(["returned", "pending_manager", "pending_ceo", "approved"]),
   );
   assert.ok(SEEDED_QUOTES.every((quote) => quote.approvalHistory.length > 0));
+  assert.ok(SEEDED_QUOTES.every((quote) => quote.versionSnapshots.length === quote.version));
+  assert.ok(SEEDED_QUOTES.every((quote) => quote.versionSnapshots.at(-1)?.version === quote.version));
   assert.ok(
     SEEDED_QUOTES.every((quote) =>
       relationships.some(
@@ -613,6 +688,26 @@ test("seed data links customers to brands and covers the approval workflow", () 
       ),
     ),
   );
+});
+
+test("seeded snapshots retain catalog-backed commercial totals and version event keys", () => {
+  for (const quote of SEEDED_QUOTES) {
+    for (const snapshot of quote.versionSnapshots) {
+      const customer = CUSTOMERS.find((item) => item.id === snapshot.customerId);
+      const resources = snapshot.placementMode === "building"
+        ? BUILDINGS.filter((item) => snapshot.placementIds.includes(item.id))
+        : PACKAGES.filter((item) => snapshot.placementIds.includes(item.id));
+      assert.ok(customer?.brands.some((brand) => brand.id === snapshot.brandId));
+      assert.equal(resources.length, snapshot.placementIds.length);
+      assert.equal(snapshot.traffic, resources.reduce((total, item) => total + item.traffic, 0));
+      assert.equal(snapshot.impressions, resources.reduce((total, item) => total + item.impressions, 0));
+      assert.deepEqual(snapshot.pricing, calculatePricing({
+        basePrice: Math.round(resources.reduce((total, item) => total + item.priceRmb, 0) * (snapshot.weeks / 4)),
+        discount: snapshot.discount,
+      }));
+      assert.ok(quote.approvalHistory.some((event) => event.version === snapshot.version));
+    }
+  }
 });
 
 test("server-side quote loading returns a fresh deep clone of the seeds", () => {
@@ -627,11 +722,11 @@ test("server-side quote loading returns a fresh deep clone of the seeds", () => 
 
 test("browser persistence round-trips valid quotes and falls back on invalid data", () => {
   const storage = new MemoryStorage();
-  const approvedSeed = SEEDED_QUOTES.find((quote) => quote.status === "approved");
-  assert.ok(approvedSeed);
+  const returnedSeed = SEEDED_QUOTES.find((quote) => quote.status === "returned");
+  assert.ok(returnedSeed);
 
   withBrowserStorage(storage, () => {
-    const changed = [{ ...approvedSeed, bonus: approvedSeed.bonus + 1 }];
+    const changed = [{ ...returnedSeed, bonus: returnedSeed.bonus + 1 }];
     saveQuotes(changed);
     const loaded = loadQuotes();
     assert.deepEqual(loaded, changed);
@@ -668,6 +763,61 @@ test("browser persistence refuses invalid numeric quotes without overwriting val
       saveQuotes([invalid]);
       assert.deepEqual(loadQuotes(), valid);
     }
+  });
+});
+
+test("browser persistence rejects unknown commercial references and snapshot pricing mismatches", () => {
+  const storage = new MemoryStorage();
+  const approved = SEEDED_QUOTES.find((quote) => quote.status === "approved");
+  assert.ok(approved);
+
+  withBrowserStorage(storage, () => {
+    saveQuotes([approved]);
+    const locked = storage.getItem("quotation-prototype-v1");
+    assert.ok(locked);
+
+    const invalidQuotes: Quote[] = [
+      { ...approved, customerId: "customer-unknown" },
+      { ...approved, brandId: "brand-unknown" },
+      { ...approved, placementIds: ["building-unknown"] },
+      {
+        ...approved,
+        versionSnapshots: approved.versionSnapshots.map((snapshot) => ({
+          ...snapshot,
+          pricing: { ...snapshot.pricing, total: snapshot.pricing.total + 1 },
+        })),
+      },
+    ];
+
+    for (const invalid of invalidQuotes) {
+      storage.setItem("quotation-prototype-v1", JSON.stringify([invalid]));
+      assert.deepEqual(loadQuotes(), SEEDED_QUOTES);
+    }
+
+    storage.setItem("quotation-prototype-v1", locked);
+    assert.deepEqual(loadQuotes(), [approved]);
+  });
+});
+
+test("browser persistence rejects resubmission histories that skip a prior-version return", () => {
+  const storage = new MemoryStorage();
+  const sales = USERS.find((user) => user.role === "sales");
+  const manager = USERS.find((user) => user.role === "manager");
+  assert.ok(sales);
+  assert.ok(manager);
+  const submitted = submitQuote(validQuoteInput(), undefined, sales);
+  const returned = returnQuote(submitted, manager, "请补充依据");
+  const resubmitted = submitQuote(validQuoteInput({ discount: 60 }), returned, sales);
+  const missingReturn = {
+    ...resubmitted,
+    approvalHistory: resubmitted.approvalHistory.filter((event) => event.action !== "returned"),
+  };
+
+  withBrowserStorage(storage, () => {
+    saveQuotes([resubmitted]);
+    assert.deepEqual(loadQuotes(), [resubmitted]);
+    storage.setItem("quotation-prototype-v1", JSON.stringify([missingReturn]));
+    assert.deepEqual(loadQuotes(), SEEDED_QUOTES);
   });
 });
 
@@ -813,14 +963,13 @@ test("browser persistence rejects approval events with forged actor identity", (
 
 test("generated manager and CEO transitions survive persistence validation", () => {
   const storage = new MemoryStorage();
+  const sales = USERS.find((user) => user.role === "sales");
   const manager = USERS.find((user) => user.role === "manager");
   const ceo = USERS.find((user) => user.role === "ceo");
-  const managerPending = SEEDED_QUOTES.find((quote) => quote.status === "pending_manager");
+  assert.ok(sales);
   assert.ok(manager);
   assert.ok(ceo);
-  assert.ok(managerPending);
-  const executiveQuote = { ...managerPending, discount: 75 };
-  const pendingCeo = approveQuote(executiveQuote, manager);
+  const pendingCeo = approveQuote(submitQuote(validQuoteInput({ discount: 75 }), undefined, sales), manager);
   const approved = approveQuote(pendingCeo, ceo);
 
   withBrowserStorage(storage, () => {
@@ -912,6 +1061,8 @@ test("building and package quotes retain one shared state across role views and 
     placementMode: "package",
     placementIds: [salesPackage.id],
     basePrice: salesPackage.priceRmb,
+    traffic: salesPackage.traffic,
+    impressions: salesPackage.impressions,
   };
   assert.deepEqual(
     validateQuoteReferences(packageInput, sales.id, { customers: CUSTOMERS, buildings: BUILDINGS, packages: PACKAGES }),
@@ -992,6 +1143,8 @@ function validQuoteInput(overrides: Partial<QuoteInput> = {}): QuoteInput {
     bonus: 0,
     discount: 50,
     basePrice: 128_000,
+    traffic: 38_000,
+    impressions: 720_000,
     ...overrides,
   };
 }
