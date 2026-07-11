@@ -11,6 +11,15 @@ import {
   translate,
   translations,
 } from "../lib/i18n.ts";
+import {
+  localizeApprovalEvent,
+  localizeBrand,
+  localizeBuilding,
+  localizeCustomer,
+  localizePackage,
+  localizeUser,
+} from "../lib/display-data.ts";
+import { BUILDINGS, CUSTOMERS, PACKAGES, SEEDED_QUOTES, USERS } from "../lib/mock-data.ts";
 import { resetQuotes } from "../lib/store.ts";
 import * as quotationDomain from "../lib/quotation.ts";
 
@@ -83,13 +92,17 @@ test("translation interpolation is deterministic and preserves unknown variables
 test("money, numbers, and dates use the active locale", () => {
   const date = new Date("2026-07-10T12:00:00.000Z");
 
-  assert.equal(formatMoney("en", 123456.78), new Intl.NumberFormat("en", {
+  assert.equal(formatMoney("en", 123456.78), new Intl.NumberFormat("en-ID", {
     style: "currency",
-    currency: "CNY",
+    currency: "IDR",
+    currencyDisplay: "symbol",
+    maximumFractionDigits: 0,
   }).format(123456.78));
   assert.equal(formatMoney("zh-CN", 123456.78), new Intl.NumberFormat("zh-CN", {
     style: "currency",
-    currency: "CNY",
+    currency: "IDR",
+    currencyDisplay: "symbol",
+    maximumFractionDigits: 0,
   }).format(123456.78));
   assert.equal(formatNumber("en", 123456.78), new Intl.NumberFormat("en").format(123456.78));
   assert.equal(formatNumber("zh-CN", 123456.78), new Intl.NumberFormat("zh-CN").format(123456.78));
@@ -253,12 +266,94 @@ test("resetting quotation data does not remove the locale preference", () => {
 
   withStorage(storage, () => {
     saveLocale("zh-CN");
-    storage.setItem("quotation-prototype-v1", "stored quotation data");
+    storage.setItem("quotation-prototype-v2", "stored quotation data");
     resetQuotes();
 
     assert.equal(loadLocale(), "zh-CN");
-    assert.equal(storage.getItem("quotation-prototype-v1"), null);
+    assert.equal(storage.getItem("quotation-prototype-v2"), null);
   });
+});
+
+test("production pricing uses Indonesian rupiah and contains no RMB schema", () => {
+  const productionSources = [
+    ...typeScriptSources(new URL("../app/", import.meta.url)),
+    ...typeScriptSources(new URL("../components/", import.meta.url)),
+    ...typeScriptSources(new URL("../lib/", import.meta.url)),
+  ];
+
+  for (const sourceUrl of productionSources) {
+    const source = readFileSync(sourceUrl, "utf8");
+    assert.doesNotMatch(source, /priceRmb|currencyCny/, `${sourceUrl.pathname} still uses the RMB schema`);
+  }
+  assert.match(formatMoney("en", 340_736_000), /Rp|IDR/);
+  assert.doesNotMatch(formatMoney("en", 340_736_000), /CN¥|CNY/);
+});
+
+test("English display data contains no Chinese while Chinese preserves the original demo data", () => {
+  const englishUsers = USERS.map((user) => localizeUser(user, "en"));
+  const englishCustomers = CUSTOMERS.map((customer) => localizeCustomer(customer, "en"));
+  const englishBrands = CUSTOMERS.flatMap((customer) => customer.brands.map((brand) => localizeBrand(brand, "en")));
+  const englishBuildings = BUILDINGS.map((building) => localizeBuilding(building, "en"));
+  const englishPackages = PACKAGES.map((salesPackage) => localizePackage(salesPackage, "en"));
+  const englishEvents = SEEDED_QUOTES.flatMap((quote) => quote.approvalHistory.map((event) => localizeApprovalEvent(event, "en")));
+
+  for (const value of [
+    ...englishUsers.flatMap((item) => [item.name, item.title]),
+    ...englishCustomers.flatMap((item) => [item.name, item.industry]),
+    ...englishBrands.flatMap((item) => [item.name, item.category]),
+    ...englishBuildings.flatMap((item) => [item.name, item.category]),
+    ...englishPackages.flatMap((item) => [item.name, item.description, item.category]),
+    ...englishEvents.flatMap((item) => [item.actorName, item.comment ?? ""]),
+  ]) {
+    assert.doesNotMatch(value, /[\u3400-\u9fff]/, `English display data contains Chinese: ${value}`);
+  }
+
+  const sourceUser = USERS[0];
+  const sourceCustomer = CUSTOMERS[0];
+  const sourceBrand = sourceCustomer.brands[0];
+  assert.equal(localizeUser(sourceUser, "zh-CN").name, sourceUser.name);
+  assert.equal(localizeCustomer(sourceCustomer, "zh-CN").name, sourceCustomer.name);
+  assert.equal(localizeBrand(sourceBrand, "zh-CN").category, sourceBrand.category);
+});
+
+test("localized display helpers preserve identifiers and user-authored approval reasons", () => {
+  const customer = CUSTOMERS[0];
+  const englishCustomer = localizeCustomer(customer, "en");
+  assert.equal(englishCustomer.id, customer.id);
+  assert.equal(englishCustomer.salesId, customer.salesId);
+  assert.deepEqual(englishCustomer.brands.map((item) => item.id), customer.brands.map((item) => item.id));
+
+  const customEvent = {
+    id: "event-user-authored",
+    actorId: "manager-lin",
+    actorName: "林玥",
+    role: "manager" as const,
+    action: "returned" as const,
+    comment: "客户要求保留原始语言 / Keep verbatim",
+    createdAt: "2026-07-11T00:00:00.000Z",
+    version: 1,
+  };
+  const localizedEvent = localizeApprovalEvent(customEvent, "en");
+  assert.equal(localizedEvent.id, customEvent.id);
+  assert.equal(localizedEvent.actorName, "Lin Yue");
+  assert.equal(localizedEvent.comment, customEvent.comment);
+});
+
+test("every component rendering mock business data uses the display localization layer", () => {
+  const componentNames = [
+    "app-shell.tsx",
+    "dashboard-screen.tsx",
+    "quote-wizard.tsx",
+    "approval-screen.tsx",
+    "quote-progress-screen.tsx",
+    "quote-version-history.tsx",
+    "quotation-screen.tsx",
+  ];
+
+  for (const componentName of componentNames) {
+    const source = readFileSync(new URL(`../components/${componentName}`, import.meta.url), "utf8");
+    assert.match(source, /@\/lib\/display-data/, `${componentName} bypasses localized demo-data display`);
+  }
 });
 
 function dictionaryLeaves(value: unknown, prefix = ""): Record<string, string> {

@@ -213,7 +213,7 @@ test("a valid priced draft retains the same total after storage round-trip", () 
       spots: 0,
       bonus: 0,
       discount: 50,
-      basePrice: 128_000,
+      basePrice: BUILDINGS[0].priceIdr,
       traffic: 38_000,
       impressions: 720_000,
     },
@@ -221,13 +221,7 @@ test("a valid priced draft retains the same total after storage round-trip", () 
     salesUser,
   );
 
-  assert.deepEqual(draft.pricing, {
-    basePrice: 128_000,
-    discountAmount: 64_000,
-    netPrice: 64_000,
-    tax: 3_840,
-    total: 67_840,
-  });
+  assert.deepEqual(draft.pricing, calculatePricing({ basePrice: BUILDINGS[0].priceIdr, discount: 50 }));
 
   const storage = new MemoryStorage();
   withBrowserStorage(storage, () => {
@@ -262,7 +256,7 @@ test("reference validation rejects a brand that does not belong to the selected 
 test("reference validation rejects resources outside the selected placement mode", () => {
   const references = { customers: CUSTOMERS, buildings: BUILDINGS, packages: PACKAGES };
   const buildingInPackage = validateQuoteReferences(
-    { ...validQuoteInput(), placementMode: "package", placementIds: [BUILDINGS[0].id], basePrice: BUILDINGS[0].priceRmb },
+    { ...validQuoteInput(), placementMode: "package", placementIds: [BUILDINGS[0].id], basePrice: BUILDINGS[0].priceIdr },
     "sales-chen",
     references,
   );
@@ -300,7 +294,7 @@ test("submitting a valid new quote creates version 1 pending manager approval", 
       spots: 160,
       bonus: 16,
       discount: 50,
-      basePrice: 128_000,
+      basePrice: BUILDINGS[0].priceIdr,
       traffic: 38_000,
       impressions: 720_000,
     },
@@ -324,13 +318,7 @@ test("submitting a valid new quote creates version 1 pending manager approval", 
       weeks: 4,
       spots: 160,
       bonus: 16,
-      pricing: {
-        basePrice: 128_000,
-        discountAmount: 64_000,
-        netPrice: 64_000,
-        tax: 3_840,
-        total: 67_840,
-      },
+      pricing: calculatePricing({ basePrice: BUILDINGS[0].priceIdr, discount: 50 }),
       traffic: 38_000,
       impressions: 720_000,
       discount: 50,
@@ -702,7 +690,7 @@ test("seeded snapshots retain catalog-backed commercial totals and version event
       assert.equal(snapshot.traffic, resources.reduce((total, item) => total + item.traffic, 0));
       assert.equal(snapshot.impressions, resources.reduce((total, item) => total + item.impressions, 0));
       assert.deepEqual(snapshot.pricing, calculatePricing({
-        basePrice: Math.round(resources.reduce((total, item) => total + item.priceRmb, 0) * (snapshot.weeks / 4)),
+        basePrice: Math.round(resources.reduce((total, item) => total + item.priceIdr, 0) * (snapshot.weeks / 4)),
         discount: snapshot.discount,
       }));
       assert.ok(quote.approvalHistory.some((event) => event.version === snapshot.version));
@@ -735,14 +723,14 @@ test("browser persistence round-trips valid quotes and falls back on invalid dat
     assert.notEqual(loaded[0].pricing, changed[0].pricing);
     assert.notEqual(loaded[0].approvalHistory, changed[0].approvalHistory);
 
-    storage.setItem("quotation-prototype-v1", "not JSON");
+    storage.setItem("quotation-prototype-v2", "not JSON");
     assert.deepEqual(loadQuotes(), SEEDED_QUOTES);
 
-    storage.setItem("quotation-prototype-v1", JSON.stringify([{ id: "invalid-schema" }]));
+    storage.setItem("quotation-prototype-v2", JSON.stringify([{ id: "invalid-schema" }]));
     assert.deepEqual(loadQuotes(), SEEDED_QUOTES);
 
     assert.deepEqual(resetQuotes(), SEEDED_QUOTES);
-    assert.equal(storage.getItem("quotation-prototype-v1"), null);
+    assert.equal(storage.getItem("quotation-prototype-v2"), null);
   });
 });
 
@@ -773,7 +761,7 @@ test("browser persistence rejects unknown commercial references and snapshot pri
 
   withBrowserStorage(storage, () => {
     saveQuotes([approved]);
-    const locked = storage.getItem("quotation-prototype-v1");
+    const locked = storage.getItem("quotation-prototype-v2");
     assert.ok(locked);
 
     const invalidQuotes: Quote[] = [
@@ -790,11 +778,11 @@ test("browser persistence rejects unknown commercial references and snapshot pri
     ];
 
     for (const invalid of invalidQuotes) {
-      storage.setItem("quotation-prototype-v1", JSON.stringify([invalid]));
+      storage.setItem("quotation-prototype-v2", JSON.stringify([invalid]));
       assert.deepEqual(loadQuotes(), SEEDED_QUOTES);
     }
 
-    storage.setItem("quotation-prototype-v1", locked);
+    storage.setItem("quotation-prototype-v2", locked);
     assert.deepEqual(loadQuotes(), [approved]);
   });
 });
@@ -816,7 +804,7 @@ test("browser persistence rejects resubmission histories that skip a prior-versi
   withBrowserStorage(storage, () => {
     saveQuotes([resubmitted]);
     assert.deepEqual(loadQuotes(), [resubmitted]);
-    storage.setItem("quotation-prototype-v1", JSON.stringify([missingReturn]));
+    storage.setItem("quotation-prototype-v2", JSON.stringify([missingReturn]));
     assert.deepEqual(loadQuotes(), SEEDED_QUOTES);
   });
 });
@@ -1060,7 +1048,7 @@ test("building and package quotes retain one shared state across role views and 
     ...validQuoteInput({ discount: 75 }),
     placementMode: "package",
     placementIds: [salesPackage.id],
-    basePrice: salesPackage.priceRmb,
+    basePrice: salesPackage.priceIdr,
     traffic: salesPackage.traffic,
     impressions: salesPackage.impressions,
   };
@@ -1142,7 +1130,7 @@ function validQuoteInput(overrides: Partial<QuoteInput> = {}): QuoteInput {
     spots: 160,
     bonus: 0,
     discount: 50,
-    basePrice: 128_000,
+    basePrice: BUILDINGS[0].priceIdr,
     traffic: 38_000,
     impressions: 720_000,
     ...overrides,

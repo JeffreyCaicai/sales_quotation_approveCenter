@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 
+import { localizeBuilding, localizeCustomer, localizePackage } from "@/lib/display-data";
 import { BUILDINGS, CUSTOMERS, DEMO_TAX_RATE, PACKAGES } from "@/lib/mock-data";
 import { calculatePricing, validateQuote, validateQuoteReferences } from "@/lib/quotation";
 import type { TranslationKey } from "@/lib/i18n";
@@ -44,7 +45,7 @@ const ERROR_STEPS: Record<string, number> = {
 };
 
 export function QuoteWizard({ initialQuote, salesUser, onCancel, onSave, onSubmit }: QuoteWizardProps) {
-  const { t } = useLocale();
+  const { locale, t } = useLocale();
   const [step, setStep] = useState(0);
   const [search, setSearch] = useState("");
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -59,19 +60,23 @@ export function QuoteWizard({ initialQuote, salesUser, onCancel, onSave, onSubmi
     discount: initialQuote?.discount ?? 50,
   }));
 
-  const customers = CUSTOMERS.filter((customer) => customer.salesId === salesUser.id);
+  const customers = CUSTOMERS
+    .filter((customer) => customer.salesId === salesUser.id)
+    .map((item) => localizeCustomer(item, locale));
+  const localizedBuildings = BUILDINGS.map((item) => localizeBuilding(item, locale));
+  const localizedPackages = PACKAGES.map((item) => localizePackage(item, locale));
   const customer = customers.find((item) => item.id === values.customerId);
   const brand = customer?.brands.find((item) => item.id === values.brandId);
   const normalizedSearch = search.trim().toLocaleLowerCase();
   const visibleBuildings = normalizedSearch
-    ? BUILDINGS.filter((building) =>
+    ? localizedBuildings.filter((building) =>
         `${building.name} ${building.location} ${building.category}`.toLocaleLowerCase().includes(normalizedSearch),
       )
-    : BUILDINGS;
+    : localizedBuildings;
   const selectedResources = values.placementMode === "package"
-    ? PACKAGES.filter((item) => values.placementIds.includes(item.id))
-    : BUILDINGS.filter((item) => values.placementIds.includes(item.id));
-  const weeklyRate = selectedResources.reduce((total, item) => total + item.priceRmb, 0);
+    ? localizedPackages.filter((item) => values.placementIds.includes(item.id))
+    : localizedBuildings.filter((item) => values.placementIds.includes(item.id));
+  const weeklyRate = selectedResources.reduce((total, item) => total + item.priceIdr, 0);
   const basePrice = Number.isFinite(values.weeks)
     ? Math.round(weeklyRate * (values.weeks / 4))
     : 0;
@@ -428,10 +433,12 @@ function ResourceStep({
   onSearchChange: (value: string) => void;
   onToggle: (id: string) => void;
 }) {
-  const { t, formatNumber } = useLocale();
+  const { locale, t, formatNumber } = useLocale();
   if (!mode) return <p className="inline-notice">{t("wizard.chooseModeFirst")}</p>;
 
-  const resources = mode === "building" ? visibleBuildings : PACKAGES;
+  const resources = mode === "building"
+    ? visibleBuildings
+    : PACKAGES.map((item) => localizePackage(item, locale));
   return (
     <fieldset
       className="form-fieldset form-stack"
@@ -482,7 +489,7 @@ function ResourceStep({
                 <span><small>{t("wizard.dailyTraffic")}</small>{formatNumber(item.traffic)}</span>
                 <span><small>{t("wizard.monthlyImpressions")}</small>{formatNumber(item.impressions)}</span>
               </span>
-              <span className="resource-card__price"><Money amount={item.priceRmb} /><small>{t("wizard.fourWeeksSuffix")}</small></span>
+              <span className="resource-card__price"><Money amount={item.priceIdr} /><small>{t("wizard.fourWeeksSuffix")}</small></span>
             </button>
           );
         })}

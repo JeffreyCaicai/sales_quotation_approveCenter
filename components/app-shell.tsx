@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 
+import { localizeUser } from "@/lib/display-data";
 import { USERS } from "@/lib/mock-data";
 import type { Role, User } from "@/lib/types";
 
@@ -30,7 +31,8 @@ export function AppShell({
   onLogout,
   onPlaceholder,
 }: AppShellProps) {
-  const { t } = useLocale();
+  const { locale, t } = useLocale();
+  const displayUser = localizeUser(user, locale);
   const requestReset = () => {
     if (window.confirm(t("shell.resetConfirm"))) onReset();
   };
@@ -75,9 +77,9 @@ export function AppShell({
             </select>
           </label>
           <div className="user-menu">
-            <span className="avatar" aria-hidden="true">{user.name.slice(0, 1)}</span>
+            <span className="avatar" aria-hidden="true">{displayUser.name.slice(0, 1)}</span>
             <span className="user-menu__identity">
-              <strong>{user.name}</strong>
+              <strong>{displayUser.name}</strong>
               <small>{roleLabel(user.role)}</small>
             </span>
             <details>
@@ -106,8 +108,8 @@ export function AppShell({
           <summary aria-label={t("shell.openMobileAccount")}><UserIcon />{t("shell.account")}</summary>
           <div className="mobile-account__popover">
             <div className="mobile-account__identity">
-              <span className="avatar" aria-hidden="true">{user.name.slice(0, 1)}</span>
-              <span><strong>{user.name}</strong><small>{roleLabel(user.role)}</small></span>
+              <span className="avatar" aria-hidden="true">{displayUser.name.slice(0, 1)}</span>
+              <span><strong>{displayUser.name}</strong><small>{roleLabel(user.role)}</small></span>
             </div>
             <LanguageSwitcher />
             <label className="mobile-role-switcher">

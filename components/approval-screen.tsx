@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 
+import { localizeBuilding, localizeCustomer, localizePackage, localizeUser } from "@/lib/display-data";
 import { BUILDINGS, CUSTOMERS, PACKAGES, USERS } from "@/lib/mock-data";
 import { canApproveQuote, getDiscountBand } from "@/lib/quotation";
 import type { TranslationKey } from "@/lib/i18n";
@@ -22,18 +23,20 @@ interface ApprovalScreenProps {
 type Decision = "approve" | "return";
 
 export function ApprovalScreen({ quote, actor, onApprove, onReturn, onBack }: ApprovalScreenProps) {
-  const { t, formatNumber } = useLocale();
+  const { locale, t, formatNumber } = useLocale();
   const [decision, setDecision] = useState<Decision | null>(null);
   const [reason, setReason] = useState("");
   const [reasonError, setReasonError] = useState<TranslationKey | null>(null);
   const dialogRef = useRef<HTMLDialogElement>(null);
   const restoreFocusRef = useRef<HTMLElement | null>(null);
-  const customer = CUSTOMERS.find((item) => item.id === quote.customerId);
+  const sourceCustomer = CUSTOMERS.find((item) => item.id === quote.customerId);
+  const customer = sourceCustomer ? localizeCustomer(sourceCustomer, locale) : undefined;
   const brand = customer?.brands.find((item) => item.id === quote.brandId);
-  const owner = USERS.find((item) => item.id === quote.salesId);
+  const sourceOwner = USERS.find((item) => item.id === quote.salesId);
+  const owner = sourceOwner ? localizeUser(sourceOwner, locale) : undefined;
   const resources = quote.placementMode === "package"
-    ? PACKAGES.filter((item) => quote.placementIds.includes(item.id))
-    : BUILDINGS.filter((item) => quote.placementIds.includes(item.id));
+    ? PACKAGES.filter((item) => quote.placementIds.includes(item.id)).map((item) => localizePackage(item, locale))
+    : BUILDINGS.filter((item) => quote.placementIds.includes(item.id)).map((item) => localizeBuilding(item, locale));
   const band = getDiscountBand(quote.discount);
   const canDecide = canApproveQuote(quote, actor);
 
@@ -107,7 +110,7 @@ export function ApprovalScreen({ quote, actor, onApprove, onReturn, onBack }: Ap
               {resources.map((resource) => (
                 <li key={resource.id}>
                   <span><strong>{resource.name}</strong><small>{resource.location} · {resource.category}</small></span>
-                  <Money amount={resource.priceRmb} />
+                  <Money amount={resource.priceIdr} />
                 </li>
               ))}
             </ul>

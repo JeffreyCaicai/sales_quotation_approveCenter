@@ -1,3 +1,4 @@
+import { localizeCustomer, localizeUser } from "@/lib/display-data";
 import { CUSTOMERS, USERS } from "@/lib/mock-data";
 import type { TranslationKey } from "@/lib/i18n";
 import { getDiscountBand } from "@/lib/quotation";
@@ -28,7 +29,8 @@ export function DashboardScreen({ user, quotes, onAction }: DashboardScreenProps
 }
 
 function SalesDashboard({ user, quotes, onAction }: DashboardScreenProps) {
-  const { formatNumber, t } = useLocale();
+  const { formatNumber, locale, t } = useLocale();
+  const displayUser = localizeUser(user, locale);
   const counts = {
     draft: quotes.filter((quote) => quote.status === "draft").length,
     returned: quotes.filter((quote) => quote.status === "returned").length,
@@ -41,7 +43,7 @@ function SalesDashboard({ user, quotes, onAction }: DashboardScreenProps) {
     <div className="dashboard">
       <DashboardHeading
         eyebrow={t("dashboard.salesEyebrow")}
-        title={t("dashboard.salesTitle", { name: user.name })}
+        title={t("dashboard.salesTitle", { name: displayUser.name })}
         description={t("dashboard.salesDescription")}
         action={<button className="button button--primary" type="button" onClick={() => onAction(t("dashboard.newQuote"))}>＋ {t("dashboard.newQuote")}</button>}
       />
@@ -64,16 +66,18 @@ function SalesDashboard({ user, quotes, onAction }: DashboardScreenProps) {
 }
 
 function ManagerDashboard({ user, quotes, onAction }: DashboardScreenProps) {
-  const { formatNumber, t } = useLocale();
+  const { formatNumber, locale, t } = useLocale();
+  const displayUser = localizeUser(user, locale);
   const pending = quotes.filter((quote) => quote.status === "pending_manager");
   const elevated = quotes.filter((quote) => getDiscountBand(quote.discount) !== "standard").length;
-  const teamMemberName = USERS.find((member) => user.teamMemberIds?.includes(member.id))?.name ?? "—";
+  const teamMember = USERS.find((member) => user.teamMemberIds?.includes(member.id));
+  const teamMemberName = teamMember ? localizeUser(teamMember, locale).name : "—";
 
   return (
     <div className="dashboard">
       <DashboardHeading
         eyebrow={t("dashboard.managerEyebrow")}
-        title={t("dashboard.managerTitle", { name: user.name })}
+        title={t("dashboard.managerTitle", { name: displayUser.name })}
         description={t("dashboard.managerDescription")}
       />
       <section className="metric-grid metric-grid--three" aria-label={t("dashboard.teamOverview")}>
@@ -99,7 +103,8 @@ function CeoDashboard({
   executiveQueue,
   onAction,
 }: DashboardScreenProps & { executiveQueue: Quote[] }) {
-  const { formatNumber, t } = useLocale();
+  const { formatNumber, locale, t } = useLocale();
+  const displayUser = localizeUser(user, locale);
   const approvedQuotes = quotes.filter((quote) => quote.status === "approved");
   const approvedValue = approvedQuotes.reduce((total, quote) => total + quote.pricing.total, 0);
 
@@ -107,7 +112,7 @@ function CeoDashboard({
     <div className="dashboard">
       <DashboardHeading
         eyebrow={t("dashboard.ceoEyebrow")}
-        title={t("dashboard.ceoTitle", { name: user.name })}
+        title={t("dashboard.ceoTitle", { name: displayUser.name })}
         description={t("dashboard.ceoDescription")}
       />
       <section className="executive-summary" aria-label={t("dashboard.executiveSummary")}>
@@ -192,7 +197,7 @@ function QuoteTable({
   onAction: (label: string, quote?: Quote) => void;
   showRisk?: boolean;
 }) {
-  const { formatDate, formatNumber, t } = useLocale();
+  const { formatDate, formatNumber, locale, t } = useLocale();
 
   return (
     <section className="table-card">
@@ -208,8 +213,10 @@ function QuoteTable({
             <span>{t("dashboard.quoteCustomer")}</span><span>{t("dashboard.owner")}</span><span>{t("dashboard.discount")}</span><span>{t("dashboard.taxIncludedTotal")}</span><span>{t("dashboard.status")}</span><span>{t("dashboard.action")}</span>
           </div>
           {quotes.map((quote) => {
-            const customer = CUSTOMERS.find((item) => item.id === quote.customerId);
-            const owner = USERS.find((item) => item.id === quote.salesId);
+            const sourceCustomer = CUSTOMERS.find((item) => item.id === quote.customerId);
+            const sourceOwner = USERS.find((item) => item.id === quote.salesId);
+            const customer = sourceCustomer ? localizeCustomer(sourceCustomer, locale) : undefined;
+            const owner = sourceOwner ? localizeUser(sourceOwner, locale) : undefined;
             const action = actionFor(role, quote);
             const actionLabel = t(action.labelKey);
             const band = getDiscountBand(quote.discount);

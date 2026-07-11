@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 
+import { localizeApprovalEvent, localizeBuilding, localizeCustomer, localizePackage, localizeUser } from "@/lib/display-data";
 import { BUILDINGS, CUSTOMERS, DEMO_TAX_RATE, PACKAGES, USERS } from "@/lib/mock-data";
 import type { ApprovalEvent, Building, Quote } from "@/lib/types";
 
@@ -31,17 +32,19 @@ export function QuotationScreen({ quote, onBack, onPrint, onViewHistory }: Quota
     );
   }
 
-  const customer = CUSTOMERS.find((item) => item.id === quote.customerId);
+  const sourceCustomer = CUSTOMERS.find((item) => item.id === quote.customerId);
+  const customer = sourceCustomer ? localizeCustomer(sourceCustomer, locale) : undefined;
   const brand = customer?.brands.find((item) => item.id === quote.brandId);
-  const owner = USERS.find((item) => item.id === quote.salesId);
+  const sourceOwner = USERS.find((item) => item.id === quote.salesId);
+  const owner = sourceOwner ? localizeUser(sourceOwner, locale) : undefined;
   const selectedPackages = quote.placementMode === "package"
-    ? PACKAGES.filter((item) => quote.placementIds.includes(item.id))
+    ? PACKAGES.filter((item) => quote.placementIds.includes(item.id)).map((item) => localizePackage(item, locale))
     : [];
   const selectedBuildings = quote.placementMode === "building"
-    ? BUILDINGS.filter((item) => quote.placementIds.includes(item.id))
+    ? BUILDINGS.filter((item) => quote.placementIds.includes(item.id)).map((item) => localizeBuilding(item, locale))
     : [];
   const resources = quote.placementMode === "package" ? selectedPackages : selectedBuildings;
-  const appendixBuildings = getAppendixBuildings(quote, selectedPackages);
+  const appendixBuildings = getAppendixBuildings(quote, selectedPackages).map((item) => localizeBuilding(item, locale));
   const traffic = resources.reduce((total, item) => total + item.traffic, 0);
   const impressions = resources.reduce((total, item) => total + item.impressions, 0);
   const issueDate = quote.approvedAt ?? quote.updatedAt;
@@ -72,7 +75,7 @@ export function QuotationScreen({ quote, onBack, onPrint, onViewHistory }: Quota
             <div><dt>{t("quotation.quoteNumber")}</dt><dd>{quote.quoteNumber}</dd></div>
             <div><dt>{t("quotation.issueDate")}</dt><dd>{formatDate(issueDate)}</dd></div>
             <div><dt>{t("quotation.version")}</dt><dd>V{quote.version}</dd></div>
-            <div><dt>{t("quotation.currency")}</dt><dd>{t("quotation.currencyCny")}</dd></div>
+            <div><dt>{t("quotation.currency")}</dt><dd>{t("quotation.currencyIdr")}</dd></div>
           </dl>
         </section>
 
@@ -99,7 +102,7 @@ export function QuotationScreen({ quote, onBack, onPrint, onViewHistory }: Quota
                     <td><strong>{resource.name}</strong><small>{resource.category}</small></td>
                     <td>{t(quote.placementMode === "package" ? "quotation.package" : "quotation.building")}<small>{resource.location}</small></td>
                     <td>{formatNumber(quote.weeks)} {t("wizard.weekUnit")}</td>
-                    <td className="align-right"><Money amount={Math.round(resource.priceRmb * (quote.weeks / 4))} /></td>
+                    <td className="align-right"><Money amount={Math.round(resource.priceIdr * (quote.weeks / 4))} /></td>
                   </tr>
                 ))}
               </tbody>
@@ -159,14 +162,17 @@ export function QuotationScreen({ quote, onBack, onPrint, onViewHistory }: Quota
             <table className="quotation-table">
               <thead><tr><th>{t("quotation.approvalAction")}</th><th>{t("quotation.approver")}</th><th>{t("quotation.version")}</th><th>{t("quotation.timeComment")}</th></tr></thead>
               <tbody>
-                {quote.approvalHistory.map((event) => (
-                  <tr key={event.id}>
-                    <td><strong>{t(approvalActionLabel(event))}</strong></td>
-                    <td>{event.actorName}<small>{t(approvalRoleLabel(event))}</small></td>
-                    <td>V{event.version}</td>
-                    <td>{dateTimeFormatter.format(new Date(event.createdAt))}{event.comment ? <small>{event.comment}</small> : null}</td>
-                  </tr>
-                ))}
+                {quote.approvalHistory.map((event) => {
+                  const displayEvent = localizeApprovalEvent(event, locale);
+                  return (
+                    <tr key={displayEvent.id}>
+                      <td><strong>{t(approvalActionLabel(displayEvent))}</strong></td>
+                      <td>{displayEvent.actorName}<small>{t(approvalRoleLabel(displayEvent))}</small></td>
+                      <td>V{displayEvent.version}</td>
+                      <td>{dateTimeFormatter.format(new Date(displayEvent.createdAt))}{displayEvent.comment ? <small>{displayEvent.comment}</small> : null}</td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>

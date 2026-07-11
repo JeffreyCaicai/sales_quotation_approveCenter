@@ -27,9 +27,10 @@ export function StatusBadge({ status }: { status: QuoteStatus }) {
 
 export function Money({ amount, compact = false }: { amount: number; compact?: boolean }) {
   const { formatMoney, locale } = useLocale();
-  const compactFormatter = useMemo(() => new Intl.NumberFormat(locale, {
+  const compactFormatter = useMemo(() => new Intl.NumberFormat(locale === "en" ? "en-ID" : locale, {
     style: "currency",
-    currency: "CNY",
+    currency: "IDR",
+    currencyDisplay: "symbol",
     notation: "compact",
     maximumFractionDigits: 1,
   }), [locale]);

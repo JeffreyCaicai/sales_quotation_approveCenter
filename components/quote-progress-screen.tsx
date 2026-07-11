@@ -1,3 +1,4 @@
+import { localizeApprovalEvent } from "@/lib/display-data";
 import type { ApprovalEvent, Quote } from "@/lib/types";
 
 import { useLocale } from "./locale-provider";
@@ -12,8 +13,9 @@ interface QuoteProgressScreenProps {
 }
 
 export function QuoteProgressScreen({ quote, backLabel, onBack, onEdit }: QuoteProgressScreenProps) {
-  const { t } = useLocale();
-  const latestReturn = getLatestReturn(quote.approvalHistory);
+  const { locale, t } = useLocale();
+  const sourceLatestReturn = getLatestReturn(quote.approvalHistory);
+  const latestReturn = sourceLatestReturn ? localizeApprovalEvent(sourceLatestReturn, locale) : undefined;
   const isReturned = quote.status === "returned";
   const isApproved = quote.status === "approved";
 

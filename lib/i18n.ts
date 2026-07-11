@@ -333,7 +333,7 @@ interface Dictionary {
     issueDate: string;
     version: string;
     currency: string;
-    currencyCny: string;
+    currencyIdr: string;
     clientAndBrand: string;
     customer: string;
     brand: string;
@@ -465,7 +465,7 @@ export const translations: Record<Locale, Dictionary> = {
       openUserMenu: "Open user menu",
       reset: "Reset sample data",
       logout: "Leave role",
-      demoNotice: "Demo environment: customers, buildings, traffic, impressions, and CNY prices are sample data.",
+      demoNotice: "Demo environment: customers, buildings, traffic, impressions, and IDR prices are sample data. Demo conversion: CNY 1 = IDR 2,662.",
       restore: "Restore initial data",
       mobileNavigation: "Mobile navigation",
       account: "Account",
@@ -575,7 +575,7 @@ export const translations: Record<Locale, Dictionary> = {
       cancel: "Cancel", previous: "Previous", next: "Next", resubmit: "Resubmit for approval", submitManager: "Submit to Sales Manager",
       liveSummary: "Live quotation summary", livePricing: "Live pricing", demo: "Sample", basePrice: "Rate Card base price",
       discountDeduction: "Discount ({discount}%)", netPrice: "Net price after discount", simulatedTax: "Simulated tax ({tax}%)", totalWithTax: "Total incl. tax",
-      demoNotice: "CNY prices, traffic, impressions, and the 6% tax rate are sample values.",
+      demoNotice: "IDR prices, traffic, impressions, and the 6% tax rate are sample values.",
     },
     approval: {
       back: "Back to dashboard", eyebrow: "Approval Review", title: "Quotation approval details", version: "Version V{version}",
@@ -586,7 +586,7 @@ export const translations: Record<Locale, Dictionary> = {
       riskElevated: "Above the standard range. Review the business rationale; the Sales Manager can complete approval.",
       riskExecutive: "Above 70%; final CEO approval is required after the Sales Manager.", pricingSummary: "Pricing Summary", calculationDetails: "Calculation details",
       basePrice: "Rate Card original price", discountDeduction: "Discount deduction ({discount}%)", netPrice: "Net price after discount",
-      simulatedTax: "Simulated tax ({tax}%)", totalWithTax: "Total incl. tax", demoNotice: "CNY amounts and the tax rate are prototype sample data.",
+      simulatedTax: "Simulated tax ({tax}%)", totalWithTax: "Total incl. tax", demoNotice: "IDR amounts and the tax rate are prototype sample data.",
       actions: "Approval actions", approve: "Approve quotation", return: "Return for revision", readOnly: "This quotation is not at your approval stage and is read-only.",
       returnTitle: "Return quotation for revision", approveTitle: "Confirm quotation approval", close: "Close dialog", returnReason: "Reason for return", required: "Required",
       returnPlaceholder: "Explain what Sales needs to revise or add", returnHelp: "This reason will be recorded in the approval timeline and shared with Sales.",
@@ -612,14 +612,14 @@ export const translations: Record<Locale, Dictionary> = {
       toolbar: "Formal quotation actions", back: "Back to dashboard", viewHistory: "View version history", print: "Print / Export PDF",
       restrictedEyebrow: "Approval is not complete", restrictedTitle: "Formal quotation unavailable", restrictedHelp: "Only approved quotations can generate, display, or print the formal Quotation.",
       workspace: "QUOTATION WORKSPACE", formalDocument: "Formal commercial document · Sample data", title: "QUOTATION", subtitle: "Quotation",
-      reference: "Quotation information", quoteNumber: "Quotation number", issueDate: "Issue date", version: "Quotation version", currency: "Currency", currencyCny: "CNY · Chinese yuan",
+      reference: "Quotation information", quoteNumber: "Quotation number", issueDate: "Issue date", version: "Quotation version", currency: "Currency", currencyIdr: "IDR · Indonesian rupiah",
       clientAndBrand: "Customer & brand", customer: "Customer", brand: "Brand", salesOwner: "Sales owner", campaignPeriod: "Campaign period", periodValue: "{weeks} consecutive weeks from schedule confirmation",
       resourcesAndItems: "Placement resources & quotation items", item: "Item", typeRegion: "Type / Area", period: "Period", campaignAmount: "Campaign amount", building: "Building", package: "Sales package",
       deliveryMetrics: "Delivery and audience metrics", dailyTraffic: "Daily traffic", monthlyImpressions: "Monthly impressions", occurrenceUnit: "times",
       priceDetails: "Price details", basePrice: "Rate Card base price", discountDeduction: "Discount deduction ({discount}%)", netPrice: "Net price after discount",
       simulatedTax: "Simulated tax ({tax}%)", totalWithTax: "Total incl. tax", terms: "Quotation terms",
       termValidity: "This quotation is valid for 15 calendar days from its issue date. Final scheduling is subject to written confirmation by both parties.",
-      termRateCard: "Rate Card uses a four-week pricing unit; Spot and Bonus confirm scheduling.", termCurrencyTax: "All amounts are in CNY and include {tax}% simulated tax.",
+      termRateCard: "Rate Card uses a four-week pricing unit; Spot and Bonus confirm scheduling.", termCurrencyTax: "All amounts are in IDR and include {tax}% simulated tax. Demo conversion: CNY 1 = IDR 2,662.",
       termDemo: "Customers, buildings, traffic, impressions, prices, and tax rates in this document are sample data.", appendix: "Building detail appendix", buildingColumn: "Building", regionType: "Area / Type",
       approvalRecord: "Approval record", approvalAction: "Approval action", approver: "Approver", timeComment: "Time / Comment", approved: "APPROVED",
       approvedNotice: "This quotation has completed all required approvals.", demoFooter: "Quotation Approval Center · Sample data",
@@ -714,7 +714,7 @@ export const translations: Record<Locale, Dictionary> = {
       openUserMenu: "打开用户菜单",
       reset: "重置演示数据",
       logout: "退出角色",
-      demoNotice: "当前为演示环境：客户、楼宇、流量、曝光及人民币价格均为模拟数据。",
+      demoNotice: "当前为演示环境：客户、楼宇、流量、曝光及印尼盾价格均为模拟数据。演示换算率：1 人民币 = 2,662 印尼盾。",
       restore: "恢复初始数据",
       mobileNavigation: "移动端导航",
       account: "账户",
@@ -813,14 +813,14 @@ export const translations: Record<Locale, Dictionary> = {
       completeInformation: "请先完善以下信息", parameters: "投放参数", approvalPath: "审批路径", notSelected: "未选择", reviewNotice: "提交后报价将锁定当前版本并进入销售主管审批。高于 70% 的折扣经主管通过后再流转 CEO。",
       cancel: "取消", previous: "上一步", next: "下一步", resubmit: "重新提交审批", submitManager: "提交销售主管审批", liveSummary: "实时报价摘要", livePricing: "实时价格",
       demo: "模拟", basePrice: "Rate Card 基础价", discountDeduction: "折扣（{discount}%）", netPrice: "折后净价", simulatedTax: "模拟税费（{tax}%）", totalWithTax: "含税总额",
-      demoNotice: "人民币价格、流量、曝光与 6% 税率均为演示模拟值。",
+      demoNotice: "印尼盾价格、流量、曝光与 6% 税率均为演示模拟值。",
     },
     approval: {
       back: "返回工作台", eyebrow: "审批审核", title: "报价审批详情", version: "版本 V{version}", clientAndBrand: "客户与品牌", commercialSubject: "本次商业报价主体", customer: "客户",
       brand: "品牌", owner: "负责人", parameters: "投放参数", unknownBrand: "未知品牌", resources: "投放资源", versionAndHistory: "版本与审批记录", versionHelp: "按版本核对商业快照与审批时间线",
       discountRisk: "折扣风险", riskStandard: "处于标准折扣区间，主管可完成最终审批。", riskElevated: "高于标准区间，请重点核对商业依据；主管可最终批准。",
       riskExecutive: "高于 70%，主管批准后仍需 CEO 最终审批。", pricingSummary: "价格摘要", calculationDetails: "计算明细", basePrice: "Rate Card 原价",
-      discountDeduction: "折扣减免 ({discount}%)", netPrice: "折后净价", simulatedTax: "模拟税费 ({tax}%)", totalWithTax: "含税总额", demoNotice: "人民币金额与税率均为原型模拟数据。",
+      discountDeduction: "折扣减免 ({discount}%)", netPrice: "折后净价", simulatedTax: "模拟税费 ({tax}%)", totalWithTax: "含税总额", demoNotice: "印尼盾金额与税率均为原型模拟数据。",
       actions: "审批操作", approve: "批准报价", return: "退回修改", readOnly: "当前报价不在你的审批节点，仅供查看。", returnTitle: "退回报价修改", approveTitle: "确认批准报价",
       close: "关闭弹窗", returnReason: "退回原因", required: "必填", returnPlaceholder: "说明需要销售修改或补充的内容", returnHelp: "该原因会写入审批时间线并同步给销售。",
       approveToCeo: "流转至 CEO 最终审批", approveFinal: "完成本版本的最终审批", approvalRecordNotice: "批准后将{outcome}。此操作会写入审批记录。", cancel: "取消",
@@ -843,12 +843,12 @@ export const translations: Record<Locale, Dictionary> = {
       toolbar: "正式报价操作", back: "返回工作台", viewHistory: "查看版本记录", print: "打印 / 导出 PDF", restrictedEyebrow: "报价尚未完成审批",
       restrictedTitle: "正式报价暂不可用", restrictedHelp: "只有状态为“已批准”的报价可以生成、查看或打印正式 Quotation。", workspace: "报价工作台",
       formalDocument: "正式商业文件 · 模拟数据", title: "QUOTATION", subtitle: "报价单", reference: "报价信息", quoteNumber: "报价编号", issueDate: "报价日期",
-      version: "报价版本", currency: "币种", currencyCny: "人民币 CNY", clientAndBrand: "客户与品牌", customer: "客户", brand: "品牌", salesOwner: "销售负责人",
+      version: "报价版本", currency: "币种", currencyIdr: "印尼盾 IDR", clientAndBrand: "客户与品牌", customer: "客户", brand: "品牌", salesOwner: "销售负责人",
       campaignPeriod: "投放周期", periodValue: "自排期确认日起连续 {weeks} 周", resourcesAndItems: "投放资源与报价项目", item: "项目", typeRegion: "类型 / 区域", period: "周期",
       campaignAmount: "投放金额", building: "楼宇", package: "销售包", deliveryMetrics: "投放与受众指标", dailyTraffic: "日均流量", monthlyImpressions: "月曝光", occurrenceUnit: "次",
       priceDetails: "价格明细", basePrice: "Rate Card 基础价", discountDeduction: "折扣减免（{discount}%）", netPrice: "折后净价", simulatedTax: "模拟税费（{tax}%）",
       totalWithTax: "含税总额", terms: "报价条款", termValidity: "本报价自报价日期起 15 个自然日内有效，最终排期以双方书面确认为准。",
-      termRateCard: "Rate Card 以 4 周为计价单位；Spot 与 Bonus 用于排期确认。", termCurrencyTax: "所有金额均以人民币计价，并包含 {tax}% 模拟税费。",
+      termRateCard: "Rate Card 以 4 周为计价单位；Spot 与 Bonus 用于排期确认。", termCurrencyTax: "所有金额均以印尼盾计价，并包含 {tax}% 模拟税费。演示换算率：1 人民币 = 2,662 印尼盾。",
       termDemo: "本文件中的客户、楼宇、流量、曝光、价格与税率均为演示模拟数据。", appendix: "楼宇明细附录", buildingColumn: "楼宇", regionType: "区域 / 类型",
       approvalRecord: "审批记录", approvalAction: "审批动作", approver: "审批人", timeComment: "时间 / 意见", approved: "APPROVED", approvedNotice: "本报价已完成所需审批流程",
       demoFooter: "报价审批中心 · 模拟数据",
@@ -921,9 +921,11 @@ export function translate(
 }
 
 export function formatMoney(locale: Locale, value: number): string {
-  return new Intl.NumberFormat(locale, {
+  return new Intl.NumberFormat(locale === "en" ? "en-ID" : locale, {
     style: "currency",
-    currency: "CNY",
+    currency: "IDR",
+    currencyDisplay: "symbol",
+    maximumFractionDigits: 0,
   }).format(value);
 }
 

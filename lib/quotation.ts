@@ -189,7 +189,7 @@ export function validateQuoteReferences(
     && (input.weeks ?? 0) > 0
   ) {
     const expectedBasePrice = Math.round(
-      selectedResources.reduce((total, resource) => total + resource.priceRmb, 0)
+      selectedResources.reduce((total, resource) => total + resource.priceIdr, 0)
       * ((input.weeks ?? 0) / 4),
     );
     if (!Number.isFinite(input.basePrice) || input.basePrice !== expectedBasePrice) {

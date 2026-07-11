@@ -46,7 +46,7 @@ export interface Building extends DemoRecord {
   category: string;
   traffic: number;
   impressions: number;
-  priceRmb: number;
+  priceIdr: number;
 }
 
 export interface SalesPackage extends DemoRecord {
@@ -58,7 +58,7 @@ export interface SalesPackage extends DemoRecord {
   category: string;
   traffic: number;
   impressions: number;
-  priceRmb: number;
+  priceIdr: number;
 }
 
 interface ApprovalEventBase {

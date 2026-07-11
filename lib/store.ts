@@ -10,7 +10,7 @@ import type {
   Role,
 } from "./types.ts";
 
-const STORAGE_KEY = "quotation-prototype-v1";
+const STORAGE_KEY = "quotation-prototype-v2";
 const ROLES: Role[] = ["sales", "manager", "ceo"];
 const STATUSES: QuoteStatus[] = ["draft", "pending_manager", "pending_ceo", "returned", "approved"];
 const ACTIONS: ApprovalAction[] = ["submitted", "resubmitted", "approved", "returned"];
@@ -175,7 +175,7 @@ function isVersionSnapshotArrayValid(
     if (selected.some((resource) => !resource)) return false;
 
     const expectedBasePrice = Math.round(
-      selected.reduce((total, resource) => total + (resource?.priceRmb ?? 0), 0)
+      selected.reduce((total, resource) => total + (resource?.priceIdr ?? 0), 0)
       * (snapshot.weeks / 4),
     );
     const expectedPricing = calculatePricing({ basePrice: expectedBasePrice, discount: snapshot.discount });
@@ -258,7 +258,7 @@ function isCurrentCommercialStateValid(quote: Quote, isEditable: boolean): boole
 
   const expectedBasePrice = quote.weeks > 0
     ? Math.round(
-        selected.reduce((total, resource) => total + (resource?.priceRmb ?? 0), 0)
+        selected.reduce((total, resource) => total + (resource?.priceIdr ?? 0), 0)
         * (quote.weeks / 4),
       )
     : 0;

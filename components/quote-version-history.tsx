@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 
+import { localizeApprovalEvent, localizeBuilding, localizeCustomer, localizePackage } from "@/lib/display-data";
 import { BUILDINGS, CUSTOMERS, PACKAGES } from "@/lib/mock-data";
 import type { ApprovalEvent, Quote, QuoteVersionSnapshot } from "@/lib/types";
 
@@ -47,11 +48,12 @@ function SnapshotSummary({ snapshot }: { snapshot: QuoteVersionSnapshot }) {
   const dateTimeFormatter = useMemo(() => new Intl.DateTimeFormat(locale, {
     year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit",
   }), [locale]);
-  const customer = CUSTOMERS.find((item) => item.id === snapshot.customerId);
+  const sourceCustomer = CUSTOMERS.find((item) => item.id === snapshot.customerId);
+  const customer = sourceCustomer ? localizeCustomer(sourceCustomer, locale) : undefined;
   const brand = customer?.brands.find((item) => item.id === snapshot.brandId);
   const resources = snapshot.placementMode === "package"
-    ? PACKAGES.filter((item) => snapshot.placementIds.includes(item.id))
-    : BUILDINGS.filter((item) => snapshot.placementIds.includes(item.id));
+    ? PACKAGES.filter((item) => snapshot.placementIds.includes(item.id)).map((item) => localizePackage(item, locale))
+    : BUILDINGS.filter((item) => snapshot.placementIds.includes(item.id)).map((item) => localizeBuilding(item, locale));
 
   return (
     <section className="version-record__snapshot" aria-labelledby={`version-${snapshot.version}-heading`}>
@@ -76,6 +78,7 @@ function SnapshotSummary({ snapshot }: { snapshot: QuoteVersionSnapshot }) {
 
 function TimelineEvent({ event }: { event: ApprovalEvent }) {
   const { locale, t } = useLocale();
+  const displayEvent = localizeApprovalEvent(event, locale);
   const dateTimeFormatter = useMemo(() => new Intl.DateTimeFormat(locale, {
     year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit",
   }), [locale]);
@@ -83,12 +86,12 @@ function TimelineEvent({ event }: { event: ApprovalEvent }) {
 
   return (
     <li>
-      <span className={`approval-timeline__marker approval-timeline__marker--${event.action}`} aria-hidden="true" />
+      <span className={`approval-timeline__marker approval-timeline__marker--${displayEvent.action}`} aria-hidden="true" />
       <div>
-        <span><strong>{t(labels[event.action])}</strong><small>V{event.version}</small></span>
-        <p>{event.actorName} · {t(roleLabel(event.role))}</p>
-        {event.comment ? <blockquote>{event.comment}</blockquote> : null}
-        <time dateTime={event.createdAt}>{dateTimeFormatter.format(new Date(event.createdAt))}</time>
+        <span><strong>{t(labels[displayEvent.action])}</strong><small>V{displayEvent.version}</small></span>
+        <p>{displayEvent.actorName} · {t(roleLabel(displayEvent.role))}</p>
+        {displayEvent.comment ? <blockquote>{displayEvent.comment}</blockquote> : null}
+        <time dateTime={displayEvent.createdAt}>{dateTimeFormatter.format(new Date(displayEvent.createdAt))}</time>
       </div>
     </li>
   );

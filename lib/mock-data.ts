@@ -2,7 +2,12 @@ import { calculatePricing } from "./quotation.ts";
 import type { Building, Customer, Quote, SalesPackage, User } from "./types.ts";
 
 export const DEMO_TAX_RATE = 0.06;
-export const DEMO_DATA_NOTICE = "以下客户、楼宇、流量、曝光与人民币价格均为模拟数据，仅用于原型演示。";
+export const DEMO_CNY_TO_IDR_RATE = 2_662;
+export const DEMO_DATA_NOTICE = "以下客户、楼宇、流量、曝光与印尼盾价格均为模拟数据，仅用于原型演示。";
+
+export function toDemoIdr(cnyAmount: number): number {
+  return Math.round(cnyAmount * DEMO_CNY_TO_IDR_RATE);
+}
 
 export const USERS: User[] = [
   { id: "sales-chen", name: "陈晨", role: "sales", title: "雅加达客户经理", isDemoData: true },
@@ -66,7 +71,7 @@ export const BUILDINGS: Building[] = [
     category: "高端商场",
     traffic: 38_000,
     impressions: 720_000,
-    priceRmb: 128_000,
+    priceIdr: toDemoIdr(128_000),
     isDemoData: true,
   },
   {
@@ -76,7 +81,7 @@ export const BUILDINGS: Building[] = [
     category: "甲级写字楼",
     traffic: 18_500,
     impressions: 365_000,
-    priceRmb: 92_000,
+    priceIdr: toDemoIdr(92_000),
     isDemoData: true,
   },
   {
@@ -86,7 +91,7 @@ export const BUILDINGS: Building[] = [
     category: "甲级写字楼",
     traffic: 17_200,
     impressions: 338_000,
-    priceRmb: 86_000,
+    priceIdr: toDemoIdr(86_000),
     isDemoData: true,
   },
   {
@@ -96,7 +101,7 @@ export const BUILDINGS: Building[] = [
     category: "企业总部",
     traffic: 16_800,
     impressions: 326_000,
-    priceRmb: 89_000,
+    priceIdr: toDemoIdr(89_000),
     isDemoData: true,
   },
   {
@@ -106,7 +111,7 @@ export const BUILDINGS: Building[] = [
     category: "城市综合体",
     traffic: 52_000,
     impressions: 910_000,
-    priceRmb: 118_000,
+    priceIdr: toDemoIdr(118_000),
     isDemoData: true,
   },
   {
@@ -116,7 +121,7 @@ export const BUILDINGS: Building[] = [
     category: "甲级写字楼",
     traffic: 14_900,
     impressions: 284_000,
-    priceRmb: 78_000,
+    priceIdr: toDemoIdr(78_000),
     isDemoData: true,
   },
   {
@@ -126,7 +131,7 @@ export const BUILDINGS: Building[] = [
     category: "商务综合体",
     traffic: 20_600,
     impressions: 402_000,
-    priceRmb: 96_000,
+    priceIdr: toDemoIdr(96_000),
     isDemoData: true,
   },
   {
@@ -136,7 +141,7 @@ export const BUILDINGS: Building[] = [
     category: "高端商场",
     traffic: 43_000,
     impressions: 790_000,
-    priceRmb: 112_000,
+    priceIdr: toDemoIdr(112_000),
     isDemoData: true,
   },
 ];
@@ -151,7 +156,7 @@ export const PACKAGES: SalesPackage[] = [
     category: "商务核心",
     traffic: 73_700,
     impressions: 1_423_000,
-    priceRmb: 276_000,
+    priceIdr: toDemoIdr(276_000),
     isDemoData: true,
   },
   {
@@ -163,7 +168,7 @@ export const PACKAGES: SalesPackage[] = [
     category: "生活方式",
     traffic: 87_500,
     impressions: 1_596_000,
-    priceRmb: 248_000,
+    priceIdr: toDemoIdr(248_000),
     isDemoData: true,
   },
   {
@@ -180,7 +185,7 @@ export const PACKAGES: SalesPackage[] = [
     category: "旗舰全域",
     traffic: 149_800,
     impressions: 2_746_000,
-    priceRmb: 386_000,
+    priceIdr: toDemoIdr(386_000),
     isDemoData: true,
   },
 ];
@@ -198,7 +203,7 @@ export const SEEDED_QUOTES: Quote[] = [
     spots: 160,
     bonus: 16,
     discount: 65,
-    pricing: calculatePricing({ basePrice: 246_000, discount: 65, taxRate: DEMO_TAX_RATE }),
+    pricing: calculatePricing({ basePrice: toDemoIdr(246_000), discount: 65, taxRate: DEMO_TAX_RATE }),
     status: "returned",
     version: 1,
     versionSnapshots: [
@@ -212,7 +217,7 @@ export const SEEDED_QUOTES: Quote[] = [
         spots: 160,
         bonus: 16,
         discount: 65,
-        pricing: calculatePricing({ basePrice: 246_000, discount: 65, taxRate: DEMO_TAX_RATE }),
+        pricing: calculatePricing({ basePrice: toDemoIdr(246_000), discount: 65, taxRate: DEMO_TAX_RATE }),
         traffic: 90_000,
         impressions: 1_630_000,
         submittedAt: "2026-07-02T02:15:00.000Z",
@@ -255,7 +260,7 @@ export const SEEDED_QUOTES: Quote[] = [
     spots: 240,
     bonus: 24,
     discount: 50,
-    pricing: calculatePricing({ basePrice: 414_000, discount: 50, taxRate: DEMO_TAX_RATE }),
+    pricing: calculatePricing({ basePrice: toDemoIdr(414_000), discount: 50, taxRate: DEMO_TAX_RATE }),
     status: "pending_manager",
     version: 1,
     versionSnapshots: [
@@ -269,7 +274,7 @@ export const SEEDED_QUOTES: Quote[] = [
         spots: 240,
         bonus: 24,
         discount: 50,
-        pricing: calculatePricing({ basePrice: 414_000, discount: 50, taxRate: DEMO_TAX_RATE }),
+        pricing: calculatePricing({ basePrice: toDemoIdr(414_000), discount: 50, taxRate: DEMO_TAX_RATE }),
         traffic: 73_700,
         impressions: 1_423_000,
         submittedAt: "2026-07-05T03:30:00.000Z",
@@ -302,7 +307,7 @@ export const SEEDED_QUOTES: Quote[] = [
     spots: 320,
     bonus: 40,
     discount: 75,
-    pricing: calculatePricing({ basePrice: 772_000, discount: 75, taxRate: DEMO_TAX_RATE }),
+    pricing: calculatePricing({ basePrice: toDemoIdr(772_000), discount: 75, taxRate: DEMO_TAX_RATE }),
     status: "pending_ceo",
     version: 1,
     versionSnapshots: [
@@ -316,7 +321,7 @@ export const SEEDED_QUOTES: Quote[] = [
         spots: 320,
         bonus: 40,
         discount: 75,
-        pricing: calculatePricing({ basePrice: 772_000, discount: 75, taxRate: DEMO_TAX_RATE }),
+        pricing: calculatePricing({ basePrice: toDemoIdr(772_000), discount: 75, taxRate: DEMO_TAX_RATE }),
         traffic: 149_800,
         impressions: 2_746_000,
         submittedAt: "2026-07-06T01:10:00.000Z",
@@ -359,7 +364,7 @@ export const SEEDED_QUOTES: Quote[] = [
     spots: 180,
     bonus: 18,
     discount: 58,
-    pricing: calculatePricing({ basePrice: 248_000, discount: 58, taxRate: DEMO_TAX_RATE }),
+    pricing: calculatePricing({ basePrice: toDemoIdr(248_000), discount: 58, taxRate: DEMO_TAX_RATE }),
     status: "approved",
     version: 1,
     versionSnapshots: [
@@ -373,7 +378,7 @@ export const SEEDED_QUOTES: Quote[] = [
         spots: 180,
         bonus: 18,
         discount: 58,
-        pricing: calculatePricing({ basePrice: 248_000, discount: 58, taxRate: DEMO_TAX_RATE }),
+        pricing: calculatePricing({ basePrice: toDemoIdr(248_000), discount: 58, taxRate: DEMO_TAX_RATE }),
         traffic: 87_500,
         impressions: 1_596_000,
         submittedAt: "2026-07-01T02:00:00.000Z",
