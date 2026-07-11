@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import test from "node:test";
 
 import {
@@ -207,6 +207,23 @@ test("English-first metadata contains no Chinese default copy", () => {
   }
 });
 
+test("every production app and component TypeScript file contains no Chinese UI copy", () => {
+  const productionSources = [
+    ...typeScriptSources(new URL("../app/", import.meta.url)),
+    ...typeScriptSources(new URL("../components/", import.meta.url)),
+  ];
+
+  assert.ok(productionSources.length > 0);
+  for (const sourceUrl of productionSources) {
+    const source = readFileSync(sourceUrl, "utf8");
+    assert.doesNotMatch(
+      source,
+      /[\u3400-\u9fff]/,
+      `${sourceUrl.pathname} contains Chinese UI copy outside the dictionary and mock data`,
+    );
+  }
+});
+
 test("domain and persistence guards contain no locale-bound error copy", () => {
   const quotationDomain = readFileSync(new URL("../lib/quotation.ts", import.meta.url), "utf8");
   const quotationApp = readFileSync(new URL("../components/quotation-app.tsx", import.meta.url), "utf8");
@@ -252,6 +269,14 @@ function dictionaryLeaves(value: unknown, prefix = ""): Record<string, string> {
     ...leaves,
     ...dictionaryLeaves(child, prefix ? `${prefix}.${key}` : key),
   }), {});
+}
+
+function typeScriptSources(directory: URL): URL[] {
+  return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+    const entryUrl = new URL(entry.name, directory);
+    if (entry.isDirectory()) return typeScriptSources(new URL(`${entry.name}/`, directory));
+    return entry.isFile() && /\.tsx?$/.test(entry.name) ? [entryUrl] : [];
+  });
 }
 
 class MemoryStorage implements Storage {
