@@ -110,6 +110,20 @@ enforce explicit server-side membership or allowlist checks.
   runner.
 - `npm run build`: type-check and create the production Next.js build.
 
+## Building Identity Operations
+
+- The Building Team allocates and governs permanent, unique IRIS Building IDs.
+  An identifier is never reused, renamed, or deleted; a building that leaves
+  operation is deactivated so its identity and commercial history remain.
+- Sales Operations uploads and publishes only approved building-master and
+  Rate Card files under the applicable permissions.
+- ERP Building ID is an optional external mapping. A blank ERP mapping leaves
+  an active building eligible for new Rate Cards, and adding the mapping later
+  updates the same building UUID rather than creating a replacement identity.
+- New Rate Card prices and package memberships resolve IRIS Building IDs to
+  active building UUIDs. Deactivation blocks new references but does not alter
+  published Rate Cards or their historical package membership.
+
 ## Learn More
 
 - [Next.js Documentation](https://nextjs.org/docs)
