@@ -34,11 +34,14 @@
 - Modify: `package.json`
 - Modify: `package-lock.json`
 - Modify: `next.config.ts`
+- Modify: `tsconfig.json`
 - Modify: `db/index.ts`
 - Delete: `worker/index.ts`
 - Delete: `vite.config.ts`
 - Delete: `build/sites-vite-plugin.ts`
 - Delete: `.openai/hosting.json`
+- Delete: `examples/d1/app/api/notes/route.ts`
+- Delete: `examples/d1/db/schema.ts`
 - Create: `tests/runtime-config.test.ts`
 - Create: `vitest.config.ts`
 

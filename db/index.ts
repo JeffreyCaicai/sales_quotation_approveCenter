@@ -1,13 +1,17 @@
-import { env } from "cloudflare:workers";
-import { drizzle } from "drizzle-orm/d1";
+import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres";
+import { Pool } from "pg";
 import * as schema from "./schema";
 
-export function getDb() {
-  if (!env.DB) {
-    throw new Error(
-      "Cloudflare D1 binding `DB` is unavailable. Set the `d1` field in .openai/hosting.json to `DB` or let your control plane inject the real binding values before using the database."
-    );
-  }
+let pool: Pool | undefined;
 
-  return drizzle(env.DB, { schema });
+export function getDb(): NodePgDatabase<typeof schema> {
+  const connectionString = process.env.DATABASE_URL;
+  if (!connectionString) throw new Error("DATABASE_URL is required");
+  pool ??= new Pool({ connectionString, max: 10 });
+  return drizzle(pool, { schema });
+}
+
+export async function closeDb(): Promise<void> {
+  await pool?.end();
+  pool = undefined;
 }
