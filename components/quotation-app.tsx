@@ -111,10 +111,10 @@ function QuotationWorkspace() {
     persistQuote(draft, wizard?.initialQuote);
     setWizard(null);
     setPlaceholder({
-      title: "草稿已保存",
+      title: t("outcome.draftSavedTitle"),
       message: draft.status === "returned"
-        ? `${draft.quoteNumber} 的修改已保存，可继续完善后重新提交。`
-        : `${draft.quoteNumber} 已保存到“我的报价”。`,
+        ? t("outcome.returnedDraftSavedMessage", { number: draft.quoteNumber })
+        : t("outcome.draftSavedMessage", { number: draft.quoteNumber }),
     });
   };
 
@@ -124,8 +124,8 @@ function QuotationWorkspace() {
     persistQuote(quote, wizard?.initialQuote);
     setWizard(null);
     setPlaceholder({
-      title: wizard?.initialQuote?.status === "returned" ? "报价已重新提交" : "报价已提交",
-      message: `${quote.quoteNumber} 已进入销售主管审批。`,
+      title: t(wizard?.initialQuote?.status === "returned" ? "outcome.resubmittedTitle" : "outcome.submittedTitle"),
+      message: t("outcome.submittedMessage", { number: quote.quoteNumber }),
     });
   };
 
@@ -145,10 +145,10 @@ function QuotationWorkspace() {
     persistQuote(nextQuote, approvalQuote);
     setApprovalQuoteId(null);
     setPlaceholder({
-      title: nextQuote.status === "pending_ceo" ? "已提交 CEO 审批" : "报价已批准",
+      title: t(nextQuote.status === "pending_ceo" ? "outcome.sentToCeoTitle" : "outcome.approvedTitle"),
       message: nextQuote.status === "pending_ceo"
-        ? `${nextQuote.quoteNumber} 已完成主管审批，现进入 CEO 最终审批。`
-        : `${nextQuote.quoteNumber} 已完成最终审批。`,
+        ? t("outcome.sentToCeoMessage", { number: nextQuote.quoteNumber })
+        : t("outcome.approvedMessage", { number: nextQuote.quoteNumber }),
     });
   };
 
@@ -158,8 +158,8 @@ function QuotationWorkspace() {
     persistQuote(nextQuote, approvalQuote);
     setApprovalQuoteId(null);
     setPlaceholder({
-      title: "报价已退回",
-      message: `${nextQuote.quoteNumber} 已退回销售修改，原因已写入审批记录。`,
+      title: t("outcome.returnedTitle"),
+      message: t("outcome.returnedMessage", { number: nextQuote.quoteNumber }),
     });
   };
 

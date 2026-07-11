@@ -139,6 +139,20 @@ interface Dictionary {
     close: string;
     acknowledge: string;
   };
+  outcome: {
+    draftSavedTitle: string;
+    returnedDraftSavedMessage: string;
+    draftSavedMessage: string;
+    resubmittedTitle: string;
+    submittedTitle: string;
+    submittedMessage: string;
+    sentToCeoTitle: string;
+    approvedTitle: string;
+    sentToCeoMessage: string;
+    approvedMessage: string;
+    returnedTitle: string;
+    returnedMessage: string;
+  };
   placeholder: {
     withQuote: string;
     generic: string;
@@ -234,7 +248,7 @@ export const translations: Record<Locale, Dictionary> = {
       metricRisk: "At-risk quotations",
       metricRiskNote: "Discount above the standard range",
       metricTeam: "Team quotations",
-      metricTeamNote: "Chen Chen · This month",
+      metricTeamNote: "{name} · This month",
       teamQueue: "Team quotation queue",
       teamQueueDescription: "Find next steps quickly by risk and update time",
       ceoEyebrow: "Executive approvals",
@@ -284,6 +298,20 @@ export const translations: Record<Locale, Dictionary> = {
     modal: {
       close: "Close dialog",
       acknowledge: "Got it",
+    },
+    outcome: {
+      draftSavedTitle: "Draft saved",
+      returnedDraftSavedMessage: "Changes to {number} were saved. You can continue editing before resubmitting.",
+      draftSavedMessage: "{number} was saved to My quotations.",
+      resubmittedTitle: "Quotation resubmitted",
+      submittedTitle: "Quotation submitted",
+      submittedMessage: "{number} is awaiting Sales Manager approval.",
+      sentToCeoTitle: "Sent for CEO approval",
+      approvedTitle: "Quotation approved",
+      sentToCeoMessage: "{number} passed Sales Manager review and is now awaiting final CEO approval.",
+      approvedMessage: "{number} received final approval.",
+      returnedTitle: "Quotation returned",
+      returnedMessage: "{number} was returned to Sales for revision, and the reason was added to the approval record.",
     },
     placeholder: {
       withQuote: "The {label} flow for {number} will be available in a later prototype stage.",
@@ -378,7 +406,7 @@ export const translations: Record<Locale, Dictionary> = {
       metricRisk: "风险报价",
       metricRiskNote: "折扣超过标准区间",
       metricTeam: "团队报价",
-      metricTeamNote: "陈晨 · 本月累计",
+      metricTeamNote: "{name} · 本月累计",
       teamQueue: "团队报价队列",
       teamQueueDescription: "按风险与更新时间快速定位待办",
       ceoEyebrow: "管理层审批",
@@ -428,6 +456,20 @@ export const translations: Record<Locale, Dictionary> = {
     modal: {
       close: "关闭弹窗",
       acknowledge: "知道了",
+    },
+    outcome: {
+      draftSavedTitle: "草稿已保存",
+      returnedDraftSavedMessage: "{number} 的修改已保存，可继续完善后重新提交。",
+      draftSavedMessage: "{number} 已保存到“我的报价”。",
+      resubmittedTitle: "报价已重新提交",
+      submittedTitle: "报价已提交",
+      submittedMessage: "{number} 已进入销售主管审批。",
+      sentToCeoTitle: "已提交 CEO 审批",
+      approvedTitle: "报价已批准",
+      sentToCeoMessage: "{number} 已完成主管审批，现进入 CEO 最终审批。",
+      approvedMessage: "{number} 已完成最终审批。",
+      returnedTitle: "报价已退回",
+      returnedMessage: "{number} 已退回销售修改，原因已写入审批记录。",
     },
     placeholder: {
       withQuote: "{number} 的“{label}”流程将在后续原型阶段开放。",

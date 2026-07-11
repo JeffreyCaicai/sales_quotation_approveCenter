@@ -169,11 +169,20 @@ test("replaces the disposable starter with the quotation workspace", async () =>
   assert.match(i18n, /label: "销售代表"/);
   assert.match(i18n, /label: "销售主管"/);
   assert.match(i18n, /label: "首席执行官"/);
-  for (const source of [login, appShell, dashboard, ui]) {
+  const quotationAppOutsideTaskThree = quotationApp
+    .replace(/backLabel=\{progressQuote\.status === "approved" \? "返回正式报价" : "返回工作台"\}/, "")
+    .replace(/placementMode: "请选择投放方式"/, "");
+  for (const source of [login, appShell, dashboard, ui, quotationAppOutsideTaskThree]) {
     assert.doesNotMatch(source, /[\u3400-\u9fff]/);
   }
+  assert.match(quotationApp, /title: t\("outcome\.draftSavedTitle"\)/);
+  assert.match(quotationApp, /message: t\("outcome\.submittedMessage", \{ number: quote\.quoteNumber \}\)/);
+  assert.match(quotationApp, /title: t\("outcome\.returnedTitle"\)/);
   assert.match(dashboard, /quotesForRole/);
   assert.match(dashboard, /label=\{t\("dashboard\.metricAll"\)\} value=\{formatNumber\(counts\.total\)\}/);
+  assert.match(dashboard, /t\("dashboard\.metricTeamNote", \{ name: teamMemberName \}\)/);
+  assert.match(i18n, /metricTeamNote: "\{name\} · This month"/);
+  assert.match(i18n, /metricTeamNote: "\{name\} · 本月累计"/);
   assert.match(ui, /export function StatusBadge/);
   assert.match(ui, /export function Money/);
   assert.match(ui, /export function Modal/);

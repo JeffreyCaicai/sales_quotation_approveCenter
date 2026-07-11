@@ -67,6 +67,7 @@ function ManagerDashboard({ user, quotes, onAction }: DashboardScreenProps) {
   const { formatNumber, t } = useLocale();
   const pending = quotes.filter((quote) => quote.status === "pending_manager");
   const elevated = quotes.filter((quote) => getDiscountBand(quote.discount) !== "standard").length;
+  const teamMemberName = USERS.find((member) => user.teamMemberIds?.includes(member.id))?.name ?? "—";
 
   return (
     <div className="dashboard">
@@ -78,7 +79,7 @@ function ManagerDashboard({ user, quotes, onAction }: DashboardScreenProps) {
       <section className="metric-grid metric-grid--three" aria-label={t("dashboard.teamOverview")}>
         <MetricCard label={t("dashboard.metricPendingMine")} value={formatNumber(pending.length)} tone="amber" note={t("dashboard.metricPendingMineNote")} />
         <MetricCard label={t("dashboard.metricRisk")} value={formatNumber(elevated)} tone="coral" note={t("dashboard.metricRiskNote")} />
-        <MetricCard label={t("dashboard.metricTeam")} value={formatNumber(quotes.length)} tone="navy" note={t("dashboard.metricTeamNote")} />
+        <MetricCard label={t("dashboard.metricTeam")} value={formatNumber(quotes.length)} tone="navy" note={t("dashboard.metricTeamNote", { name: teamMemberName })} />
       </section>
       <QuoteTable
         title={t("dashboard.teamQueue")}
