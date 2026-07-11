@@ -4,7 +4,7 @@ import { ImportError } from "@/lib/imports/contracts";
 import type { PreparedUploadFile } from "@/lib/imports/contracts";
 
 export const MAX_IMPORT_FILE_BYTES = 25 * 1024 * 1024;
-const MAX_MULTIPART_OVERHEAD_BYTES = 256 * 1024;
+export const MAX_MULTIPART_OVERHEAD_BYTES = 256 * 1024;
 
 export interface ParsedImportMultipart {
   templateVersion: string;

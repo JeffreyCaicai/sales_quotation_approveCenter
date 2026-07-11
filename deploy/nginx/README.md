@@ -24,4 +24,8 @@ sudo nginx -t
 ```
 
 Certbot adds the dedicated TLS listener and renewal configuration to this vhost.
-Re-run `nginx -t` before every reload. Do not edit the existing default site.
+The configured HSTS header is ignored by browsers over plain HTTP and becomes
+effective only over HTTPS after Certbot enables TLS on this same vhost. Confirm
+the TLS-enabled vhost retains the `Strict-Transport-Security` header with
+`sudo nginx -T`, then re-run `nginx -t` before every reload. Do not edit the
+existing default site.

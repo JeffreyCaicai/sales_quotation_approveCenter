@@ -1,7 +1,35 @@
+import { execFileSync, spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { describe, expect, test, vi } from "vitest";
 
+import { MAX_IMPORT_FILE_BYTES, MAX_MULTIPART_OVERHEAD_BYTES } from "@/lib/imports/multipart";
+
 const read = (path: string) => readFileSync(path, "utf8");
+const { load: loadYaml } = createRequire(import.meta.url)("js-yaml") as {
+  load: (source: string) => unknown;
+};
+
+interface ComposeService {
+  image?: string;
+  environment?: Record<string, string>;
+  env_file?: string[];
+  ports?: string[];
+  volumes?: string[];
+  read_only?: boolean;
+  user?: string;
+  restart?: string;
+  healthcheck?: unknown;
+  depends_on?: Record<string, { condition?: string }>;
+}
+
+interface ComposeConfig {
+  services: Record<string, ComposeService>;
+  volumes: Record<string, unknown>;
+  networks: Record<string, { internal?: boolean }>;
+}
+
+const loadCompose = () => loadYaml(read("docker-compose.yml")) as ComposeConfig;
 
 describe("production container packaging", () => {
   test("runs the standalone Next server as immutable uid and gid 10001", () => {
@@ -25,40 +53,81 @@ describe("production container packaging", () => {
   });
 
   test("exposes only web on loopback and keeps stateful services private", () => {
-    const compose = read("docker-compose.yml");
+    const compose = loadCompose();
 
-    expect(compose).toContain('"127.0.0.1:3000:3000"');
-    expect(compose.match(/ports:/g)).toHaveLength(1);
-    expect(compose).toContain("quotation_internal:");
-    expect(compose).toMatch(/postgres_data:[\s\S]*minio_data:/);
-    expect(compose).toMatch(/postgres:[\s\S]*postgres_data:\/var\/lib\/postgresql\/data/);
-    expect(compose).toMatch(/minio:[\s\S]*minio_data:\/data/);
+    expect(compose.services.web.ports).toEqual(["127.0.0.1:3000:3000"]);
+    expect(Object.entries(compose.services).filter(([, service]) => service.ports)).toHaveLength(1);
+    expect(compose.networks.quotation_internal.internal).toBe(true);
+    expect(Object.keys(compose.volumes)).toEqual(["postgres_data", "minio_data"]);
+    expect(compose.services.postgres.volumes).toContain("postgres_data:/var/lib/postgresql/data");
+    expect(compose.services.minio.volumes).toContain("minio_data:/data");
   });
 
   test("uses an externally supplied immutable image and hardened service policy", () => {
-    const compose = read("docker-compose.yml");
+    const compose = loadCompose();
 
-    expect(compose).toContain("${APP_IMAGE:?APP_IMAGE must be an immutable digest reference}");
-    expect(compose).toContain("read_only: true");
-    expect(compose).toContain("user: \"10001:10001\"");
-    expect(compose.match(/restart: unless-stopped/g)).toHaveLength(3);
-    expect(compose.match(/healthcheck:/g)).toHaveLength(3);
-    expect(compose).toContain("condition: service_healthy");
-    for (const line of compose.split("\n").filter((candidate) => /(?:PASSWORD|SECRET):/.test(candidate))) {
-      expect(line).toMatch(/:\s*\$\{/);
+    expect(compose.services.web.image).toBe("${APP_IMAGE:?APP_IMAGE must be an immutable digest reference}");
+    expect(compose.services.web.read_only).toBe(true);
+    expect(compose.services.web.user).toBe("10001:10001");
+    for (const service of Object.values(compose.services)) {
+      expect(service.restart).toBe("unless-stopped");
+      expect(service.healthcheck).toBeDefined();
     }
+    expect(compose.services.web.depends_on).toEqual({
+      postgres: { condition: "service_healthy" },
+      minio: { condition: "service_healthy" },
+    });
   });
 
   test("allows only application credentials into the web container", () => {
-    const compose = read("docker-compose.yml");
-    const web = compose.slice(compose.indexOf("  web:"), compose.indexOf("  postgres:"));
+    const web = loadCompose().services.web;
 
-    expect(web).toContain("environment:");
-    expect(web).toContain("AUTH_SECRET:");
-    expect(web).toContain("S3_SECRET_ACCESS_KEY:");
-    expect(web).not.toContain("env_file:");
-    expect(web).not.toContain("MINIO_ROOT_PASSWORD");
-    expect(web).not.toContain("POSTGRES_PASSWORD");
+    expect(Object.keys(web.environment ?? {})).toEqual([
+      "DATABASE_URL", "AUTH_SECRET", "SITE_ORIGIN", "S3_ENDPOINT", "S3_REGION",
+      "S3_ACCESS_KEY_ID", "S3_SECRET_ACCESS_KEY", "S3_BUCKET",
+    ]);
+    expect(web.env_file).toBeUndefined();
+  });
+
+  test("passes each stateful service only its required credentials", () => {
+    const { postgres, minio } = loadCompose().services;
+
+    expect(postgres.env_file).toBeUndefined();
+    expect(postgres.environment).toEqual({
+      POSTGRES_DB: "${POSTGRES_DB:?POSTGRES_DB is required}",
+      POSTGRES_USER: "${POSTGRES_USER:?POSTGRES_USER is required}",
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}",
+    });
+    expect(minio.env_file).toBeUndefined();
+    expect(minio.environment).toEqual({
+      MINIO_ROOT_USER: "${MINIO_ROOT_USER:?MINIO_ROOT_USER is required}",
+      MINIO_ROOT_PASSWORD: "${MINIO_ROOT_PASSWORD:?MINIO_ROOT_PASSWORD is required}",
+    });
+  });
+
+  test("rejects mutable image tags and accepts a canonical sha256 digest", () => {
+    const validator = "deploy/validate-app-image.sh";
+    const digest = `ghcr.io/example/sales-quotation@sha256:${"a".repeat(64)}`;
+
+    expect(execFileSync(validator, [digest], { encoding: "utf8" })).toBe("");
+    for (const invalid of [
+      "ghcr.io/example/sales-quotation:latest",
+      `ghcr.io/example/sales-quotation@sha256:${"a".repeat(63)}`,
+      `ghcr.io/example/sales-quotation@sha256:${"g".repeat(64)}`,
+    ]) {
+      const result = spawnSync(validator, [invalid], { encoding: "utf8" });
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain("immutable repo@sha256:<64 lowercase hex> reference");
+    }
+  });
+
+  test("documents the validator preflight and readable production env permissions", () => {
+    const deploymentNotes = read("deploy/README.md");
+
+    expect(deploymentNotes).toContain("deploy/validate-app-image.sh");
+    expect(deploymentNotes).toContain("root:deploy");
+    expect(deploymentNotes).toContain("0640");
+    expect(deploymentNotes).not.toContain("0600");
   });
 
   test("defers a worker service until the repository contains a real entrypoint", () => {
@@ -98,14 +167,18 @@ describe("host nginx reverse proxy", () => {
 
     expect(nginx).toContain("server_name ${APP_DOMAIN};");
     expect(nginx).not.toContain("default_server");
-    expect(nginx).toContain("client_max_body_size 25m;");
+    const nginxLimit = Number(nginx.match(/client_max_body_size (\d+)m;/)?.[1]) * 1024 * 1024;
+    expect(nginxLimit).toBeGreaterThanOrEqual(MAX_IMPORT_FILE_BYTES + MAX_MULTIPART_OVERHEAD_BYTES);
+    expect(nginxLimit).toBeLessThan(MAX_IMPORT_FILE_BYTES + 2 * 1024 * 1024);
     expect(nginx).toContain("proxy_pass http://127.0.0.1:3000;");
     expect(nginx).toContain("X-Content-Type-Options");
     expect(nginx).toContain("Referrer-Policy");
     expect(nginx).toContain("X-Frame-Options");
+    expect(nginx).toContain('Strict-Transport-Security "max-age=31536000" always;');
     expect(nginxDocs).toContain("worldcup-lottery");
     expect(nginxDocs).toContain("certbot --nginx");
     expect(nginxDocs).toContain("nginx -t");
+    expect(nginxDocs).toContain("effective only over HTTPS");
   });
 });
 
