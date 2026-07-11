@@ -229,3 +229,68 @@ timestamp persistence. PGlite is not claimed as native lock evidence.
 Customer/brand processors, package processors, controlled business rollback,
 Rate Card activation/supersession, administration UI, and VPS operations remain
 in `docs/superpowers/plans/2026-07-11-stage-2-data-import-vps.md`.
+
+---
+
+## R3 focused fix wave
+
+**Implementation commit:** `7637805` (`fix: close R3 import concurrency gaps`)
+
+### R3 corrections
+
+- Added one strict shared calendar parser for Rate Card processing and
+  publication. It accepts only exact `YYYY-MM-DD`, validates Gregorian month,
+  day, and leap-year rules by component round-trip, and returns Jakarta
+  midnight at `+07:00`. Impossible values such as `2026-02-30` fail with stable
+  processing/publication errors.
+- Made upload template contracts data-type-specific: Building and Rate Card
+  require `TMN-IMPORT-2`; customer/brand and package uploads preserve
+  `TMN-IMPORT-1`. Deferred processors remain deferred.
+- Process-route domain errors retain their mapped status/key. Unknown `Error`
+  and non-Error failures now return only `IMPORT_PROCESS_FAILED` with status
+  500; raw messages are never returned.
+- Added a shared building-reference advisory transaction lock. Both Building
+  and Rate Card publishers acquire it first, followed by their type lock.
+  Building changes and Rate Card building queries lock rows in deterministic
+  IRIS-ID order.
+- Added pure lock-order and building-change ordering tests plus a native
+  deactivation-versus-multi-building-Rate-Card concurrency test.
+- Rate Card `uploadedAt` now preserves the import job's `createdAt`, distinct
+  from publication time and publisher identity.
+- Migration 0008 now checks existing rows for normalized blanks and collisions,
+  fails explicitly on unsafe collisions, normalizes safe legacy values, and
+  only then installs the trigger/trimmed constraint.
+- Processing compares the locked job data type with the preliminary data type
+  used for authorization before probing state or processing the job.
+
+### R3 TDD and verification
+
+RED coverage reproduced permissive invalid dates, legacy upload rejection,
+unknown route error leakage, missing shared-lock helpers/order, preliminary
+data-type mismatch, and migration failures on existing values/collisions.
+
+| Command | Result |
+|---|---|
+| `npm run test:unit` | PASS — 20 files, 244 tests |
+| `npx tsc --noEmit` | PASS |
+| `npm run lint` | PASS — exact script, no warnings |
+| `npm run build` | PASS — production build |
+| `git diff --check` | PASS |
+| 5,000-row performance | PASS — parse 18.39 ms, validate 1.76 ms, diff 1.37 ms, total 21.51 ms |
+| PGlite migration suite | PASS — 16/16 tests, including legacy normalization and collision detection |
+
+### R3 native PostgreSQL attempt
+
+The required suite, including the new cross-publisher concurrency case, was
+attempted with the explicit local database URL. It failed before native cases
+could execute:
+
+```text
+connect ECONNREFUSED ::1:55432
+connect ECONNREFUSED 127.0.0.1:55432
+```
+
+The three native files failed in connection hooks; one colocated PGlite test
+passed and eight native tests were skipped. Native PostgreSQL concurrency/lock
+verification therefore remains required in CI/deployment and is not replaced
+by pure or PGlite coverage.
