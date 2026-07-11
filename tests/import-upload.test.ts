@@ -32,8 +32,8 @@ function upload(
   name: string,
   type: string,
   bytes: Uint8Array,
-): File {
-  return new File([bytes.slice().buffer as ArrayBuffer], name, { type });
+): { filename: string; mimeType: string; body: Uint8Array } {
+  return { filename: name, mimeType: type, body: bytes };
 }
 
 function workbookBytes(bookType: "xlsx" | "xlsm" = "xlsx"): Uint8Array {
@@ -95,6 +95,7 @@ class FakeRepository implements ImportJobRepository {
   duplicates = new Set<string>();
   failCreate = false;
   atomicDuplicate = false;
+  private reservations = new Map<string, import("@/lib/imports/contracts").UploadReservationRecord>();
 
   async hasPublishedChecksum(dataType: string, checksum: string) {
     return this.duplicates.has(`${dataType}:${checksum}`);
@@ -105,6 +106,43 @@ class FakeRepository implements ImportJobRepository {
     if (this.atomicDuplicate) return "duplicate";
     this.jobs.push(structuredClone(record));
   }
+
+  async reserveUpload(record: import("@/lib/imports/contracts").UploadReservationRecord) {
+    if (this.atomicDuplicate || this.duplicates.has(`${record.dataType}:${record.checksum}`)) return "duplicate" as const;
+    this.reservations.set(record.attemptId, record);
+    return "reserved" as const;
+  }
+
+  async finalizeUpload(
+    input: import("@/lib/imports/contracts").FinalizeUploadInput,
+    commit: () => Promise<void>,
+  ) {
+    if (this.failCreate) throw new Error("database failed");
+    const reservation = this.reservations.get(input.attemptId);
+    if (!reservation) return "stale" as const;
+    await commit();
+    this.jobs.push({
+      id: reservation.id, dataType: reservation.dataType,
+      templateVersion: reservation.templateVersion, checksum: reservation.checksum,
+      state: "uploaded", sourceType: reservation.sourceType, normalizedPayload: null,
+      uploadedBy: reservation.uploadedBy, createdAt: reservation.createdAt.toISOString(),
+      files: structuredClone(input.files),
+    });
+    return "uploaded" as const;
+  }
+
+  async cleanupUploadAttempt(_attemptId: string, _summary: string, cleanup: () => Promise<void>) {
+    await cleanup();
+    return "failed" as const;
+  }
+
+  async listExpiredUploadAttemptIds() { return [] as string[]; }
+  async reconcileUploadAttempt(
+    _attemptId: string,
+    _now: Date,
+    _objects: readonly PendingObject[],
+    operations: import("@/lib/imports/contracts").UploadReconciliationOperations,
+  ) { await operations.cleanup(); return "failed" as const; }
 }
 
 function dependencies(repository = new FakeRepository(), store = new FakeStore()) {
@@ -254,7 +292,7 @@ describe("rate-card batches and compensation", () => {
     expect(store.cleaned).toHaveLength(failure === "object storage" ? 2 : 4);
   });
 
-  test("cleans pending objects when the in-transaction duplicate recheck wins the race", async () => {
+  test("rejects an atomic reservation duplicate before writing pending objects", async () => {
     const repository = new FakeRepository();
     repository.atomicDuplicate = true;
     const deps = dependencies(repository);
@@ -264,7 +302,7 @@ describe("rate-card batches and compensation", () => {
       deps,
     )).rejects.toMatchObject({ status: 409, key: "IMPORT_DUPLICATE_PUBLISHED" });
     expect(deps.objectStore.objects.size).toBe(0);
-    expect(deps.objectStore.cleaned).toHaveLength(4);
+    expect(deps.objectStore.cleaned).toHaveLength(0);
   });
 
   test("leaves a durable pending signal when cleanup retries fail and reconciliation later recovers", async () => {
@@ -278,7 +316,7 @@ describe("rate-card batches and compensation", () => {
       dependencies(repository, store),
     )).rejects.toMatchObject({ status: 500, key: "IMPORT_CLEANUP_PENDING" });
     expect(store.pending.size).toBe(1);
-    await expect(reconcilePendingObjects(store, { hasObjectKeyReference: async () => false })).resolves.toEqual({ committed: 0, deleted: 1 });
+    await expect(reconcilePendingObjects(store, repository)).resolves.toEqual({ committed: 0, deleted: 1, failed: 1, skipped: 0 });
     expect(store.pending.size).toBe(0);
   });
 });

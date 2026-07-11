@@ -6,6 +6,7 @@ export const importDataTypes = [
 ] as const;
 
 export const importStates = [
+  "uploading",
   "uploaded",
   "validating",
   "validation_failed",

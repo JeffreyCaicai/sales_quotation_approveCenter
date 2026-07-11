@@ -11,6 +11,7 @@ import {
   text,
   timestamp,
   unique,
+  uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
@@ -71,6 +72,8 @@ export const importJobs = pgTable(
     templateVersion: text("template_version").notNull(),
     checksum: text("checksum").notNull(),
     state: importStateEnum("state").notNull().default("uploaded"),
+    uploadAttemptId: uuid("upload_attempt_id"),
+    uploadLeaseExpiresAt: timestamp("upload_lease_expires_at", { withTimezone: true }),
     totalRows: integer("total_rows").notNull().default(0),
     validRows: integer("valid_rows").notNull().default(0),
     invalidRows: integer("invalid_rows").notNull().default(0),
@@ -95,6 +98,9 @@ export const importJobs = pgTable(
       table.dataType,
       table.publishedAt,
     ),
+    uniqueIndex("import_jobs_upload_attempt_id_unique")
+      .on(table.uploadAttemptId)
+      .where(sql`${table.uploadAttemptId} is not null`),
   ],
 );
 

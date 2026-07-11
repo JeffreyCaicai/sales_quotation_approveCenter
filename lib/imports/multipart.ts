@@ -1,13 +1,14 @@
 import Busboy from "busboy";
 
 import { ImportError } from "@/lib/imports/contracts";
+import type { PreparedUploadFile } from "@/lib/imports/contracts";
 
 export const MAX_IMPORT_FILE_BYTES = 25 * 1024 * 1024;
 const MAX_MULTIPART_OVERHEAD_BYTES = 256 * 1024;
 
 export interface ParsedImportMultipart {
   templateVersion: string;
-  files: File[];
+  files: PreparedUploadFile[];
 }
 
 export async function parseImportMultipart(request: Request): Promise<ParsedImportMultipart> {
@@ -101,7 +102,13 @@ export async function parseImportMultipart(request: Request): Promise<ParsedImpo
   }
   return {
     templateVersion,
-    files: uploads.map(({ name, type, chunks }) =>
-      new File([Buffer.concat(chunks)], name, { type })),
+    files: uploads.map(({ name, type, chunks }) => {
+      const buffer = Buffer.concat(chunks);
+      return {
+        filename: name,
+        mimeType: type,
+        body: new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength),
+      };
+    }),
   };
 }

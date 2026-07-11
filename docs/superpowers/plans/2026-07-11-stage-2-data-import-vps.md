@@ -314,6 +314,7 @@ git commit -m "feat: add bootstrap admin permissions"
 - Modify: `db/enums.ts`
 - Modify: `db/schema.ts`
 - Create: `drizzle/0003_import_source_type.sql`
+- Create: `drizzle/0004_import_upload_lease.sql`
 - Create: `lib/storage/object-store.ts`
 - Create: `lib/storage/s3-object-store.ts`
 - Create: `lib/imports/contracts.ts`
@@ -325,6 +326,7 @@ git commit -m "feat: add bootstrap admin permissions"
 - Create: `lib/imports/ingestion-service.ts`
 - Create: `lib/imports/create-job.ts`
 - Create: `app/api/imports/route.ts`
+- Create: `scripts/reconcile-pending-objects.ts`
 - Create: `tests/import-upload.test.ts`
 - Create: `tests/import-route.test.ts`
 
@@ -340,7 +342,7 @@ Test that `.xlsm`, filename path traversal, a mismatched MIME/signature, a dupli
 
 - [ ] **Step 2: Install storage and parsing prerequisites**
 
-Run: `npm install @aws-sdk/client-s3 @aws-sdk/s3-request-presigner xlsx csv-parse file-type busboy yauzl && npm install -D @types/busboy @types/yauzl`
+Run: `npm install @aws-sdk/client-s3 @aws-sdk/s3-request-presigner xlsx csv-parse file-type busboy yauzl fast-xml-parser && npm install -D @types/busboy @types/yauzl`
 
 Expected: npm exits `0`.
 
@@ -354,11 +356,13 @@ Stream each file to a bounded buffer, calculate SHA-256, verify magic bytes/MIME
 
 Authenticate and authorize the declared data type before consuming the multipart body. Parse multipart incrementally, cancel immediately above 25 MiB, and never call `Request.formData()` for import uploads. Inspect the OOXML ZIP central directory and `[Content_Types].xml`; require a normal XLSX workbook and reject macro-enabled content, VBA parts, unsafe ZIP paths, malformed archives, and excessive uncompressed size.
 
-Tag every new object with a unique pending ownership token. Cleanup verifies that token and pending state before deleting a specific object version; a conditional-put collision never deletes the pre-existing object. Cleanup failures remain discoverable through pending tags and `reconcilePendingObjects`, which checks database references before retrying commit or deletion.
+Before writing any object, reserve the import job in state `uploading` with a unique attempt ID and a 15-minute lease. Finalization, cleanup, and reconciliation acquire the same PostgreSQL advisory lock, recheck the attempt/state/lease, and perform the object tag/delete operation while the lock is held. Only finalization changes the job to `uploaded`; expired attempts become failed after owned pending objects are removed. Tag every new object with the attempt ID and pending state; a conditional-put collision never deletes the pre-existing object. A production CLI and the Task 7 worker call `reconcilePendingObjects`, which skips active leases and safely retries expired attempts.
 
 Route both manual parsing and the future CRM source through `submitNormalizedImport`; that service stores `sourceType`, creates the same staging job, and never writes active business tables. Add a contract test proving identical normalized rows produce identical validation/difference inputs for `manual` and `crm` sources.
 
 Canonicalize normalized JSON with sorted object keys and calculate its checksum on the server; reject a supplied checksum that differs. Acquire the shared PostgreSQL advisory transaction lock for `dataType + checksum`, recheck published duplicates inside the insertion transaction, and export the lock helper for Task 7 publication to use.
+
+Parse `[Content_Types].xml`, workbook XML, and workbook relationships as XML. Require one exact `/xl/workbook.xml` normal-XLSX override, a valid workbook root, unique critical ZIP entries, no external/macro/VBA/embedded parts, at most 2,048 entries, and bounded per-entry/aggregate decompressed sizes and compression ratios.
 
 Correct the existing `import_jobs.source_type` column to the exact values `manual | crm` with default `manual`; file format remains represented by `import_files.mime_type` and filenames, not by `source_type`. Generate an append-only PostgreSQL migration and a PGlite test for this constraint.
 

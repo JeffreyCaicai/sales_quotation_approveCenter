@@ -9,6 +9,7 @@ import {
   type CreateImportJobInput,
   type ImportFileRecord,
   type ImportJobDependencies,
+  type PreparedUploadFile,
 } from "@/lib/imports/contracts";
 import { PostgresImportJobRepository } from "@/lib/imports/repository";
 import { cleanupPendingWithRetry } from "@/lib/imports/reconcile-pending-objects";
@@ -58,15 +59,15 @@ function validateFilename(filename: string): void {
   }
 }
 
-function validateFileSet(dataType: ImportDataType, files: readonly File[]): void {
+function validateFileSet(dataType: ImportDataType, files: readonly PreparedUploadFile[]): void {
   if (dataType !== "rate_card") {
     if (files.length !== 1) {
       throw new ImportError(400, "IMPORT_FILES_INVALID");
     }
     return;
   }
-  if (files.length === 1 && extension(files[0].name) === ".xlsx") return;
-  const names = files.map((file) => file.name).sort();
+  if (files.length === 1 && extension(files[0].filename) === ".xlsx") return;
+  const names = files.map((file) => file.filename).sort();
   if (
     names.length !== RATE_CARD_CSV_NAMES.length ||
     names.some((name, index) => name !== RATE_CARD_CSV_NAMES[index])
@@ -76,12 +77,12 @@ function validateFileSet(dataType: ImportDataType, files: readonly File[]): void
 }
 
 async function validateTypeAndSignature(
-  file: File,
+  file: PreparedUploadFile,
   body: Uint8Array,
 ): Promise<void> {
-  const ext = extension(file.name);
+  const ext = extension(file.filename);
   if (ext === ".xlsx") {
-    if (file.type !== XLSX_MIME) {
+    if (file.mimeType !== XLSX_MIME) {
       throw new ImportError(400, "IMPORT_FILE_TYPE_INVALID");
     }
     const zipSignature =
@@ -96,7 +97,7 @@ async function validateTypeAndSignature(
     return;
   }
   if (ext === ".csv") {
-    if (file.type !== "text/csv") {
+    if (file.mimeType !== "text/csv") {
       throw new ImportError(400, "IMPORT_FILE_TYPE_INVALID");
     }
     try {
@@ -112,35 +113,6 @@ async function validateTypeAndSignature(
     return;
   }
   throw new ImportError(400, "IMPORT_FILE_TYPE_INVALID");
-}
-
-async function readBounded(file: File, usedBytes: number): Promise<Uint8Array> {
-  const chunks: Uint8Array[] = [];
-  let size = 0;
-  const reader = file.stream().getReader();
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      const chunk = value instanceof Uint8Array ? value : new Uint8Array(value);
-      size += chunk.byteLength;
-      if (usedBytes + size > MAX_TOTAL_BYTES) {
-        await reader.cancel();
-        throw new ImportError(413, "IMPORT_TOTAL_SIZE_EXCEEDED");
-      }
-      chunks.push(chunk);
-    }
-  } finally {
-    reader.releaseLock();
-  }
-  if (size === 0) throw new ImportError(400, "IMPORT_FILE_EMPTY");
-  const body = new Uint8Array(size);
-  let offset = 0;
-  for (const chunk of chunks) {
-    body.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  return body;
 }
 
 function batchChecksum(files: readonly ImportFileRecord[]): string {
@@ -161,14 +133,16 @@ export async function createImportJob(
   dependencies?: ImportJobDependencies,
 ): Promise<{ jobId: string; state: "uploaded" }> {
   const dataType = assertPermission(input.dataType, actor);
-  for (const file of input.files) validateFilename(file.name);
+  for (const file of input.files) validateFilename(file.filename);
   validateFileSet(dataType, input.files);
 
   let totalBytes = 0;
-  const prepared: Array<{ file: File; body: Uint8Array; checksum: string }> = [];
+  const prepared: Array<{ file: PreparedUploadFile; body: Uint8Array; checksum: string }> = [];
   for (const file of input.files) {
-    const body = await readBounded(file, totalBytes);
+    const body = file.body;
     totalBytes += body.byteLength;
+    if (totalBytes > MAX_TOTAL_BYTES) throw new ImportError(413, "IMPORT_TOTAL_SIZE_EXCEEDED");
+    if (body.byteLength === 0) throw new ImportError(400, "IMPORT_FILE_EMPTY");
     await validateTypeAndSignature(file, body);
     prepared.push({
       file,
@@ -183,14 +157,29 @@ export async function createImportJob(
   const date = deps.now();
   const files: ImportFileRecord[] = prepared.map(({ file, body, checksum }) => ({
     objectStorageKey: `imports/${date.getUTCFullYear()}/${String(date.getUTCMonth() + 1).padStart(2, "0")}/${jobId}/original/${deps.randomUUID()}`,
-    originalFilename: file.name,
-    mimeType: file.type,
+    originalFilename: file.filename,
+    mimeType: file.mimeType,
     sizeBytes: body.byteLength,
     checksum,
     purpose: "original",
   }));
   const checksum = batchChecksum(files);
   if (await deps.repository.hasPublishedChecksum(dataType, checksum)) {
+    throw new ImportError(409, "IMPORT_DUPLICATE_PUBLISHED");
+  }
+
+  const reserveResult = await deps.repository.reserveUpload({
+    id: jobId,
+    dataType,
+    templateVersion: input.templateVersion,
+    checksum,
+    sourceType: "manual",
+    uploadedBy: actor.id,
+    attemptId,
+    leaseExpiresAt: new Date(date.getTime() + 15 * 60 * 1000),
+    createdAt: date,
+  });
+  if (reserveResult === "duplicate") {
     throw new ImportError(409, "IMPORT_DUPLICATE_PUBLISHED");
   }
 
@@ -207,30 +196,30 @@ export async function createImportJob(
       );
       pendingObjects.push(pending);
     }
-    const createResult = await deps.repository.createUploadedJob({
-      id: jobId,
-      dataType,
-      templateVersion: input.templateVersion,
-      checksum,
-      state: "uploaded",
-      sourceType: "manual",
-      normalizedPayload: null,
-      uploadedBy: actor.id,
-      createdAt: date.toISOString(),
+    const finalizeResult = await deps.repository.finalizeUpload({
+      attemptId,
+      now: deps.now(),
       files,
+    }, async () => {
+      for (const pending of pendingObjects) {
+        await deps.objectStore.commitPending(pending);
+      }
     });
-    if (createResult === "duplicate") {
-      throw new ImportError(409, "IMPORT_DUPLICATE_PUBLISHED");
+    if (finalizeResult !== "uploaded") {
+      throw new ImportError(500, "IMPORT_CREATE_FAILED");
     }
   } catch (error) {
-    for (const pending of pendingObjects) {
-      await cleanupPendingWithRetry(deps.objectStore, pending);
-    }
+    await deps.repository.cleanupUploadAttempt(
+      attemptId,
+      error instanceof ImportError ? error.key : "IMPORT_CREATE_FAILED",
+      async () => {
+        for (const pending of pendingObjects) {
+          await cleanupPendingWithRetry(deps.objectStore, pending);
+        }
+      },
+    );
     if (error instanceof ImportError) throw error;
     throw new ImportError(500, "IMPORT_CREATE_FAILED");
-  }
-  for (const pending of pendingObjects) {
-    try { await deps.objectStore.commitPending(pending); } catch { /* durable pending tag is reconciled */ }
   }
   return { jobId, state: "uploaded" };
 }

@@ -14,7 +14,8 @@
     "test:localization": "node --experimental-strip-types --test tests/localization.test.ts",
     "lint": "eslint . --ignore-pattern .next",
     "db:generate": "drizzle-kit generate",
-    "db:migrate": "tsx scripts/migrate.ts"
+    "db:migrate": "tsx scripts/migrate.ts",
+    "imports:reconcile-pending": "tsx scripts/reconcile-pending-objects.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1085.0",
@@ -23,6 +24,7 @@
     "busboy": "^1.6.0",
     "csv-parse": "^7.0.1",
     "drizzle-orm": "0.45.2",
+    "fast-xml-parser": "^5.10.0",
     "file-type": "^22.0.1",
     "jose": "^6.2.3",
     "next": "16.2.6",

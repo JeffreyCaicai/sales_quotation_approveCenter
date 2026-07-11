@@ -53,4 +53,114 @@ describe("Postgres atomic duplicate gate", () => {
     await expect(new PostgresImportJobRepository().createUploadedJob(record)).resolves.toBe("duplicate");
     expect(fake.events).toEqual(["lock", "recheck"]);
   });
+
+  test("finalizes under the attempt lock with commit before files and job state", async () => {
+    const events: string[] = [];
+    let selects = 0;
+    const tx = {
+      execute: async () => { events.push("attempt-lock"); },
+      select: () => ({ from: () => ({ where: () => ({ limit: async () => {
+        selects += 1;
+        events.push("load-reservation");
+        return selects === 1 ? [{ id: record.id, state: "uploading", lease: new Date("2026-07-11T00:15:00Z") }] : [];
+      } }) }) }),
+      insert: () => ({ values: async () => { events.push("insert-files"); } }),
+      update: () => ({ set: () => ({ where: async () => { events.push("update-uploaded"); } }) }),
+    };
+    mocks.getDb.mockReturnValue({ transaction: async (operation: (value: typeof tx) => Promise<unknown>) => operation(tx) });
+    const repository = new PostgresImportJobRepository();
+    await expect(repository.finalizeUpload({
+      attemptId: "00000000-0000-4000-8000-000000000003",
+      now: new Date("2026-07-11T00:10:00Z"),
+      files: [{ objectStorageKey: "imports/key", originalFilename: "building.csv", mimeType: "text/csv", sizeBytes: 1, checksum: "a".repeat(64), purpose: "original" }],
+    }, async () => { events.push("commit-s3"); })).resolves.toBe("uploaded");
+    expect(events).toEqual(["attempt-lock", "load-reservation", "commit-s3", "insert-files", "update-uploaded"]);
+  });
+
+  test.each([
+    ["active lease", new Date("2026-07-11T00:15:00Z"), "skipped", false],
+    ["expired lease", new Date("2026-07-10T23:59:00Z"), "failed", true],
+  ])("reconciliation rechecks an %s under the attempt lock", async (_label, lease, expected, cleans) => {
+    const events: string[] = [];
+    let selects = 0;
+    const tx = {
+      execute: async () => { events.push("attempt-lock"); },
+      select: () => ({ from: () => ({ where: () => ({ limit: async () => {
+        selects += 1;
+        events.push(selects === 1 ? "load-state" : "check-references");
+        return selects === 1 ? [{ id: record.id, state: "uploading", lease }] : [];
+      } }) }) }),
+      update: () => ({ set: () => ({ where: async () => { events.push("mark-failed"); } }) }),
+    };
+    mocks.getDb.mockReturnValue({ transaction: async (operation: (value: typeof tx) => Promise<unknown>) => operation(tx) });
+    const cleanup = vi.fn(async () => { events.push("cleanup-s3"); });
+    const result = await new PostgresImportJobRepository().reconcileUploadAttempt(
+      "00000000-0000-4000-8000-000000000003",
+      new Date("2026-07-11T00:10:00Z"),
+      [],
+      { cleanup, commit: vi.fn() },
+    );
+    expect(result).toBe(expected);
+    expect(cleanup).toHaveBeenCalledTimes(cleans ? 1 : 0);
+    expect(events[0]).toBe("attempt-lock");
+    if (cleans) expect(events).toEqual(["attempt-lock", "load-state", "check-references", "cleanup-s3", "mark-failed"]);
+  });
+
+  test("reconciler-first expiry makes a later finalizer stale without creating a missing reference", async () => {
+    const state = { jobState: "uploading", lease: new Date("2026-07-10T23:00:00Z") as Date | null, references: false };
+    mocks.getDb.mockReturnValue(statefulLeaseDatabase(state));
+    const repository = new PostgresImportJobRepository();
+    const cleanup = vi.fn();
+    await expect(repository.reconcileUploadAttempt(
+      "00000000-0000-4000-8000-000000000003", new Date("2026-07-11T00:00:00Z"), [],
+      { cleanup, commit: vi.fn() },
+    )).resolves.toBe("failed");
+    const commit = vi.fn();
+    await expect(repository.finalizeUpload({
+      attemptId: "00000000-0000-4000-8000-000000000003", now: new Date("2026-07-11T00:00:01Z"), files: [],
+    }, commit)).resolves.toBe("stale");
+    expect(state).toMatchObject({ jobState: "validation_failed", references: false });
+    expect(commit).not.toHaveBeenCalled();
+  });
+
+  test("finalizer-first references make a later reconciler commit tags and never delete", async () => {
+    const state = { jobState: "uploading", lease: new Date("2026-07-11T00:15:00Z") as Date | null, references: false };
+    mocks.getDb.mockReturnValue(statefulLeaseDatabase(state));
+    const repository = new PostgresImportJobRepository();
+    await expect(repository.finalizeUpload({
+      attemptId: "00000000-0000-4000-8000-000000000003", now: new Date("2026-07-11T00:00:00Z"),
+      files: [{ objectStorageKey: "imports/key", originalFilename: "building.csv", mimeType: "text/csv", sizeBytes: 1, checksum: "a".repeat(64), purpose: "original" }],
+    }, vi.fn())).resolves.toBe("uploaded");
+    const cleanup = vi.fn();
+    const commit = vi.fn();
+    await expect(repository.reconcileUploadAttempt(
+      "00000000-0000-4000-8000-000000000003", new Date("2026-07-11T00:20:00Z"), [],
+      { cleanup, commit },
+    )).resolves.toBe("committed");
+    expect(state).toMatchObject({ jobState: "uploaded", references: true });
+    expect(commit).toHaveBeenCalledTimes(1);
+    expect(cleanup).not.toHaveBeenCalled();
+  });
 });
+
+function statefulLeaseDatabase(state: { jobState: string; lease: Date | null; references: boolean }) {
+  return {
+    transaction: async (operation: (transaction: unknown) => Promise<unknown>) => {
+      let selects = 0;
+      const tx = {
+        execute: async () => undefined,
+        select: () => ({ from: () => ({ where: () => ({ limit: async () => {
+          selects += 1;
+          if (selects === 1) return [{ id: record.id, state: state.jobState, lease: state.lease }];
+          return state.references ? [{ id: "reference" }] : [];
+        } }) }) }),
+        insert: () => ({ values: async () => { state.references = true; } }),
+        update: () => ({ set: (values: { state?: string; uploadLeaseExpiresAt?: Date | null }) => ({ where: async () => {
+          if (values.state) state.jobState = values.state;
+          if (values.uploadLeaseExpiresAt !== undefined) state.lease = values.uploadLeaseExpiresAt;
+        } }) }),
+      };
+      return operation(tx);
+    },
+  };
+}

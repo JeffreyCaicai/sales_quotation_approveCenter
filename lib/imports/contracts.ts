@@ -45,7 +45,13 @@ export interface NormalizedImport {
 export interface CreateImportJobInput {
   dataType: ImportDataType;
   templateVersion: string;
-  files: readonly File[];
+  files: readonly PreparedUploadFile[];
+}
+
+export interface PreparedUploadFile {
+  filename: string;
+  mimeType: string;
+  body: Uint8Array;
 }
 
 export interface ImportFileRecord {
@@ -73,6 +79,46 @@ export interface UploadedJobRecord {
 export interface ImportJobRepository {
   hasPublishedChecksum(dataType: string, checksum: string): Promise<boolean>;
   createUploadedJob(record: UploadedJobRecord): Promise<void | "duplicate">;
+  reserveUpload(record: UploadReservationRecord): Promise<"reserved" | "duplicate">;
+  finalizeUpload(
+    input: FinalizeUploadInput,
+    markCommitted: () => Promise<void>,
+  ): Promise<"uploaded" | "stale">;
+  cleanupUploadAttempt(
+    attemptId: string,
+    failureSummary: string,
+    cleanup: () => Promise<void>,
+  ): Promise<"failed" | "referenced" | "missing">;
+  listExpiredUploadAttemptIds(now: Date): Promise<string[]>;
+  reconcileUploadAttempt(
+    attemptId: string,
+    now: Date,
+    objects: readonly import("@/lib/storage/object-store").PendingObject[],
+    operations: UploadReconciliationOperations,
+  ): Promise<"skipped" | "committed" | "failed" | "missing">;
+}
+
+export interface UploadReservationRecord {
+  id: string;
+  dataType: ImportDataType;
+  templateVersion: string;
+  checksum: string;
+  sourceType: ImportSourceType;
+  uploadedBy: string;
+  attemptId: string;
+  leaseExpiresAt: Date;
+  createdAt: Date;
+}
+
+export interface FinalizeUploadInput {
+  attemptId: string;
+  now: Date;
+  files: ImportFileRecord[];
+}
+
+export interface UploadReconciliationOperations {
+  commit: () => Promise<void>;
+  cleanup: () => Promise<void>;
 }
 
 export interface ImportJobDependencies {

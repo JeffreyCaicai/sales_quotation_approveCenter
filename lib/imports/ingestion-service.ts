@@ -57,7 +57,7 @@ export async function submitNormalizedImport(
     }
     const jobId = deps.randomUUID();
     const createdAt = deps.now().toISOString();
-    await deps.repository.createUploadedJob({
+    const createResult = await deps.repository.createUploadedJob({
       id: jobId,
       dataType: normalized.dataType,
       templateVersion: normalized.templateVersion,
@@ -69,6 +69,9 @@ export async function submitNormalizedImport(
       createdAt,
       files: [],
     });
+    if (createResult === "duplicate") {
+      throw new ImportError(409, "IMPORT_DUPLICATE_PUBLISHED");
+    }
     return { jobId };
   } catch (error) {
     if (error instanceof ImportError) throw error;

@@ -77,6 +77,8 @@ function excessiveCentralDirectory(): Uint8Array {
 }
 
 describe("OOXML container inspection", () => {
+  const contentTypes = '<Types><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/></Types>';
+  const workbookXml = '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"/>';
   test("accepts a real normal XLSX", async () => {
     await expect(inspectXlsxContainer(workbookBytes())).resolves.toBeUndefined();
   });
@@ -88,6 +90,14 @@ describe("OOXML container inspection", () => {
     ["VBA part with mixed case", storedZip([["[Content_Types].xml", '<Types><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/></Types>'], ["xl/workbook.xml", "x"], ["XL/VbaProject.BIN", "x"]])],
     ["malformed archive", workbookBytes().slice(0, 100)],
     ["excessive declared uncompressed total", excessiveCentralDirectory()],
+    ["fake workbook XML behind a valid MIME string", storedZip([["[Content_Types].xml", contentTypes], ["xl/workbook.xml", "not xml workbook"]])],
+    ["duplicate normalized critical entry", storedZip([["[Content_Types].xml", contentTypes], ["[content_types].xml", contentTypes], ["xl/workbook.xml", workbookXml]])],
+    ["external workbook relationship", storedZip([["[Content_Types].xml", contentTypes], ["xl/workbook.xml", workbookXml], ["xl/_rels/workbook.xml.rels", '<Relationships><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/externalLink" Target="https://evil.test/data" TargetMode="External"/></Relationships>']])],
+    ["entry flood", storedZip([
+      ["[Content_Types].xml", contentTypes],
+      ["xl/workbook.xml", workbookXml],
+      ...Array.from({ length: 2049 }, (_, index) => [`xl/dummy-${index}.xml`, "x"] as [string, string]),
+    ])],
   ])("rejects %s", async (_label, bytes) => {
     await expect(inspectXlsxContainer(bytes)).rejects.toMatchObject({ key: "IMPORT_FILE_SIGNATURE_INVALID" });
   });
@@ -110,12 +120,32 @@ describe("canonical normalized envelope", () => {
       repository, objectStore: {} as ObjectStore, now: () => new Date(), randomUUID: () => crypto.randomUUID(),
     })).rejects.toMatchObject({ status: 400, key: "IMPORT_ENVELOPE_INVALID" });
   });
+
+  test("throws duplicate when the fast check misses but the atomic recheck wins", async () => {
+    const payload = { rows: [] };
+    const checksum = normalizedChecksum({ dataType: "building", templateVersion: "v1", payload });
+    const repository = {
+      hasPublishedChecksum: vi.fn().mockResolvedValue(false),
+      createUploadedJob: vi.fn().mockResolvedValue("duplicate"),
+    } as unknown as ImportJobRepository;
+    await expect(submitNormalizedImport(
+      { dataType: "building", templateVersion: "v1", checksum, payload },
+      "crm",
+      actor,
+      { repository, objectStore: {} as ObjectStore, now: () => new Date(), randomUUID: () => crypto.randomUUID() },
+    )).rejects.toMatchObject({ status: 409, key: "IMPORT_DUPLICATE_PUBLISHED" });
+  });
 });
 
 class OrderedRepository implements ImportJobRepository {
   readonly events: string[] = [];
   async hasPublishedChecksum() { this.events.push("fast-check"); return false; }
   async createUploadedJob() { this.events.push("lock", "recheck", "insert"); }
+  async reserveUpload() { return "reserved" as const; }
+  async finalizeUpload() { return "uploaded" as const; }
+  async cleanupUploadAttempt() { return "failed" as const; }
+  async listExpiredUploadAttemptIds() { return []; }
+  async reconcileUploadAttempt() { return "skipped" as const; }
 }
 
 describe("atomic duplicate gate", () => {
@@ -151,10 +181,16 @@ describe("pending object reconciliation", () => {
       { key: "orphan", attemptId: "b", versionId: "v2" },
     ];
     store.failDeletes = 3;
-    const references = { hasObjectKeyReference: vi.fn(async (key: string) => key === "referenced") };
-    await expect(reconcilePendingObjects(store, references, { maxAttempts: 2 })).rejects.toMatchObject({ key: "IMPORT_CLEANUP_PENDING" });
+    const repository = {
+      listExpiredUploadAttemptIds: vi.fn(async () => []),
+      reconcileUploadAttempt: vi.fn(async (attemptId: string, _now: Date, _objects: PendingObject[], operations: import("@/lib/imports/contracts").UploadReconciliationOperations) => {
+        if (attemptId === "a") { await operations.commit(); return "committed" as const; }
+        await operations.cleanup(); return "failed" as const;
+      }),
+    };
+    await expect(reconcilePendingObjects(store, repository, { maxAttempts: 2 })).rejects.toMatchObject({ key: "IMPORT_CLEANUP_PENDING" });
     expect(store.commits).toBe(1);
-    await expect(reconcilePendingObjects(store, references, { maxAttempts: 2 })).resolves.toEqual({ committed: 1, deleted: 1 });
+    await expect(reconcilePendingObjects(store, repository, { maxAttempts: 2 })).resolves.toEqual({ committed: 1, deleted: 1, failed: 1, skipped: 0 });
     expect(store.pending.map((item) => item.key)).toEqual(["referenced"]);
   });
 });

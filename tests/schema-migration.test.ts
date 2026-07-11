@@ -177,6 +177,30 @@ describe("generated PostgreSQL migration", () => {
     ).resolves.toBeDefined();
   });
 
+  test("adds durable upload attempt reservations with an uploading state and unique lease identity", async () => {
+    db = new PGlite();
+    await applyMigrations(db);
+    const columns = await db.query<{ column_name: string; is_nullable: string }>(`
+      select column_name, is_nullable from information_schema.columns
+      where table_schema = 'public' and table_name = 'import_jobs'
+        and column_name in ('upload_attempt_id', 'upload_lease_expires_at')
+      order by column_name
+    `);
+    expect(columns.rows).toEqual([
+      { column_name: "upload_attempt_id", is_nullable: "YES" },
+      { column_name: "upload_lease_expires_at", is_nullable: "YES" },
+    ]);
+    const states = await db.query<{ enumlabel: string }>(`
+      select enumlabel from pg_enum join pg_type on pg_type.oid = pg_enum.enumtypid
+      where pg_type.typname = 'import_state'
+    `);
+    expect(states.rows.map((row) => row.enumlabel)).toContain("uploading");
+    const indexes = await db.query<{ indexdef: string }>(`
+      select indexdef from pg_indexes where indexname = 'import_jobs_upload_attempt_id_unique'
+    `);
+    expect(indexes.rows[0].indexdef).toMatch(/UNIQUE.*upload_attempt_id.*WHERE.*IS NOT NULL/i);
+  });
+
   test("locks both old and new parents before allowing child mutations", async () => {
     db = new PGlite();
     await applyMigrations(db);

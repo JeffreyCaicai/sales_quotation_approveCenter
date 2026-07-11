@@ -38,7 +38,7 @@ describe("imports route authorization boundary", () => {
     const response = await POST(new Request("https://quotation.test/api/imports?dataType=building", { method: "POST", body: form }));
     expect(mocks.requirePermission).toHaveBeenCalledWith("data.import.building");
     expect(mocks.createImportJob).toHaveBeenCalledWith(
-      expect.objectContaining({ dataType: "building", templateVersion: "v1", files: [expect.any(File)] }),
+      expect.objectContaining({ dataType: "building", templateVersion: "v1", files: [expect.objectContaining({ filename: "building.csv", mimeType: "text/csv", body: expect.any(Uint8Array) })] }),
       user,
     );
     expect(response.status).toBe(201);

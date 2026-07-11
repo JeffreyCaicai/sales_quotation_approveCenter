@@ -1,9 +1,6 @@
 import { ImportError } from "@/lib/imports/contracts";
 import type { ObjectStore, PendingObject } from "@/lib/storage/object-store";
-
-export interface ObjectReferenceRepository {
-  hasObjectKeyReference(key: string): Promise<boolean>;
-}
+import type { ImportJobRepository } from "@/lib/imports/contracts";
 
 async function retry<T>(operation: () => Promise<T>, maxAttempts: number): Promise<T> {
   let lastError: unknown;
@@ -27,19 +24,47 @@ export async function cleanupPendingWithRetry(
 
 export async function reconcilePendingObjects(
   store: ObjectStore,
-  repository: ObjectReferenceRepository,
-  options: { maxAttempts?: number } = {},
-): Promise<{ committed: number; deleted: number }> {
+  repository: Pick<ImportJobRepository, "listExpiredUploadAttemptIds" | "reconcileUploadAttempt">,
+  options: { maxAttempts?: number; now?: Date } = {},
+): Promise<{ committed: number; deleted: number; failed: number; skipped: number }> {
   let committed = 0;
   let deleted = 0;
+  let failed = 0;
+  let skipped = 0;
+  const groups = new Map<string, PendingObject[]>();
   for (const object of await store.listPendingObjects()) {
-    if (await repository.hasObjectKeyReference(object.key)) {
-      await retry(() => store.commitPending(object), options.maxAttempts ?? 3);
-      committed += 1;
-    } else {
-      const result = await cleanupPendingWithRetry(store, object, options.maxAttempts ?? 3);
-      if (result === "deleted") deleted += 1;
-    }
+    const group = groups.get(object.attemptId) ?? [];
+    group.push(object);
+    groups.set(object.attemptId, group);
   }
-  return { committed, deleted };
+  const now = options.now ?? new Date();
+  const attemptIds = new Set([
+    ...groups.keys(),
+    ...await repository.listExpiredUploadAttemptIds(now),
+  ]);
+  for (const attemptId of attemptIds) {
+    const objects = groups.get(attemptId) ?? [];
+    const result = await repository.reconcileUploadAttempt(
+      attemptId,
+      now,
+      objects,
+      {
+        commit: async () => {
+          for (const object of objects) {
+            await retry(() => store.commitPending(object), options.maxAttempts ?? 3);
+            committed += 1;
+          }
+        },
+        cleanup: async () => {
+          for (const object of objects) {
+            const outcome = await cleanupPendingWithRetry(store, object, options.maxAttempts ?? 3);
+            if (outcome === "deleted") deleted += 1;
+          }
+        },
+      },
+    );
+    if (result === "failed" || result === "missing") failed += 1;
+    if (result === "skipped") skipped += 1;
+  }
+  return { committed, deleted, failed, skipped };
 }
