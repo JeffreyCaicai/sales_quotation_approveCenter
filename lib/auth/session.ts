@@ -16,6 +16,7 @@ export const SESSION_ISSUER = "quotation-app";
 export const SESSION_AUDIENCE = "quotation-admin";
 
 const MINIMUM_SECRET_LENGTH = 32;
+const SESSION_CLOCK_SKEW_SECONDS = 60;
 
 export type AuthErrorKey =
   | "AUTH_REQUIRED"
@@ -61,6 +62,10 @@ function secretKey(secret = process.env.AUTH_SECRET): Uint8Array {
   return new TextEncoder().encode(secret);
 }
 
+export function assertAuthConfigured(secret = process.env.AUTH_SECRET): void {
+  secretKey(secret);
+}
+
 function epochSeconds(date: Date): number {
   return Math.floor(date.getTime() / 1000);
 }
@@ -93,6 +98,14 @@ export async function verifySessionToken(
       currentDate: options.now,
       requiredClaims: ["sub", "iat", "exp"],
     });
+    const now = epochSeconds(options.now ?? new Date());
+    if (
+      payload.iat! > now + SESSION_CLOCK_SKEW_SECONDS ||
+      payload.exp! <= payload.iat! ||
+      payload.exp! - payload.iat! > SESSION_MAX_AGE_SECONDS
+    ) {
+      throw new AuthError(401, "AUTH_REQUIRED");
+    }
     return payload;
   } catch {
     throw new AuthError(401, "AUTH_REQUIRED");
@@ -156,12 +169,9 @@ async function loadDatabaseUser(userId: string): Promise<LoadedUser | null> {
     .from(users)
     .leftJoin(
       userPermissions,
-      and(
-        eq(userPermissions.userId, users.id),
-        eq(users.id, userId),
-      ),
+      eq(userPermissions.userId, users.id),
     )
-    .where(eq(users.id, userId));
+    .where(and(eq(users.id, userId), eq(users.status, "active")));
 
   const first = rows[0];
   if (!first) return null;

@@ -7,6 +7,7 @@ import { authenticatePassword, normalizeEmail } from "@/lib/auth/password";
 import {
   AuthError,
   SESSION_COOKIE_NAME,
+  assertAuthConfigured,
   sessionCookieOptions,
   signSessionToken,
 } from "@/lib/auth/session";
@@ -23,6 +24,15 @@ function loginFailure(): NextResponse {
 }
 
 export async function POST(request: Request): Promise<NextResponse> {
+  try {
+    assertAuthConfigured();
+  } catch {
+    return NextResponse.json(
+      { error: "AUTH_CONFIGURATION_ERROR" },
+      { status: 500 },
+    );
+  }
+
   let body: LoginBody;
   try {
     body = (await request.json()) as LoginBody;

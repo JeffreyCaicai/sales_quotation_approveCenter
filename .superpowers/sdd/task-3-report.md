@@ -125,3 +125,65 @@ not be fetched. The required network-enabled rerun passed.
   unrelated global lint configuration was changed.
 - `npm install` reports the existing 9 audit findings (1 low, 7 moderate, 1 high); no
   potentially breaking automatic audit fix was run.
+
+## Review follow-up: authentication boundary hardening
+
+### Fixes
+
+- Moved `AUTH_SECRET` validation to the first operation in the bootstrap login handler,
+  before JSON parsing, email normalization, user lookup, or password comparison. Missing
+  and weak secrets now always return `{ error: "AUTH_CONFIGURATION_ERROR" }` with 500,
+  independent of submitted credentials.
+- Added JWT temporal invariant validation with a fixed 60-second future-`iat` skew:
+  `exp` must be strictly greater than `iat`, and the signed lifetime must not exceed the
+  12-hour session maximum.
+- Added `users.status = 'active'` to the PostgreSQL authorization query itself. Missing
+  and inactive users continue to converge on the same external 401 `AUTH_REQUIRED`
+  contract, while inactive permission rows are no longer loaded into a session user.
+
+### Review TDD evidence
+
+RED command:
+
+```sh
+npx vitest run tests/auth.test.ts
+```
+
+RED result: exit 1; 6/21 failed. The verifier accepted a token with `iat` 61 seconds in
+the future, a 12-hour-plus-one-second token, and a token with `exp === iat`. Correct,
+wrong, and unknown-user credential-shaped requests under a weak secret each returned
+401 instead of the required configuration 500.
+
+GREEN focused command:
+
+```sh
+npx vitest run tests/auth.test.ts && npx tsc --noEmit && \
+  npx eslint app/api/auth/bootstrap/route.ts lib/auth/session.ts tests/auth.test.ts
+```
+
+GREEN result: exit 0; focused auth 21/21 passed, TypeScript passed, and changed-file
+ESLint passed with no diagnostics.
+
+### Follow-up verification
+
+Final command (network-enabled for the existing Google fonts):
+
+```sh
+npx vitest run tests/auth.test.ts && npm run test:unit && \
+  npm run test:logic && npm run test:localization && npx tsc --noEmit && \
+  npx eslint app/api/auth/bootstrap/route.ts lib/auth/password.ts \
+    lib/auth/permissions.ts lib/auth/session.ts proxy.ts \
+    scripts/create-bootstrap-admin.ts tests/auth.test.ts && \
+  npm run build && git diff --check
+```
+
+Final result: exit 0.
+
+- Focused auth: 21/21 passed.
+- Unit: 4 files, 44/44 passed.
+- Logic: 53 passed, 0 failed.
+- Localization: 20 passed, 0 failed.
+- TypeScript and Task-scoped ESLint: passed with no diagnostics.
+- Next.js production build: compiled, type-checked, generated all pages, and retained
+  the bootstrap API route plus Proxy middleware.
+- Whitespace verification: clean.
