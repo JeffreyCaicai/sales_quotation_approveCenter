@@ -190,7 +190,7 @@ describe("generated PostgreSQL migration", () => {
     ]);
   });
 
-  test("keeps IRIS identity immutable and allows a blank ERP mapping", async () => {
+  test("keeps IRIS identity immutable and normalizes blank ERP mappings", async () => {
     db = new PGlite();
     await applyMigrations(db);
     const first = await db.query<{ id: string }>(`
@@ -205,19 +205,47 @@ describe("generated PostgreSQL migration", () => {
       where id = '${first.rows[0].id}'
     `)).rejects.toThrow(/iris building id is immutable/i);
 
-    await expect(db.query(`
+    const blanks = await db.query<{
+      erp_building_id: string | null;
+      erp_link_status: string;
+    }>(`
       insert into buildings (
-        iris_building_id, name, address, erp_link_status, data_source
-      ) values ('B000004', 'Tower Blank A', 'Tangerang', 'manual_only', 'building_team'),
-               ('B000005', 'Tower Blank B', 'Tangerang', 'manual_only', 'building_team')
-    `)).resolves.toBeDefined();
+        iris_building_id, erp_building_id, name, address, erp_link_status, data_source
+      ) values ('B000004', '', 'Tower Blank A', 'Tangerang', 'erp_linked', 'building_team'),
+               ('B000005', '   ', 'Tower Blank B', 'Tangerang', 'erp_linked', 'building_team'),
+               ('B000012', E'\t\n', 'Tower Blank C', 'Tangerang', 'erp_linked', 'building_team')
+      returning erp_building_id, erp_link_status
+    `);
+    expect(blanks.rows).toEqual([
+      { erp_building_id: null, erp_link_status: "manual_only" },
+      { erp_building_id: null, erp_link_status: "manual_only" },
+      { erp_building_id: null, erp_link_status: "manual_only" },
+    ]);
 
     await expect(db.query(`
       insert into buildings (
         iris_building_id, erp_building_id, name, address, erp_link_status, data_source
       ) values ('B000006', 'ERP-01', 'Tower A', 'Tangerang', 'erp_linked', 'building_team'),
-               ('B000007', 'ERP-01', 'Tower B', 'Tangerang', 'erp_linked', 'building_team')
+               ('B000007', ' ERP-01 ', 'Tower B', 'Tangerang', 'erp_linked', 'building_team')
     `)).rejects.toThrow(/erp_building_id/i);
+  });
+
+  test("rejects building deletion so an IRIS ID can never be reused", async () => {
+    db = new PGlite();
+    await applyMigrations(db);
+    const inserted = await db.query<{ id: string }>(`
+      insert into buildings (iris_building_id, name, address)
+      values ('B000013', 'Permanent Tower', 'Jakarta')
+      returning id
+    `);
+
+    await expect(db.query(`
+      delete from buildings where id = '${inserted.rows[0].id}'
+    `)).rejects.toThrow(/buildings cannot be deleted/i);
+    await expect(db.query(`
+      insert into buildings (iris_building_id, name, address)
+      values ('B000013', 'Reused Tower', 'Jakarta')
+    `)).rejects.toThrow(/iris_building_id/i);
   });
 
   test("requires unique IRIS IDs and link status consistent with ERP presence", async () => {
@@ -229,14 +257,28 @@ describe("generated PostgreSQL migration", () => {
       values ('B000008', 'Tower C', 'Jakarta'),
              ('B000008', 'Tower D', 'Jakarta')
     `)).rejects.toThrow(/iris_building_id/i);
-    await expect(db.query(`
+    const derivedLinked = await db.query<{
+      erp_building_id: string | null;
+      erp_link_status: string;
+    }>(`
       insert into buildings (iris_building_id, erp_building_id, name, address, erp_link_status)
-      values ('B000009', 'ERP-09', 'Tower E', 'Jakarta', 'manual_only')
-    `)).rejects.toThrow(/buildings_erp_link_status_check/i);
-    await expect(db.query(`
+      values ('B000009', ' ERP-09 ', 'Tower E', 'Jakarta', 'manual_only')
+      returning erp_building_id, erp_link_status
+    `);
+    expect(derivedLinked.rows).toEqual([
+      { erp_building_id: "ERP-09", erp_link_status: "erp_linked" },
+    ]);
+    const derivedManual = await db.query<{
+      erp_building_id: string | null;
+      erp_link_status: string;
+    }>(`
       insert into buildings (iris_building_id, name, address, erp_link_status)
       values ('B000010', 'Tower F', 'Jakarta', 'erp_linked')
-    `)).rejects.toThrow(/buildings_erp_link_status_check/i);
+      returning erp_building_id, erp_link_status
+    `);
+    expect(derivedManual.rows).toEqual([
+      { erp_building_id: null, erp_link_status: "manual_only" },
+    ]);
     await expect(db.query(`
       insert into buildings (iris_building_id, name, address, data_source)
       values ('B000011', 'Tower G', 'Jakarta', 'spreadsheet')
