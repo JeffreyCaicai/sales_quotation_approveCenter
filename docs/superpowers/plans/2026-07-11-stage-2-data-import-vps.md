@@ -381,6 +381,8 @@ git commit -m "feat: create immutable import jobs"
 
 ### Task 5: Parse versioned Excel and CSV templates into normalized rows
 
+> **Approved building-identity amendment:** Before executing this task, follow `docs/superpowers/plans/2026-07-11-iris-building-identity-implementation.md`. That plan replaces every generic `Building Code` contract below with immutable `IRIS Building ID`, adds nullable ERP Building ID mapping, and upgrades the affected building and Rate Card templates to `TMN-IMPORT-2`.
+
 **Files:**
 - Create: `lib/imports/template-v1.ts`
 - Create: `lib/imports/parse-workbook.ts`
