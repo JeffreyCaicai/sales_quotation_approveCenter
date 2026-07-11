@@ -75,3 +75,45 @@ git diff --check    # exit 0; no findings
 
 - The in-app Browser plugin initialized, but `agent.browsers.list()` returned `[]`; therefore screenshot-based desktop/mobile QA and client click-through could not be performed. Production build/render tests, logic tests, lint, responsive source review, and live dev-server startup were completed instead.
 - The local dev server selected `http://localhost:3002/` because ports 3000 and 3001 were already in use. This did not alter application configuration.
+
+## Approved Quotation History Follow-up
+
+Completed the final interrupted review fix that keeps both representations of an approved quote available: the formal printable Quotation and its immutable commercial version history.
+
+### RED / GREEN Evidence
+
+The inherited uncommitted regression test was preserved and run before production changes:
+
+```text
+node --test --test-name-pattern='approved V2' tests/rendered-html.test.mjs
+tests 1; pass 0; fail 1
+AssertionError: quotation-screen.tsx did not match /onViewHistory: \(\) => void/
+```
+
+After the minimal toolbar and routing change, the same targeted test passed:
+
+```text
+node --test --test-name-pattern='approved V2' tests/rendered-html.test.mjs
+tests 1; pass 1; fail 0
+```
+
+### Implementation
+
+- `QuotationScreen` now accepts `onViewHistory` and exposes an accessible `查看版本记录` button in the existing non-print toolbar.
+- `QuotationApp` routes that action to `QuoteProgressScreen` for the current approved quote, regardless of the signed-in role.
+- Back navigation from approved history restores the formal Quotation; sales pending/returned progress keeps its existing dashboard destination.
+- The existing print stylesheet hides `.quotation-toolbar` and all buttons, so printed/PDF output is unchanged.
+
+### Fresh Verification
+
+```text
+npm run test:logic  # exit 0; tests 53, pass 53, fail 0
+npm test            # exit 0; production build complete; tests 5, pass 5, fail 0
+npm run lint        # exit 0; no findings
+npm run build       # exit 0; production build complete
+git diff --check    # exit 0; no findings
+```
+
+### Concerns / Limitations
+
+- No new concerns. The production-render regression verifies the navigation wiring and print exclusion remains covered by the existing stylesheet assertions.

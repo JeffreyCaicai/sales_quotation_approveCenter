@@ -7,6 +7,7 @@ interface QuotationScreenProps {
   quote: Quote;
   onBack: () => void;
   onPrint: () => void;
+  onViewHistory: () => void;
 }
 
 const DATE_FORMATTER = new Intl.DateTimeFormat("zh-CN", {
@@ -26,7 +27,7 @@ const DATE_TIME_FORMATTER = new Intl.DateTimeFormat("zh-CN", {
 const METRIC_FORMATTER = new Intl.NumberFormat("zh-CN");
 const PERCENT_FORMATTER = new Intl.NumberFormat("zh-CN", { maximumFractionDigits: 2 });
 
-export function QuotationScreen({ quote, onBack, onPrint }: QuotationScreenProps) {
+export function QuotationScreen({ quote, onBack, onPrint, onViewHistory }: QuotationScreenProps) {
   if (quote.status !== "approved") {
     return (
       <div className="quotation-screen quotation-screen--restricted">
@@ -60,6 +61,7 @@ export function QuotationScreen({ quote, onBack, onPrint }: QuotationScreenProps
     <div className="quotation-screen">
       <div className="quotation-toolbar" aria-label="正式报价操作">
         <button className="back-button" type="button" onClick={onBack}>← 返回工作台</button>
+        <button className="button" type="button" onClick={onViewHistory}>查看版本记录</button>
         <button className="button button--primary" type="button" onClick={onPrint}>打印 / 导出 PDF</button>
       </div>
 

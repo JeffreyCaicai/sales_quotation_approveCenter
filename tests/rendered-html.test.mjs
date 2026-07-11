@@ -205,6 +205,28 @@ test("includes the approved-only printable quotation experience", async () => {
   assert.match(quotationScreen, /quote\.status !== "approved"/);
 });
 
+test("approved V2 keeps formal quotation and version-history navigation", async () => {
+  const [quotationApp, quotationScreen, dashboard] = await Promise.all([
+    readFile(new URL("../components/quotation-app.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../components/quotation-screen.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../components/dashboard-screen.tsx", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(dashboard, /quote\.status === "approved"[\s\S]*label: "查看正式报价"/);
+  assert.match(quotationScreen, /报价版本<\/dt><dd>V\{quote\.version\}<\/dd>/);
+  assert.match(quotationScreen, /onViewHistory: \(\) => void/);
+  assert.match(quotationScreen, /onClick=\{onViewHistory\}>查看版本记录<\/button>/);
+  assert.match(
+    quotationApp,
+    /onViewHistory=\{\(\) => \{\s*setProgressQuoteId\(quotationQuote\.id\);\s*setQuotationQuoteId\(null\);\s*\}\}/,
+  );
+  assert.match(quotationApp, /progressQuote && \(progressQuote\.status === "approved" \|\| user\.role === "sales"\)/);
+  assert.match(
+    quotationApp,
+    /if \(progressQuote\.status === "approved"\) setQuotationQuoteId\(progressQuote\.id\)/,
+  );
+});
+
 test("uses only a canonical site origin for public Open Graph and X metadata", async () => {
   const response = await render(
     "https://evil.example/",

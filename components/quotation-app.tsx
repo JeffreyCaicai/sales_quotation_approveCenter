@@ -178,11 +178,18 @@ export function QuotationApp() {
           quote={quotationQuote}
           onBack={() => setQuotationQuoteId(null)}
           onPrint={() => window.print()}
+          onViewHistory={() => {
+            setProgressQuoteId(quotationQuote.id);
+            setQuotationQuoteId(null);
+          }}
         />
-      ) : progressQuote && user.role === "sales" ? (
+      ) : progressQuote && (progressQuote.status === "approved" || user.role === "sales") ? (
         <QuoteProgressScreen
           quote={progressQuote}
-          onBack={() => setProgressQuoteId(null)}
+          onBack={() => {
+            if (progressQuote.status === "approved") setQuotationQuoteId(progressQuote.id);
+            setProgressQuoteId(null);
+          }}
           onEdit={() => {
             setWizard({ initialQuote: progressQuote });
             setProgressQuoteId(null);
