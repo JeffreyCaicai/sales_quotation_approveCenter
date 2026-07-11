@@ -107,61 +107,61 @@ test("replaces the disposable starter with the quotation workspace", async () =>
   assert.match(quoteWizard, /validateQuote/);
   assert.match(quoteWizard, /validateQuoteReferences/);
   assert.match(quoteWizard, /calculatePricing/);
-  assert.match(quoteWizard, /销售主管 → CEO/);
+  assert.match(quoteWizard, /labelKey: "wizard\.approvalExecutive"/);
   assert.match(
     quoteWizard,
-    /if \(discount > 60\) \{[\s\S]*?label: "较高折扣 · 销售主管审批"[\s\S]*?tone: "elevated"[\s\S]*?description: "折扣处于关注区间，请在提交前确认商业依据。"/,
+    /if \(discount > 60\) \{[\s\S]*?labelKey: "wizard\.approvalElevated"[\s\S]*?tone: "elevated"[\s\S]*?descriptionKey: "wizard\.approvalElevatedHelp"/,
   );
   assert.match(
     quoteWizard,
-    /<div className=\{`approval-callout approval-callout--\$\{approval\.tone\}`\} role="status" aria-live="polite">[\s\S]*?<strong>\{approval\.label\}<\/strong>[\s\S]*?<p>\{approval\.description\}<\/p>/,
+    /<div className=\{`approval-callout approval-callout--\$\{approval\.tone\}`\} role="status" aria-live="polite">[\s\S]*?<strong>\{t\(approval\.labelKey\)\}<\/strong>[\s\S]*?<p>\{t\(approval\.descriptionKey\)\}<\/p>/,
   );
   assert.match(quoteWizard, /aria-current=\{index === step \? "step" : undefined\}/);
   assert.match(quoteWizard, /aria-invalid=\{Boolean\(error\)\}/);
   assert.match(quoteWizard, /id="bonus"[\s\S]*error=\{errors\.bonus\}/);
   assert.match(quoteWizard, /const handleSave = \(\) => \{\s*onSave\(input\);\s*\}/);
   assert.match(approvalScreen, /export function ApprovalScreen/);
-  assert.match(approvalScreen, /客户与品牌/);
-  assert.match(approvalScreen, /投放资源/);
-  assert.match(approvalScreen, /计算明细/);
-  assert.match(approvalScreen, /审批时间线/);
+  assert.match(approvalScreen, /t\("approval\.clientAndBrand"\)/);
+  assert.match(approvalScreen, /t\("approval\.resources"\)/);
+  assert.match(approvalScreen, /t\("approval\.calculationDetails"\)/);
+  assert.match(approvalScreen, /<QuoteVersionHistory/);
   assert.match(approvalScreen, /<dialog/);
-  assert.match(approvalScreen, /请填写退回原因/);
+  assert.match(approvalScreen, /t\("validation\.returnReasonRequired"\)/);
   assert.match(approvalScreen, /<QuoteVersionHistory/);
   assert.match(quoteProgressScreen, /export function QuoteProgressScreen/);
-  assert.match(quoteProgressScreen, /最新退回原因/);
-  assert.match(quoteProgressScreen, /isReturned \? "需要销售处理" : "上一轮退回意见"/);
-  assert.match(quoteProgressScreen, /修改并重新提交/);
+  assert.match(quoteProgressScreen, /t\("progress\.latestReturnReason"\)/);
+  assert.match(quoteProgressScreen, /isReturned \? "progress\.salesActionNeeded" : "progress\.priorReturn"/);
+  assert.match(quoteProgressScreen, /t\("progress\.reviseResubmit"\)/);
   assert.match(quoteProgressScreen, /<QuoteVersionHistory/);
-  assert.match(quoteVersionHistory, /版本记录/);
-  assert.match(quoteVersionHistory, /审批时间线/);
+  assert.match(quoteVersionHistory, /t\("history\.versionHistory"\)/);
+  assert.match(quoteVersionHistory, /t\("history\.approvalTimeline"\)/);
   assert.match(quoteVersionHistory, /quote\.versionSnapshots\.map/);
   assert.match(quoteVersionHistory, /snapshot\.traffic/);
   assert.match(quoteVersionHistory, /snapshot\.impressions/);
   assert.match(quoteVersionHistory, /event\.version === snapshot\.version/);
   assert.match(quotationScreen, /export function QuotationScreen/);
   assert.match(quotationScreen, /quote\.status !== "approved"/);
-  assert.match(quotationScreen, /报价编号/);
-  assert.match(quotationScreen, /报价日期/);
-  assert.match(quotationScreen, /客户与品牌/);
-  assert.match(quotationScreen, /销售负责人/);
-  assert.match(quotationScreen, /投放周期/);
+  assert.match(quotationScreen, /t\("quotation\.quoteNumber"\)/);
+  assert.match(quotationScreen, /t\("quotation\.issueDate"\)/);
+  assert.match(quotationScreen, /t\("quotation\.clientAndBrand"\)/);
+  assert.match(quotationScreen, /t\("quotation\.salesOwner"\)/);
+  assert.match(quotationScreen, /t\("quotation\.campaignPeriod"\)/);
   assert.match(quotationScreen, /Spot/);
   assert.match(quotationScreen, /Bonus/);
-  assert.match(quotationScreen, /日均流量/);
-  assert.match(quotationScreen, /月曝光/);
-  assert.match(quotationScreen, /<th className="align-right">投放金额<\/th>/);
+  assert.match(quotationScreen, /t\("quotation\.dailyTraffic"\)/);
+  assert.match(quotationScreen, /t\("quotation\.monthlyImpressions"\)/);
+  assert.match(quotationScreen, /<th className="align-right">\{t\("quotation\.campaignAmount"\)\}<\/th>/);
   assert.doesNotMatch(quotationScreen, /<th className="align-right">Rate Card<\/th>/);
-  assert.match(quotationScreen, /Rate Card 基础价/);
-  assert.match(quotationScreen, /折扣减免/);
-  assert.match(quotationScreen, /折后净价/);
-  assert.match(quotationScreen, /模拟税费/);
+  assert.match(quotationScreen, /t\("quotation\.basePrice"\)/);
+  assert.match(quotationScreen, /t\("quotation\.discountDeduction"/);
+  assert.match(quotationScreen, /t\("quotation\.netPrice"\)/);
+  assert.match(quotationScreen, /t\("quotation\.simulatedTax"/);
   assert.match(quotationScreen, /DEMO_TAX_RATE/);
   assert.doesNotMatch(quotationScreen, /pricing\.tax\s*\/\s*quote\.pricing\.netPrice/);
-  assert.match(quotationScreen, /含税总额/);
-  assert.match(quotationScreen, /报价条款/);
-  assert.match(quotationScreen, /楼宇明细附录/);
-  assert.match(quotationScreen, /审批记录/);
+  assert.match(quotationScreen, /t\("quotation\.totalWithTax"\)/);
+  assert.match(quotationScreen, /t\("quotation\.terms"\)/);
+  assert.match(quotationScreen, /t\("quotation\.appendix"\)/);
+  assert.match(quotationScreen, /t\("quotation\.approvalRecord"\)/);
   assert.match(appShell, /DEMO/);
   assert.match(login, /<LanguageSwitcher \/>/);
   assert.equal(appShell.match(/<LanguageSwitcher \/>/g)?.length, 2);
@@ -169,10 +169,7 @@ test("replaces the disposable starter with the quotation workspace", async () =>
   assert.match(i18n, /label: "销售代表"/);
   assert.match(i18n, /label: "销售主管"/);
   assert.match(i18n, /label: "首席执行官"/);
-  const quotationAppOutsideTaskThree = quotationApp
-    .replace(/backLabel=\{progressQuote\.status === "approved" \? "返回正式报价" : "返回工作台"\}/, "")
-    .replace(/placementMode: "请选择投放方式"/, "");
-  for (const source of [login, appShell, dashboard, ui, quotationAppOutsideTaskThree]) {
+  for (const source of [login, appShell, dashboard, ui, quotationApp]) {
     assert.doesNotMatch(source, /[\u3400-\u9fff]/);
   }
   assert.match(quotationApp, /title: t\("outcome\.draftSavedTitle"\)/);
@@ -234,9 +231,9 @@ test("approved V2 keeps formal quotation and version-history navigation", async 
   ]);
 
   assert.match(dashboard, /quote\.status === "approved"[\s\S]*labelKey: "dashboard\.viewQuotation"/);
-  assert.match(quotationScreen, /报价版本<\/dt><dd>V\{quote\.version\}<\/dd>/);
+  assert.match(quotationScreen, /t\("quotation\.version"\)[\s\S]*?<dd>V\{quote\.version\}<\/dd>/);
   assert.match(quotationScreen, /onViewHistory: \(\) => void/);
-  assert.match(quotationScreen, /onClick=\{onViewHistory\}>查看版本记录<\/button>/);
+  assert.match(quotationScreen, /onClick=\{onViewHistory\}>\{t\("quotation\.viewHistory"\)\}<\/button>/);
   assert.match(
     quotationApp,
     /onViewHistory=\{\(\) => \{\s*setProgressQuoteId\(quotationQuote\.id\);\s*setQuotationQuoteId\(null\);\s*\}\}/,
@@ -248,11 +245,11 @@ test("approved V2 keeps formal quotation and version-history navigation", async 
   );
   assert.match(
     quotationApp,
-    /backLabel=\{progressQuote\.status === "approved" \? "返回正式报价" : "返回工作台"\}/,
+    /backLabel=\{t\(progressQuote\.status === "approved" \? "progress\.backToQuotation" : "progress\.backToWorkspace"\)\}/,
   );
   assert.match(quoteProgressScreen, /backLabel: string/);
   assert.match(quoteProgressScreen, /← \{backLabel\}/);
-  assert.doesNotMatch(quoteProgressScreen, /← 返回工作台/);
+  assert.doesNotMatch(quoteProgressScreen, /[\u3400-\u9fff]/);
 });
 
 test("uses only a canonical site origin for public Open Graph and X metadata", async () => {

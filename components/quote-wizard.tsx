@@ -4,9 +4,11 @@ import { useState } from "react";
 
 import { BUILDINGS, CUSTOMERS, DEMO_TAX_RATE, PACKAGES } from "@/lib/mock-data";
 import { calculatePricing, validateQuote, validateQuoteReferences } from "@/lib/quotation";
+import type { TranslationKey } from "@/lib/i18n";
 import type { PlacementMode, Quote, QuoteInput, User } from "@/lib/types";
 
 import { Money } from "./ui";
+import { useLocale } from "./locale-provider";
 
 interface QuoteWizardProps {
   initialQuote?: Quote;
@@ -27,8 +29,7 @@ interface WizardValues {
   discount: number;
 }
 
-const STEPS = ["客户与品牌", "投放方式", "资源选择", "投放参数", "折扣审批", "确认提交"];
-const METRIC_FORMATTER = new Intl.NumberFormat("zh-CN");
+const STEPS: TranslationKey[] = ["wizard.stepCustomer", "wizard.stepMode", "wizard.stepResources", "wizard.stepParameters", "wizard.stepDiscount", "wizard.stepReview"];
 const QUOTE_REFERENCES = { customers: CUSTOMERS, buildings: BUILDINGS, packages: PACKAGES };
 const ERROR_STEPS: Record<string, number> = {
   customerId: 0,
@@ -43,6 +44,7 @@ const ERROR_STEPS: Record<string, number> = {
 };
 
 export function QuoteWizard({ initialQuote, salesUser, onCancel, onSave, onSubmit }: QuoteWizardProps) {
+  const { t } = useLocale();
   const [step, setStep] = useState(0);
   const [search, setSearch] = useState("");
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -143,17 +145,17 @@ export function QuoteWizard({ initialQuote, salesUser, onCancel, onSave, onSubmi
     <div className="quote-wizard">
       <header className="wizard-heading">
         <div>
-          <button className="back-button" type="button" onClick={onCancel}>← 返回工作台</button>
-          <p className="eyebrow">Quotation Builder</p>
-          <h1>{initialQuote ? "编辑报价" : "新建报价"}</h1>
-          <p>{initialQuote ? `${initialQuote.quoteNumber} · V${initialQuote.version}` : "按步骤完成客户、资源与商业条件配置。"}</p>
+          <button className="back-button" type="button" onClick={onCancel}>← {t("wizard.back")}</button>
+          <p className="eyebrow">{t("wizard.eyebrow")}</p>
+          <h1>{t(initialQuote ? "wizard.editTitle" : "wizard.newTitle")}</h1>
+          <p>{initialQuote ? `${initialQuote.quoteNumber} · V${initialQuote.version}` : t("wizard.description")}</p>
         </div>
         <button className="button button--secondary" type="button" onClick={handleSave}>
-          保存草稿
+          {t("wizard.saveDraft")}
         </button>
       </header>
 
-      <nav className="wizard-steps" aria-label="报价创建步骤">
+      <nav className="wizard-steps" aria-label={t("wizard.stepsLabel")}>
         <ol>
           {STEPS.map((label, index) => (
             <li key={label}>
@@ -165,7 +167,7 @@ export function QuoteWizard({ initialQuote, salesUser, onCancel, onSave, onSubmi
                 onClick={() => setStep(index)}
               >
                 <span>{index + 1}</span>
-                {label}
+                {t(label)}
               </button>
             </li>
           ))}
@@ -243,8 +245,8 @@ export function QuoteWizard({ initialQuote, salesUser, onCancel, onSave, onSubmi
 
             {step === 5 ? (
               <ReviewStep
-                customerName={customer?.name ?? "未选择"}
-                brandName={brand?.name ?? "未选择"}
+                customerName={customer?.name ?? t("wizard.notSelected")}
+                brandName={brand?.name ?? t("wizard.notSelected")}
                 mode={values.placementMode}
                 resources={selectedResources.map((item) => item.name)}
                 values={values}
@@ -260,15 +262,15 @@ export function QuoteWizard({ initialQuote, salesUser, onCancel, onSave, onSubmi
               type="button"
               onClick={step === 0 ? onCancel : () => setStep((current) => current - 1)}
             >
-              {step === 0 ? "取消" : "上一步"}
+              {t(step === 0 ? "wizard.cancel" : "wizard.previous")}
             </button>
             {step < STEPS.length - 1 ? (
               <button className="button button--primary" type="button" onClick={goNext}>
-                下一步
+                {t("wizard.next")}
               </button>
             ) : (
               <button className="button button--primary" type="button" onClick={handleSubmit}>
-                {initialQuote?.status === "returned" ? "重新提交审批" : "提交销售主管审批"}
+                {t(initialQuote?.status === "returned" ? "wizard.resubmit" : "wizard.submitManager")}
               </button>
             )}
           </footer>
@@ -287,20 +289,18 @@ export function QuoteWizard({ initialQuote, salesUser, onCancel, onSave, onSubmi
 }
 
 function WizardSectionHeading({ step }: { step: number }) {
-  const content = [
-    ["选择客户与品牌", "仅显示当前 Sales PIC 负责的客户。"],
-    ["选择投放方式", "按单栋楼宇灵活组合，或使用预设销售包。"],
-    ["选择投放资源", "Rate Card、流量和曝光均为原型模拟数据。"],
-    ["设置投放参数", "基础价格按四周 Rate Card 随周期等比例计算。"],
-    ["设置折扣", "审批路径会随折扣实时变化。"],
-    ["确认并提交", "核对信息后提交；所有报价均先进入销售主管审批。"],
-  ][step];
+  const { t } = useLocale();
+  const content = ([
+    ["wizard.customerTitle", "wizard.customerHelp"], ["wizard.modeTitle", "wizard.modeHelp"],
+    ["wizard.resourcesTitle", "wizard.resourcesHelp"], ["wizard.parametersTitle", "wizard.parametersHelp"],
+    ["wizard.discountTitle", "wizard.discountStepHelp"], ["wizard.reviewTitle", "wizard.reviewHelp"],
+  ] as Array<[TranslationKey, TranslationKey]>)[step];
 
   return (
     <header className="wizard-section__heading">
-      <span>步骤 {step + 1} / {STEPS.length}</span>
-      <h2 id={`wizard-step-${step}`}>{content[0]}</h2>
-      <p>{content[1]}</p>
+      <span>{t("wizard.stepProgress", { current: step + 1, total: STEPS.length })}</span>
+      <h2 id={`wizard-step-${step}`}>{t(content[0])}</h2>
+      <p>{t(content[1])}</p>
     </header>
   );
 }
@@ -320,12 +320,13 @@ function CustomerStep({
   onCustomerChange: (id: string) => void;
   onBrandChange: (id: string) => void;
 }) {
+  const { t } = useLocale();
   const customer = customers.find((item) => item.id === customerId);
 
   return (
     <div className="form-stack">
-      <fieldset className="form-fieldset" aria-describedby={errors.customerId ? "customer-error" : undefined}>
-        <legend>客户</legend>
+      <fieldset className="form-fieldset" aria-invalid={Boolean(errors.customerId)} aria-describedby={errors.customerId ? "customer-error" : undefined}>
+        <legend>{t("wizard.customer")}</legend>
         <div className="choice-grid choice-grid--customers">
           {customers.map((item) => (
             <button
@@ -345,7 +346,7 @@ function CustomerStep({
       </fieldset>
 
       <label className="form-field">
-        <span>品牌</span>
+        <span>{t("wizard.brand")}</span>
         <select
           value={brandId}
           disabled={!customer}
@@ -353,7 +354,7 @@ function CustomerStep({
           aria-describedby={errors.brandId ? "brand-error" : undefined}
           onChange={(event) => onBrandChange(event.target.value)}
         >
-          <option value="">{customer ? "请选择品牌" : "请先选择客户"}</option>
+          <option value="">{t(customer ? "wizard.selectBrand" : "wizard.selectCustomerFirst")}</option>
           {customer?.brands.map((item) => (
             <option value={item.id} key={item.id}>{item.name} · {item.category}</option>
           ))}
@@ -373,13 +374,14 @@ function PlacementModeStep({
   error?: string;
   onChange: (mode: PlacementMode) => void;
 }) {
+  const { t } = useLocale();
   return (
     <fieldset
       className="form-fieldset"
       aria-invalid={Boolean(error)}
       aria-describedby={error ? "placement-mode-error" : undefined}
     >
-      <legend>投放方式</legend>
+      <legend>{t("wizard.placementMode")}</legend>
       <div className="mode-grid">
         <button
           className={value === "building" ? "mode-card mode-card--selected" : "mode-card"}
@@ -387,10 +389,10 @@ function PlacementModeStep({
           aria-pressed={value === "building"}
           onClick={() => onChange("building")}
         >
-          <span className="mode-card__icon" aria-hidden="true">楼</span>
-          <strong>定点挑楼</strong>
-          <span>按客户目标逐栋选择，可组合多个楼宇。</span>
-          <small>灵活配置 · 多选</small>
+          <span className="mode-card__icon" aria-hidden="true">B</span>
+          <strong>{t("wizard.buildingMode")}</strong>
+          <span>{t("wizard.buildingModeDescription")}</span>
+          <small>{t("wizard.buildingModeMeta")}</small>
         </button>
         <button
           className={value === "package" ? "mode-card mode-card--selected" : "mode-card"}
@@ -398,10 +400,10 @@ function PlacementModeStep({
           aria-pressed={value === "package"}
           onClick={() => onChange("package")}
         >
-          <span className="mode-card__icon" aria-hidden="true">包</span>
-          <strong>预设销售包</strong>
-          <span>比较已配置的区域组合与人群覆盖。</span>
-          <small>快速报价 · 单选</small>
+          <span className="mode-card__icon" aria-hidden="true">P</span>
+          <strong>{t("wizard.packageMode")}</strong>
+          <span>{t("wizard.packageModeDescription")}</span>
+          <small>{t("wizard.packageModeMeta")}</small>
         </button>
       </div>
       <FieldError id="placement-mode-error" message={error} />
@@ -426,7 +428,8 @@ function ResourceStep({
   onSearchChange: (value: string) => void;
   onToggle: (id: string) => void;
 }) {
-  if (!mode) return <p className="inline-notice">请返回上一步选择投放方式。</p>;
+  const { t, formatNumber } = useLocale();
+  if (!mode) return <p className="inline-notice">{t("wizard.chooseModeFirst")}</p>;
 
   const resources = mode === "building" ? visibleBuildings : PACKAGES;
   return (
@@ -435,22 +438,22 @@ function ResourceStep({
       aria-invalid={Boolean(error)}
       aria-describedby={error ? "placement-error" : undefined}
     >
-      <legend className="sr-only">投放资源</legend>
+      <legend className="sr-only">{t("wizard.resources")}</legend>
       {mode === "building" ? (
         <label className="search-field">
-          <span className="sr-only">搜索楼宇</span>
+          <span className="sr-only">{t("wizard.searchBuildings")}</span>
           <span aria-hidden="true">⌕</span>
           <input
             type="search"
             value={search}
-            placeholder="搜索楼宇名称、区域或类型"
+            placeholder={t("wizard.searchPlaceholder")}
             onChange={(event) => onSearchChange(event.target.value)}
           />
         </label>
       ) : (
         <div className="package-compare-label">
-          <strong>销售包对比</strong>
-          <span>价格均为四周 Rate Card</span>
+          <strong>{t("wizard.packageComparison")}</strong>
+          <span>{t("wizard.fourWeekRateCard")}</span>
         </div>
       )}
 
@@ -476,15 +479,15 @@ function ResourceStep({
               <small>{item.location}</small>
               {description ? <p>{description}</p> : null}
               <span className="resource-card__metrics">
-                <span><small>日均流量</small>{METRIC_FORMATTER.format(item.traffic)}</span>
-                <span><small>月曝光</small>{METRIC_FORMATTER.format(item.impressions)}</span>
+                <span><small>{t("wizard.dailyTraffic")}</small>{formatNumber(item.traffic)}</span>
+                <span><small>{t("wizard.monthlyImpressions")}</small>{formatNumber(item.impressions)}</span>
               </span>
-              <span className="resource-card__price"><Money amount={item.priceRmb} /><small> / 4 周</small></span>
+              <span className="resource-card__price"><Money amount={item.priceRmb} /><small>{t("wizard.fourWeeksSuffix")}</small></span>
             </button>
           );
         })}
       </div>
-      {resources.length === 0 ? <p className="inline-notice">没有匹配的楼宇，请调整搜索关键词。</p> : null}
+      {resources.length === 0 ? <p className="inline-notice">{t("wizard.noBuildings")}</p> : null}
       <FieldError id="placement-error" message={error} />
     </fieldset>
   );
@@ -499,12 +502,13 @@ function ParameterStep({
   errors: Record<string, string>;
   onChange: <Key extends keyof WizardValues>(key: Key, value: WizardValues[Key]) => void;
 }) {
+  const { t } = useLocale();
   return (
     <div className="number-grid">
       <NumberField
         id="weeks"
-        label="投放周期"
-        suffix="周"
+        label={t("wizard.weeks")}
+        suffix={t("wizard.weekUnit")}
         min={1}
         value={values.weeks}
         error={errors.weeks}
@@ -512,8 +516,8 @@ function ParameterStep({
       />
       <NumberField
         id="spots"
-        label="Spot 数量"
-        suffix="次"
+        label={t("wizard.spots")}
+        suffix={t("wizard.occurrenceUnit")}
         min={1}
         value={values.spots}
         error={errors.spots}
@@ -521,16 +525,16 @@ function ParameterStep({
       />
       <NumberField
         id="bonus"
-        label="Bonus"
-        suffix="次"
+        label={t("wizard.bonus")}
+        suffix={t("wizard.occurrenceUnit")}
         min={0}
         value={values.bonus}
         error={errors.bonus}
         onChange={(value) => onChange("bonus", value)}
       />
       <div className="parameter-note">
-        <strong>计算说明</strong>
-        <span>Rate Card 以 4 周为计价单位；Spot 与 Bonus 用于排期确认，暂不改变模拟基础价格。</span>
+        <strong>{t("wizard.calculationNote")}</strong>
+        <span>{t("wizard.calculationHelp")}</span>
       </div>
     </div>
   );
@@ -547,10 +551,11 @@ function DiscountStep({
   error?: string;
   onChange: (value: number) => void;
 }) {
+  const { t } = useLocale();
   return (
     <div className="discount-editor">
       <label className="form-field form-field--discount">
-        <span>客户折扣</span>
+        <span>{t("wizard.customerDiscount")}</span>
         <span className="discount-input">
           <input
             type="number"
@@ -564,13 +569,13 @@ function DiscountStep({
           />
           <span>%</span>
         </span>
-        <small id="discount-help">输入 0–100，数值表示从 Rate Card 扣减的比例。</small>
+        <small id="discount-help">{t("wizard.discountHelp")}</small>
         <FieldError id="discount-error" message={error} />
       </label>
       <div className={`approval-callout approval-callout--${approval.tone}`} role="status" aria-live="polite">
-        <span>当前审批路径</span>
-        <strong>{approval.label}</strong>
-        <p>{approval.description}</p>
+        <span>{t("wizard.currentApprovalPath")}</span>
+        <strong>{t(approval.labelKey)}</strong>
+        <p>{t(approval.descriptionKey)}</p>
       </div>
     </div>
   );
@@ -593,23 +598,24 @@ function ReviewStep({
   approval: ReturnType<typeof approvalPath>;
   errors: Record<string, string>;
 }) {
+  const { locale, t, formatNumber } = useLocale();
   return (
     <div className="review-stack">
       {Object.keys(errors).length > 0 ? (
         <div className="form-error-summary" role="alert">
-          <strong>请先完善以下信息</strong>
-          <ul>{Object.values(errors).map((message) => <li key={message}>{message}</li>)}</ul>
+          <strong>{t("wizard.completeInformation")}</strong>
+          <ul>{Object.values(errors).map((message) => <li key={message}>{t(message as TranslationKey)}</li>)}</ul>
         </div>
       ) : null}
       <dl className="review-grid">
-        <div><dt>客户</dt><dd>{customerName}</dd></div>
-        <div><dt>品牌</dt><dd>{brandName}</dd></div>
-        <div><dt>投放方式</dt><dd>{mode === "building" ? "定点挑楼" : mode === "package" ? "预设销售包" : "未选择"}</dd></div>
-        <div><dt>投放参数</dt><dd>{values.weeks} 周 · {values.spots} Spot · {values.bonus} Bonus</dd></div>
-        <div className="review-grid__wide"><dt>投放资源</dt><dd>{resources.join("、") || "未选择"}</dd></div>
-        <div className="review-grid__wide"><dt>审批路径</dt><dd><strong>{approval.label}</strong></dd></div>
+        <div><dt>{t("wizard.customer")}</dt><dd>{customerName}</dd></div>
+        <div><dt>{t("wizard.brand")}</dt><dd>{brandName}</dd></div>
+        <div><dt>{t("wizard.placementMode")}</dt><dd>{mode ? t(mode === "building" ? "wizard.buildingMode" : "wizard.packageMode") : t("wizard.notSelected")}</dd></div>
+        <div><dt>{t("wizard.parameters")}</dt><dd>{formatNumber(values.weeks)} {t("wizard.weekUnit")} · {formatNumber(values.spots)} Spot · {formatNumber(values.bonus)} Bonus</dd></div>
+        <div className="review-grid__wide"><dt>{t("wizard.resources")}</dt><dd>{resources.join(locale === "zh-CN" ? "、" : ", ") || t("wizard.notSelected")}</dd></div>
+        <div className="review-grid__wide"><dt>{t("wizard.approvalPath")}</dt><dd><strong>{t(approval.labelKey)}</strong></dd></div>
       </dl>
-      <p className="review-notice">提交后报价将锁定当前版本并进入销售主管审批。高于 70% 的折扣经主管通过后再流转 CEO。</p>
+      <p className="review-notice">{t("wizard.reviewNotice")}</p>
     </div>
   );
 }
@@ -653,7 +659,8 @@ function NumberField({
 }
 
 function FieldError({ id, message }: { id: string; message?: string }) {
-  return message ? <span className="field-error" id={id} role="alert">{message}</span> : null;
+  const { t } = useLocale();
+  return message ? <span className="field-error" id={id} role="alert">{t(message as TranslationKey)}</span> : null;
 }
 
 function PricingSummary({
@@ -669,28 +676,29 @@ function PricingSummary({
   traffic: number;
   impressions: number;
 }) {
+  const { t, formatNumber } = useLocale();
   return (
-    <aside className="pricing-summary" aria-label="实时报价摘要">
+    <aside className="pricing-summary" aria-label={t("wizard.liveSummary")}>
       <header>
-        <div><span>实时价格</span><strong>报价摘要</strong></div>
-        <span className="demo-chip">模拟</span>
+        <div><span>{t("wizard.livePricing")}</span><strong>{t("wizard.liveSummary")}</strong></div>
+        <span className="demo-chip">{t("wizard.demo")}</span>
       </header>
       <dl className="pricing-ledger">
-        <div><dt>Rate Card 基础价</dt><dd><Money amount={pricing.basePrice} /></dd></div>
-        <div><dt>折扣（{Number.isFinite(discount) ? discount : "—"}%）</dt><dd className="pricing-ledger__discount">− <Money amount={pricing.discountAmount} /></dd></div>
-        <div className="pricing-ledger__net"><dt>折后净价</dt><dd><Money amount={pricing.netPrice} /></dd></div>
-        <div><dt>模拟税费（{DEMO_TAX_RATE * 100}%）</dt><dd><Money amount={pricing.tax} /></dd></div>
-        <div className="pricing-ledger__total"><dt>含税总额</dt><dd><Money amount={pricing.total} /></dd></div>
+        <div><dt>{t("wizard.basePrice")}</dt><dd><Money amount={pricing.basePrice} /></dd></div>
+        <div><dt>{t("wizard.discountDeduction", { discount: Number.isFinite(discount) ? formatNumber(discount) : "—" })}</dt><dd className="pricing-ledger__discount">− <Money amount={pricing.discountAmount} /></dd></div>
+        <div className="pricing-ledger__net"><dt>{t("wizard.netPrice")}</dt><dd><Money amount={pricing.netPrice} /></dd></div>
+        <div><dt>{t("wizard.simulatedTax", { tax: formatNumber(DEMO_TAX_RATE * 100) })}</dt><dd><Money amount={pricing.tax} /></dd></div>
+        <div className="pricing-ledger__total"><dt>{t("wizard.totalWithTax")}</dt><dd><Money amount={pricing.total} /></dd></div>
       </dl>
       <div className="audience-summary">
-        <div><span>日均流量</span><strong>{METRIC_FORMATTER.format(traffic)}</strong></div>
-        <div><span>月曝光</span><strong>{METRIC_FORMATTER.format(impressions)}</strong></div>
+        <div><span>{t("wizard.dailyTraffic")}</span><strong>{formatNumber(traffic)}</strong></div>
+        <div><span>{t("wizard.monthlyImpressions")}</span><strong>{formatNumber(impressions)}</strong></div>
       </div>
       <div className={`approval-strip approval-strip--${approval.tone}`}>
-        <span>审批路径</span>
-        <strong>{approval.label}</strong>
+        <span>{t("wizard.approvalPath")}</span>
+        <strong>{t(approval.labelKey)}</strong>
       </div>
-      <p>人民币价格、流量、曝光与 6% 税率均为演示模拟值。</p>
+      <p>{t("wizard.demoNotice")}</p>
     </aside>
   );
 }
@@ -719,30 +727,30 @@ function getValidationErrors(input: QuoteInput, values: WizardValues, salesId: s
   return {
     ...referenceErrors,
     ...fieldErrors,
-    ...(!values.placementMode ? { placementMode: "请选择投放方式" } : {}),
+    ...(!values.placementMode ? { placementMode: "validation.placementModeRequired" } : {}),
   };
 }
 
 function approvalPath(discount: number) {
   if (discount > 70) {
     return {
-      label: "销售主管 → CEO",
+      labelKey: "wizard.approvalExecutive",
       tone: "executive",
-      description: "折扣高于 70%，销售主管通过后将进入 CEO 最终审批。",
+      descriptionKey: "wizard.approvalExecutiveHelp",
     } as const;
   }
 
   if (discount > 60) {
     return {
-      label: "较高折扣 · 销售主管审批",
+      labelKey: "wizard.approvalElevated",
       tone: "elevated",
-      description: "折扣处于关注区间，请在提交前确认商业依据。",
+      descriptionKey: "wizard.approvalElevatedHelp",
     } as const;
   }
 
   return {
-    label: "销售主管审批",
+    labelKey: "wizard.approvalManager",
     tone: "standard",
-    description: "报价提交后由销售主管完成审批。",
+    descriptionKey: "wizard.approvalStandardHelp",
   } as const;
 }

@@ -1,6 +1,9 @@
-import { BUILDINGS, CUSTOMERS, DEMO_DATA_NOTICE, DEMO_TAX_RATE, PACKAGES, USERS } from "@/lib/mock-data";
+import { useMemo } from "react";
+
+import { BUILDINGS, CUSTOMERS, DEMO_TAX_RATE, PACKAGES, USERS } from "@/lib/mock-data";
 import type { ApprovalEvent, Building, Quote } from "@/lib/types";
 
+import { useLocale } from "./locale-provider";
 import { Money } from "./ui";
 
 interface QuotationScreenProps {
@@ -10,32 +13,19 @@ interface QuotationScreenProps {
   onViewHistory: () => void;
 }
 
-const DATE_FORMATTER = new Intl.DateTimeFormat("zh-CN", {
-  year: "numeric",
-  month: "2-digit",
-  day: "2-digit",
-});
-
-const DATE_TIME_FORMATTER = new Intl.DateTimeFormat("zh-CN", {
-  year: "numeric",
-  month: "2-digit",
-  day: "2-digit",
-  hour: "2-digit",
-  minute: "2-digit",
-});
-
-const METRIC_FORMATTER = new Intl.NumberFormat("zh-CN");
-const PERCENT_FORMATTER = new Intl.NumberFormat("zh-CN", { maximumFractionDigits: 2 });
-
 export function QuotationScreen({ quote, onBack, onPrint, onViewHistory }: QuotationScreenProps) {
+  const { locale, t, formatDate, formatNumber } = useLocale();
+  const dateTimeFormatter = useMemo(() => new Intl.DateTimeFormat(locale, {
+    year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit",
+  }), [locale]);
   if (quote.status !== "approved") {
     return (
       <div className="quotation-screen quotation-screen--restricted">
-        <button className="back-button" type="button" onClick={onBack}>← 返回工作台</button>
+        <button className="back-button" type="button" onClick={onBack}>← {t("quotation.back")}</button>
         <section className="quotation-access-message" role="alert">
-          <span>报价尚未完成审批</span>
-          <h1>正式报价暂不可用</h1>
-          <p>只有状态为“已批准”的报价可以生成、查看或打印正式 Quotation。</p>
+          <span>{t("quotation.restrictedEyebrow")}</span>
+          <h1>{t("quotation.restrictedTitle")}</h1>
+          <p>{t("quotation.restrictedHelp")}</p>
         </section>
       </div>
     );
@@ -59,103 +49,103 @@ export function QuotationScreen({ quote, onBack, onPrint, onViewHistory }: Quota
 
   return (
     <div className="quotation-screen">
-      <div className="quotation-toolbar" aria-label="正式报价操作">
-        <button className="back-button" type="button" onClick={onBack}>← 返回工作台</button>
-        <button className="button" type="button" onClick={onViewHistory}>查看版本记录</button>
-        <button className="button button--primary" type="button" onClick={onPrint}>打印 / 导出 PDF</button>
+      <div className="quotation-toolbar" aria-label={t("quotation.toolbar")}>
+        <button className="back-button" type="button" onClick={onBack}>← {t("quotation.back")}</button>
+        <button className="button" type="button" onClick={onViewHistory}>{t("quotation.viewHistory")}</button>
+        <button className="button button--primary" type="button" onClick={onPrint}>{t("quotation.print")}</button>
       </div>
 
       <article className="quotation-document" aria-labelledby="quotation-title">
         <header className="quotation-document__header">
           <div className="quotation-brand">
             <span className="quotation-brand__mark" aria-hidden="true"><i /><i /><i /></span>
-            <span><strong>报价审批中心</strong><small>QUOTATION WORKSPACE</small></span>
+            <span><strong>{t("product.name")}</strong><small>{t("quotation.workspace")}</small></span>
           </div>
           <div className="quotation-title-block">
-            <span>正式商业文件 · 模拟数据</span>
-            <h1 id="quotation-title">QUOTATION <small>报价单</small></h1>
+            <span>{t("quotation.formalDocument")}</span>
+            <h1 id="quotation-title">{t("quotation.title")} <small>{t("quotation.subtitle")}</small></h1>
           </div>
         </header>
 
-        <section className="quotation-reference" aria-label="报价信息">
+        <section className="quotation-reference" aria-label={t("quotation.reference")}>
           <dl>
-            <div><dt>报价编号</dt><dd>{quote.quoteNumber}</dd></div>
-            <div><dt>报价日期</dt><dd>{DATE_FORMATTER.format(new Date(issueDate))}</dd></div>
-            <div><dt>报价版本</dt><dd>V{quote.version}</dd></div>
-            <div><dt>币种</dt><dd>人民币 CNY</dd></div>
+            <div><dt>{t("quotation.quoteNumber")}</dt><dd>{quote.quoteNumber}</dd></div>
+            <div><dt>{t("quotation.issueDate")}</dt><dd>{formatDate(issueDate)}</dd></div>
+            <div><dt>{t("quotation.version")}</dt><dd>V{quote.version}</dd></div>
+            <div><dt>{t("quotation.currency")}</dt><dd>{t("quotation.currencyCny")}</dd></div>
           </dl>
         </section>
 
         <section className="quotation-section quotation-parties" aria-labelledby="quotation-client-heading">
-          <header><span>01</span><h2 id="quotation-client-heading">客户与品牌</h2></header>
+          <header><span>01</span><h2 id="quotation-client-heading">{t("quotation.clientAndBrand")}</h2></header>
           <dl className="quotation-facts">
-            <div><dt>客户</dt><dd>{customer?.name ?? "未知客户"}</dd></div>
-            <div><dt>品牌</dt><dd>{brand?.name ?? "未知品牌"}</dd></div>
-            <div><dt>销售负责人</dt><dd>{owner?.name ?? quote.salesId} · {owner?.title ?? "销售"}</dd></div>
-            <div><dt>投放周期</dt><dd>自排期确认日起连续 {quote.weeks} 周</dd></div>
+            <div><dt>{t("quotation.customer")}</dt><dd>{customer?.name ?? t("dashboard.unknownCustomer")}</dd></div>
+            <div><dt>{t("quotation.brand")}</dt><dd>{brand?.name ?? t("approval.unknownBrand")}</dd></div>
+            <div><dt>{t("quotation.salesOwner")}</dt><dd>{owner?.name ?? quote.salesId} · {owner?.title ?? t("approval.roleSales")}</dd></div>
+            <div><dt>{t("quotation.campaignPeriod")}</dt><dd>{t("quotation.periodValue", { weeks: formatNumber(quote.weeks) })}</dd></div>
           </dl>
         </section>
 
         <section className="quotation-section" aria-labelledby="quotation-resource-heading">
-          <header><span>02</span><h2 id="quotation-resource-heading">投放资源与报价项目</h2></header>
+          <header><span>02</span><h2 id="quotation-resource-heading">{t("quotation.resourcesAndItems")}</h2></header>
           <div className="quotation-table-wrap">
             <table className="quotation-table">
               <thead>
-                <tr><th>项目</th><th>类型 / 区域</th><th>周期</th><th className="align-right">投放金额</th></tr>
+                <tr><th>{t("quotation.item")}</th><th>{t("quotation.typeRegion")}</th><th>{t("quotation.period")}</th><th className="align-right">{t("quotation.campaignAmount")}</th></tr>
               </thead>
               <tbody>
                 {resources.map((resource) => (
                   <tr key={resource.id}>
                     <td><strong>{resource.name}</strong><small>{resource.category}</small></td>
-                    <td>{quote.placementMode === "package" ? "销售包" : "楼宇"}<small>{resource.location}</small></td>
-                    <td>{quote.weeks} 周</td>
+                    <td>{t(quote.placementMode === "package" ? "quotation.package" : "quotation.building")}<small>{resource.location}</small></td>
+                    <td>{formatNumber(quote.weeks)} {t("wizard.weekUnit")}</td>
                     <td className="align-right"><Money amount={Math.round(resource.priceRmb * (quote.weeks / 4))} /></td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
-          <div className="quotation-delivery-grid" aria-label="投放与受众指标">
-            <Metric label="Spot" value={`${METRIC_FORMATTER.format(quote.spots)} 次`} />
-            <Metric label="Bonus" value={`${METRIC_FORMATTER.format(quote.bonus)} 次`} />
-            <Metric label="日均流量" value={METRIC_FORMATTER.format(traffic)} />
-            <Metric label="月曝光" value={METRIC_FORMATTER.format(impressions)} />
+          <div className="quotation-delivery-grid" aria-label={t("quotation.deliveryMetrics")}>
+            <Metric label="Spot" value={`${formatNumber(quote.spots)} ${t("quotation.occurrenceUnit")}`} />
+            <Metric label="Bonus" value={`${formatNumber(quote.bonus)} ${t("quotation.occurrenceUnit")}`} />
+            <Metric label={t("quotation.dailyTraffic")} value={formatNumber(traffic)} />
+            <Metric label={t("quotation.monthlyImpressions")} value={formatNumber(impressions)} />
           </div>
         </section>
 
         <section className="quotation-section quotation-pricing" aria-labelledby="quotation-pricing-heading">
-          <header><span>03</span><h2 id="quotation-pricing-heading">价格明细</h2></header>
+          <header><span>03</span><h2 id="quotation-pricing-heading">{t("quotation.priceDetails")}</h2></header>
           <dl className="quotation-pricing__ledger">
-            <PriceRow label="Rate Card 基础价" amount={quote.pricing.basePrice} />
-            <PriceRow label={`折扣减免（${quote.discount}%）`} amount={quote.pricing.discountAmount} deduction />
-            <PriceRow label="折后净价" amount={quote.pricing.netPrice} />
-            <PriceRow label={`模拟税费（${formatPercent(taxRate)}%）`} amount={quote.pricing.tax} />
-            <div className="quotation-total"><dt>含税总额</dt><dd><Money amount={quote.pricing.total} /></dd></div>
+            <PriceRow label={t("quotation.basePrice")} amount={quote.pricing.basePrice} />
+            <PriceRow label={t("quotation.discountDeduction", { discount: formatNumber(quote.discount) })} amount={quote.pricing.discountAmount} deduction />
+            <PriceRow label={t("quotation.netPrice")} amount={quote.pricing.netPrice} />
+            <PriceRow label={t("quotation.simulatedTax", { tax: formatNumber(taxRate) })} amount={quote.pricing.tax} />
+            <div className="quotation-total"><dt>{t("quotation.totalWithTax")}</dt><dd><Money amount={quote.pricing.total} /></dd></div>
           </dl>
         </section>
 
         <section className="quotation-section quotation-terms" aria-labelledby="quotation-terms-heading">
-          <header><span>04</span><h2 id="quotation-terms-heading">报价条款</h2></header>
+          <header><span>04</span><h2 id="quotation-terms-heading">{t("quotation.terms")}</h2></header>
           <ol>
-            <li>本报价自报价日期起 15 个自然日内有效，最终排期以双方书面确认为准。</li>
-            <li>Rate Card 以 4 周为计价单位；Spot 与 Bonus 用于排期确认。</li>
-            <li>所有金额均以人民币计价，并包含 {formatPercent(taxRate)}% 模拟税费。</li>
-            <li>{DEMO_DATA_NOTICE}</li>
+            <li>{t("quotation.termValidity")}</li>
+            <li>{t("quotation.termRateCard")}</li>
+            <li>{t("quotation.termCurrencyTax", { tax: formatNumber(taxRate) })}</li>
+            <li>{t("quotation.termDemo")}</li>
           </ol>
         </section>
 
         <section className="quotation-section quotation-appendix" aria-labelledby="quotation-appendix-heading">
-          <header><span>A</span><h2 id="quotation-appendix-heading">楼宇明细附录</h2></header>
+          <header><span>A</span><h2 id="quotation-appendix-heading">{t("quotation.appendix")}</h2></header>
           <div className="quotation-table-wrap">
             <table className="quotation-table">
-              <thead><tr><th>楼宇</th><th>区域 / 类型</th><th className="align-right">日均流量</th><th className="align-right">月曝光</th></tr></thead>
+              <thead><tr><th>{t("quotation.buildingColumn")}</th><th>{t("quotation.regionType")}</th><th className="align-right">{t("quotation.dailyTraffic")}</th><th className="align-right">{t("quotation.monthlyImpressions")}</th></tr></thead>
               <tbody>
                 {appendixBuildings.map((building) => (
                   <tr key={building.id}>
                     <td><strong>{building.name}</strong></td>
                     <td>{building.location}<small>{building.category}</small></td>
-                    <td className="align-right">{METRIC_FORMATTER.format(building.traffic)}</td>
-                    <td className="align-right">{METRIC_FORMATTER.format(building.impressions)}</td>
+                    <td className="align-right">{formatNumber(building.traffic)}</td>
+                    <td className="align-right">{formatNumber(building.impressions)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -164,28 +154,28 @@ export function QuotationScreen({ quote, onBack, onPrint, onViewHistory }: Quota
         </section>
 
         <section className="quotation-section quotation-approval-record" aria-labelledby="quotation-approval-heading">
-          <header><span>✓</span><h2 id="quotation-approval-heading">审批记录</h2></header>
+          <header><span>✓</span><h2 id="quotation-approval-heading">{t("quotation.approvalRecord")}</h2></header>
           <div className="quotation-table-wrap">
             <table className="quotation-table">
-              <thead><tr><th>审批动作</th><th>审批人</th><th>版本</th><th>时间 / 意见</th></tr></thead>
+              <thead><tr><th>{t("quotation.approvalAction")}</th><th>{t("quotation.approver")}</th><th>{t("quotation.version")}</th><th>{t("quotation.timeComment")}</th></tr></thead>
               <tbody>
                 {quote.approvalHistory.map((event) => (
                   <tr key={event.id}>
-                    <td><strong>{approvalActionLabel(event)}</strong></td>
-                    <td>{event.actorName}<small>{approvalRoleLabel(event)}</small></td>
+                    <td><strong>{t(approvalActionLabel(event))}</strong></td>
+                    <td>{event.actorName}<small>{t(approvalRoleLabel(event))}</small></td>
                     <td>V{event.version}</td>
-                    <td>{DATE_TIME_FORMATTER.format(new Date(event.createdAt))}{event.comment ? <small>{event.comment}</small> : null}</td>
+                    <td>{dateTimeFormatter.format(new Date(event.createdAt))}{event.comment ? <small>{event.comment}</small> : null}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
-          <p className="quotation-approval-stamp"><span aria-hidden="true">✓</span><strong>APPROVED</strong> 本报价已完成所需审批流程</p>
+          <p className="quotation-approval-stamp"><span aria-hidden="true">✓</span><strong>{t("quotation.approved")}</strong> {t("quotation.approvedNotice")}</p>
         </section>
 
         <footer className="quotation-document__footer">
           <span>{quote.quoteNumber} · V{quote.version}</span>
-          <span>报价审批中心 · 模拟数据</span>
+          <span>{t("quotation.demoFooter")}</span>
         </footer>
       </article>
     </div>
@@ -214,22 +204,18 @@ function getAppendixBuildings(quote: Quote, selectedPackages: typeof PACKAGES): 
   return BUILDINGS.filter((building) => buildingIds.has(building.id));
 }
 
-function formatPercent(value: number) {
-  return PERCENT_FORMATTER.format(value);
-}
-
 function approvalActionLabel(event: ApprovalEvent) {
   const labels = {
-    submitted: "提交审批",
-    resubmitted: "重新提交",
-    approved: "批准报价",
-    returned: "退回修改",
+    submitted: "approval.actionSubmitted",
+    resubmitted: "approval.actionResubmitted",
+    approved: "approval.actionApproved",
+    returned: "approval.actionReturned",
   } as const;
   return labels[event.action];
 }
 
 function approvalRoleLabel(event: ApprovalEvent) {
-  if (event.role === "sales") return "销售";
-  if (event.role === "manager") return "销售主管";
-  return "CEO";
+  if (event.role === "sales") return "approval.roleSales" as const;
+  if (event.role === "manager") return "approval.roleManager" as const;
+  return "approval.roleCeo" as const;
 }

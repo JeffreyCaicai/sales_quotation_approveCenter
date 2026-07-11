@@ -50,40 +50,40 @@ test("pricing defaults to the simulated 6 percent tax rate", () => {
   });
 });
 
-test("invalid quote fields return field-level messages", () => {
+test("invalid quote fields return stable field-level localization keys", () => {
   const errors = validateQuote({ customerId: "", brandId: "", placementIds: [], weeks: 0, spots: 0, discount: 101 });
-  assert.equal(errors.customerId, "请选择客户");
-  assert.equal(errors.placementIds, "请至少选择一栋楼宇或一个销售包");
-  assert.equal(errors.discount, "折扣必须在 0%–100% 之间");
+  assert.equal(errors.customerId, "validation.customerRequired");
+  assert.equal(errors.placementIds, "validation.placementRequired");
+  assert.equal(errors.discount, "validation.discountRange");
 });
 
 test("non-finite discount returns the discount range message", () => {
   const errors = validateQuote({ discount: Number.NaN });
-  assert.equal(errors.discount, "折扣必须在 0%–100% 之间");
+  assert.equal(errors.discount, "validation.discountRange");
 });
 
 test("weeks and spots must be finite positive integers", () => {
-  assert.equal(validateQuote({ ...validQuoteInput(), weeks: 1.5 }).weeks, "投放周期必须为正整数");
-  assert.equal(validateQuote({ ...validQuoteInput(), weeks: Number.POSITIVE_INFINITY }).weeks, "投放周期必须为正整数");
-  assert.equal(validateQuote({ ...validQuoteInput(), spots: -1 }).spots, "Spot 数量必须为正整数");
-  assert.equal(validateQuote({ ...validQuoteInput(), spots: 3.2 }).spots, "Spot 数量必须为正整数");
+  assert.equal(validateQuote({ ...validQuoteInput(), weeks: 1.5 }).weeks, "validation.weeksPositiveInteger");
+  assert.equal(validateQuote({ ...validQuoteInput(), weeks: Number.POSITIVE_INFINITY }).weeks, "validation.weeksPositiveInteger");
+  assert.equal(validateQuote({ ...validQuoteInput(), spots: -1 }).spots, "validation.spotsPositiveInteger");
+  assert.equal(validateQuote({ ...validQuoteInput(), spots: 3.2 }).spots, "validation.spotsPositiveInteger");
 });
 
 test("bonus must be a finite nonnegative integer", () => {
-  assert.equal(validateQuote({ ...validQuoteInput(), bonus: Number.NaN }).bonus, "Bonus 必须为非负整数");
-  assert.equal(validateQuote({ ...validQuoteInput(), bonus: -1 }).bonus, "Bonus 必须为非负整数");
-  assert.equal(validateQuote({ ...validQuoteInput(), bonus: 1.5 }).bonus, "Bonus 必须为非负整数");
+  assert.equal(validateQuote({ ...validQuoteInput(), bonus: Number.NaN }).bonus, "validation.bonusNonnegativeInteger");
+  assert.equal(validateQuote({ ...validQuoteInput(), bonus: -1 }).bonus, "validation.bonusNonnegativeInteger");
+  assert.equal(validateQuote({ ...validQuoteInput(), bonus: 1.5 }).bonus, "validation.bonusNonnegativeInteger");
   assert.equal(validateQuote({ ...validQuoteInput(), bonus: 0 }).bonus, undefined);
 });
 
 test("explicit pricing inputs must stay finite before persistence", () => {
   assert.equal(
     validateQuote({ ...validQuoteInput(), basePrice: Number.POSITIVE_INFINITY }).basePrice,
-    "报价基础价格必须为有限非负数",
+    "validation.basePriceFiniteNonnegative",
   );
   assert.equal(
     validateQuote({ ...validQuoteInput(), taxRate: Number.NaN }).taxRate,
-    "模拟税率必须为有限非负数",
+    "validation.taxRateFiniteNonnegative",
   );
 });
 
@@ -93,7 +93,7 @@ test("submitQuote rejects invalid numeric input before creating a persistable qu
 
   assert.throws(
     () => submitQuote({ ...validQuoteInput(), bonus: Number.NaN }, undefined, salesUser),
-    /Bonus 必须为非负整数/,
+    /validation\.bonusNonnegativeInteger/,
   );
 });
 
@@ -246,7 +246,7 @@ test("reference validation rejects a customer outside the active salesperson por
     { customers: [...CUSTOMERS, foreignCustomer], buildings: BUILDINGS, packages: PACKAGES },
   );
 
-  assert.equal(errors.customerId, "请选择当前销售负责的客户");
+  assert.equal(errors.customerId, "validation.customerOwned");
 });
 
 test("reference validation rejects a brand that does not belong to the selected customer", () => {
@@ -256,7 +256,7 @@ test("reference validation rejects a brand that does not belong to the selected 
     { customers: CUSTOMERS, buildings: BUILDINGS, packages: PACKAGES },
   );
 
-  assert.equal(errors.brandId, "请选择该客户旗下的品牌");
+  assert.equal(errors.brandId, "validation.brandBelongsToCustomer");
 });
 
 test("reference validation rejects resources outside the selected placement mode", () => {
@@ -272,8 +272,8 @@ test("reference validation rejects resources outside the selected placement mode
     references,
   );
 
-  assert.equal(buildingInPackage.placementIds, "所选资源与投放方式不匹配");
-  assert.equal(unknownBuilding.placementIds, "所选资源与投放方式不匹配");
+  assert.equal(buildingInPackage.placementIds, "validation.resourceModeMismatch");
+  assert.equal(unknownBuilding.placementIds, "validation.resourceModeMismatch");
 });
 
 test("reference validation rejects a base price that does not match selected resources", () => {
@@ -283,7 +283,7 @@ test("reference validation rejects a base price that does not match selected res
     { customers: CUSTOMERS, buildings: BUILDINGS, packages: PACKAGES },
   );
 
-  assert.equal(errors.basePrice, "报价基础价格与所选资源不一致");
+  assert.equal(errors.basePrice, "validation.basePriceMismatch");
 });
 
 test("submitting a valid new quote creates version 1 pending manager approval", () => {
@@ -527,7 +527,7 @@ test("returning a quote requires a nonblank reason", () => {
   assert.ok(manager);
   assert.ok(pendingQuote);
 
-  assert.throws(() => returnQuote(pendingQuote, manager, "  \n "), /退回原因/);
+  assert.throws(() => returnQuote(pendingQuote, manager, "  \n "), /validation\.returnReasonRequired/);
 });
 
 test("returning a quote preserves its commercial details and exact trimmed reason", () => {

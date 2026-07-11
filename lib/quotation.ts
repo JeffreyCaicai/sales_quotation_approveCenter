@@ -46,35 +46,35 @@ export function calculatePricing(input: QuoteInput): PricingSummary {
 export function validateQuote(input: QuoteInput): Record<string, string> {
   const errors: Record<string, string> = {};
 
-  if (!input.customerId) errors.customerId = "请选择客户";
-  if (!input.brandId) errors.brandId = "请选择品牌";
-  if (!input.placementMode) errors.placementMode = "请选择投放方式";
+  if (!input.customerId) errors.customerId = "validation.customerRequired";
+  if (!input.brandId) errors.brandId = "validation.brandRequired";
+  if (!input.placementMode) errors.placementMode = "validation.placementModeRequired";
   if (!input.placementIds?.length) {
-    errors.placementIds = "请至少选择一栋楼宇或一个销售包";
+    errors.placementIds = "validation.placementRequired";
   }
   if (!Number.isInteger(input.weeks) || (input.weeks ?? 0) <= 0) {
-    errors.weeks = "投放周期必须为正整数";
+    errors.weeks = "validation.weeksPositiveInteger";
   }
   if (!Number.isInteger(input.spots) || (input.spots ?? 0) <= 0) {
-    errors.spots = "Spot 数量必须为正整数";
+    errors.spots = "validation.spotsPositiveInteger";
   }
   if (!Number.isInteger(input.bonus ?? 0) || (input.bonus ?? 0) < 0) {
-    errors.bonus = "Bonus 必须为非负整数";
+    errors.bonus = "validation.bonusNonnegativeInteger";
   }
   if (!Number.isFinite(input.discount) || input.discount < 0 || input.discount > 100) {
-    errors.discount = "折扣必须在 0%–100% 之间";
+    errors.discount = "validation.discountRange";
   }
   if (input.basePrice !== undefined && (!Number.isFinite(input.basePrice) || input.basePrice < 0)) {
-    errors.basePrice = "报价基础价格必须为有限非负数";
+    errors.basePrice = "validation.basePriceFiniteNonnegative";
   }
   if (input.taxRate !== undefined && (!Number.isFinite(input.taxRate) || input.taxRate < 0)) {
-    errors.taxRate = "模拟税率必须为有限非负数";
+    errors.taxRate = "validation.taxRateFiniteNonnegative";
   }
   if (input.traffic !== undefined && (!Number.isInteger(input.traffic) || input.traffic < 0)) {
-    errors.traffic = "日均流量必须为非负整数";
+    errors.traffic = "validation.trafficNonnegativeInteger";
   }
   if (input.impressions !== undefined && (!Number.isInteger(input.impressions) || input.impressions < 0)) {
-    errors.impressions = "月曝光必须为非负整数";
+    errors.impressions = "validation.impressionsNonnegativeInteger";
   }
 
   return errors;
@@ -131,9 +131,9 @@ export function validateQuoteReferences(
   const customer = references.customers.find((item) => item.id === input.customerId);
 
   if (!customer || customer.salesId !== salesId) {
-    errors.customerId = "请选择当前销售负责的客户";
+    errors.customerId = "validation.customerOwned";
   } else if (!customer.brands.some((brand) => brand.id === input.brandId)) {
-    errors.brandId = "请选择该客户旗下的品牌";
+    errors.brandId = "validation.brandBelongsToCustomer";
   }
 
   const resourceIds = input.placementIds ?? [];
@@ -151,7 +151,7 @@ export function validateQuoteReferences(
     || (input.placementMode === "package" && resourceIds.length !== 1);
 
   if (resourceIds.length > 0 && hasWrongResource) {
-    errors.placementIds = "所选资源与投放方式不匹配";
+    errors.placementIds = "validation.resourceModeMismatch";
   } else if (
     resourceIds.length > 0
     && selectedResources.every((resource) => resource !== undefined)
@@ -163,7 +163,7 @@ export function validateQuoteReferences(
       * ((input.weeks ?? 0) / 4),
     );
     if (!Number.isFinite(input.basePrice) || input.basePrice !== expectedBasePrice) {
-      errors.basePrice = "报价基础价格与所选资源不一致";
+      errors.basePrice = "validation.basePriceMismatch";
     }
   }
 
@@ -301,7 +301,7 @@ export function returnQuote(quote: Quote, actor: User, reason: string): Quote {
   assertApprovalTransition(quote, actor);
 
   const comment = reason.trim();
-  if (!comment) throw new Error("请填写退回原因");
+  if (!comment) throw new Error("validation.returnReasonRequired");
 
   const now = new Date().toISOString();
   const eventNumber = quote.approvalHistory.length + 1;

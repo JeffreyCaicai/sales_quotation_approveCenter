@@ -96,6 +96,82 @@ test("money, numbers, and dates use the active locale", () => {
   assert.equal(formatDate("zh-CN", date), new Intl.DateTimeFormat("zh-CN").format(date));
 });
 
+test("quotation workflow dictionaries cover validation, decisions, versions, and print", () => {
+  const requiredKeys = [
+    "validation.customerRequired",
+    "validation.brandRequired",
+    "validation.placementModeRequired",
+    "validation.placementRequired",
+    "validation.weeksPositiveInteger",
+    "validation.spotsPositiveInteger",
+    "validation.bonusNonnegativeInteger",
+    "validation.discountRange",
+    "validation.basePriceFiniteNonnegative",
+    "validation.taxRateFiniteNonnegative",
+    "validation.trafficNonnegativeInteger",
+    "validation.impressionsNonnegativeInteger",
+    "validation.customerOwned",
+    "validation.brandBelongsToCustomer",
+    "validation.resourceModeMismatch",
+    "validation.basePriceMismatch",
+    "validation.returnReasonRequired",
+    "wizard.stepCustomer",
+    "wizard.stepMode",
+    "wizard.stepResources",
+    "wizard.stepParameters",
+    "wizard.stepDiscount",
+    "wizard.stepReview",
+    "wizard.livePricing",
+    "wizard.approvalPath",
+    "approval.approve",
+    "approval.return",
+    "approval.actionSubmitted",
+    "approval.actionResubmitted",
+    "approval.actionApproved",
+    "approval.actionReturned",
+    "progress.latestReturnReason",
+    "progress.backToWorkspace",
+    "progress.backToQuotation",
+    "history.versionHistory",
+    "history.commercialSnapshot",
+    "history.approvalTimeline",
+    "quotation.title",
+    "quotation.quoteNumber",
+    "quotation.issueDate",
+    "quotation.clientAndBrand",
+    "quotation.priceDetails",
+    "quotation.terms",
+    "quotation.appendix",
+    "quotation.approvalRecord",
+    "quotation.print",
+  ] as const;
+  const englishLeaves = dictionaryLeaves(translations.en);
+  const chineseLeaves = dictionaryLeaves(translations["zh-CN"]);
+
+  for (const key of requiredKeys) {
+    assert.equal(typeof englishLeaves[key], "string", `English is missing ${key}`);
+    assert.equal(typeof chineseLeaves[key], "string", `Chinese is missing ${key}`);
+    assert.notEqual(englishLeaves[key], "", `English ${key} is empty`);
+    assert.notEqual(chineseLeaves[key], "", `Chinese ${key} is empty`);
+  }
+});
+
+test("quotation workflow components render copy through the locale context", () => {
+  const componentNames = [
+    "quote-wizard.tsx",
+    "approval-screen.tsx",
+    "quote-progress-screen.tsx",
+    "quote-version-history.tsx",
+    "quotation-screen.tsx",
+  ];
+
+  for (const componentName of componentNames) {
+    const source = readFileSync(new URL(`../components/${componentName}`, import.meta.url), "utf8");
+    assert.match(source, /useLocale\(\)/, `${componentName} must subscribe to locale changes`);
+    assert.doesNotMatch(source, /[\u3400-\u9fff]/, `${componentName} contains untranslated UI copy`);
+  }
+});
+
 test("resetting quotation data does not remove the locale preference", () => {
   const storage = new MemoryStorage();
 
