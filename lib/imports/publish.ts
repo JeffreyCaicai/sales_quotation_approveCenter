@@ -31,6 +31,7 @@ export type PublicationErrorKey =
   | "IMPORT_JOB_NOT_READY"
   | "IMPORT_DATA_TYPE_UNSUPPORTED"
   | "IMPORT_CHANGE_INVALID"
+  | "IMPORT_CHANGE_TYPE_INVALID"
   | "IMPORT_CHANGE_STALE"
   | "PERMISSION_DENIED";
 
@@ -98,42 +99,44 @@ export async function publishImport(
       .orderBy(asc(importChanges.createdAt), asc(importChanges.id));
 
     const changes = stagedRows.map(toImportChange);
+    const liveBeforeByEntityKey = new Map<
+      string,
+      NormalizedCurrentBuilding | null
+    >();
+    for (const change of changes) {
+      const liveBefore = await selectBuildingForUpdate(
+        tx,
+        change.entityKey,
+      );
+      assertBuildingChangePublishable(change, liveBefore);
+      liveBeforeByEntityKey.set(change.entityKey, liveBefore);
+    }
+
     const now = new Date();
     let publishedChanges = 0;
 
     for (const change of changes) {
       if (change.type === "unchanged") continue;
 
-      const [current] = await tx
-        .select({ id: buildings.id })
-        .from(buildings)
-        .where(eq(buildings.irisBuildingId, change.entityKey))
-        .limit(1);
+      const liveBefore = liveBeforeByEntityKey.get(change.entityKey) ?? null;
       const values = publicationValues(change.after, jobId, now);
       let buildingId: string;
 
       if (change.type === "added") {
-        if (current) {
-          throw new PublicationError("IMPORT_CHANGE_STALE", 409);
-        }
         const [inserted] = await tx
           .insert(buildings)
           .values({ irisBuildingId: change.entityKey, ...values })
           .returning({ id: buildings.id });
         buildingId = inserted.id;
       } else {
-        if (
-          !current
-          || current.id !== change.before.id
-          || change.before.irisBuildingId !== change.entityKey
-        ) {
+        if (!liveBefore) {
           throw new PublicationError("IMPORT_CHANGE_STALE", 409);
         }
         const [updated] = await tx
           .update(buildings)
           .set(values)
           .where(and(
-            eq(buildings.id, current.id),
+            eq(buildings.id, liveBefore.id),
             eq(buildings.irisBuildingId, change.entityKey),
           ))
           .returning({ id: buildings.id });
@@ -150,7 +153,7 @@ export async function publishImport(
         entityId: buildingId,
         importJobId: jobId,
         source: "import",
-        beforeMetadata: change.before,
+        beforeMetadata: liveBefore,
         afterMetadata: normalizedAfter(change.after),
         createdAt: now,
       });
@@ -201,6 +204,97 @@ async function assertCurrentPermission(
   if (!authorized) {
     throw new PublicationError("PERMISSION_DENIED", 403);
   }
+}
+
+async function selectBuildingForUpdate(
+  tx: PublicationTransaction,
+  irisBuildingId: string,
+): Promise<NormalizedCurrentBuilding | null> {
+  const [current] = await tx
+    .select({
+      id: buildings.id,
+      irisBuildingId: buildings.irisBuildingId,
+      erpBuildingId: buildings.erpBuildingId,
+      buildingName: buildings.name,
+      buildingType: buildings.buildingType,
+      gradeResource: buildings.gradeResource,
+      area: buildings.area,
+      city: buildings.city,
+      cbdArea: buildings.cbdArea,
+      subDistrict: buildings.subDistrict,
+      address: buildings.address,
+      operationalStatus: buildings.status,
+      dataSource: buildings.dataSource,
+    })
+    .from(buildings)
+    .where(eq(buildings.irisBuildingId, irisBuildingId))
+    .limit(1)
+    .for("update");
+  if (!current) return null;
+  if (
+    (current.operationalStatus !== "active" && current.operationalStatus !== "inactive")
+    || (current.dataSource !== "building_team" && current.dataSource !== "erp")
+  ) {
+    invalidChange();
+  }
+  return {
+    ...current,
+    irisBuildingId: current.irisBuildingId.trim(),
+    erpBuildingId: normalizeExternalId(current.erpBuildingId),
+    operationalStatus: current.operationalStatus,
+    dataSource: current.dataSource,
+  };
+}
+
+export function assertBuildingChangePublishable(
+  change: ImportChange,
+  liveBefore: NormalizedCurrentBuilding | null,
+): void {
+  if (change.type === "added") {
+    if (liveBefore) staleChange();
+    return;
+  }
+
+  if (!liveBefore || !currentBuildingEqual(liveBefore, change.before)) {
+    staleChange();
+  }
+
+  const equalPayloads = normalizedBuildingEqual(change.before, change.after);
+  const isDeactivation = change.before.operationalStatus === "active"
+    && change.after.operationalStatus === "inactive";
+
+  if (
+    (change.type === "unchanged" && !equalPayloads)
+    || (change.type === "deactivated" && !isDeactivation)
+    || (change.type === "modified" && (equalPayloads || isDeactivation))
+  ) {
+    throw new PublicationError("IMPORT_CHANGE_TYPE_INVALID", 400);
+  }
+}
+
+function currentBuildingEqual(
+  left: NormalizedCurrentBuilding,
+  right: NormalizedCurrentBuilding,
+): boolean {
+  return left.id === right.id && normalizedBuildingEqual(left, right);
+}
+
+function normalizedBuildingEqual(
+  left: NormalizedBuilding,
+  right: NormalizedBuilding,
+): boolean {
+  return left.irisBuildingId === right.irisBuildingId
+    && normalizeExternalId(left.erpBuildingId) === normalizeExternalId(right.erpBuildingId)
+    && left.buildingName === right.buildingName
+    && left.buildingType === right.buildingType
+    && left.gradeResource === right.gradeResource
+    && left.area === right.area
+    && left.city === right.city
+    && left.cbdArea === right.cbdArea
+    && left.subDistrict === right.subDistrict
+    && left.address === right.address
+    && left.operationalStatus === right.operationalStatus
+    && left.dataSource === right.dataSource;
 }
 
 function publicationValues(
@@ -286,7 +380,7 @@ function parseNormalizedBuilding(value: unknown): NormalizedBuilding {
   }
   return {
     irisBuildingId: value.irisBuildingId,
-    erpBuildingId: value.erpBuildingId,
+    erpBuildingId: normalizeExternalId(value.erpBuildingId),
     buildingName: value.buildingName,
     buildingType: value.buildingType,
     gradeResource: value.gradeResource,
@@ -310,4 +404,8 @@ function nullableString(value: unknown): value is string | null {
 
 function invalidChange(): never {
   throw new PublicationError("IMPORT_CHANGE_INVALID", 400);
+}
+
+function staleChange(): never {
+  throw new PublicationError("IMPORT_CHANGE_STALE", 409);
 }

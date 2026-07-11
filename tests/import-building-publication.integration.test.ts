@@ -154,6 +154,12 @@ describe("IRIS-keyed building publication", () => {
        ) values ($1, $2, 1000000)`,
       [version.rows[0].id, buildingId],
     );
+    await pool.query(
+      `update rate_card_versions
+       set status = 'published', published_by = $2, published_at = now()
+       where id = $1`,
+      [version.rows[0].id, actor.id],
+    );
 
     const before = { id: buildingId, ...building("B003004") };
     const after = building("B003004", { erpBuildingId: " ERP-89321 " });
@@ -186,12 +192,17 @@ describe("IRIS-keyed building publication", () => {
       source_import_job_id: jobId,
     }]);
 
-    const reference = await pool.query<{ building_id: string }>(
-      `select building_id from rate_card_building_prices
-       where rate_card_version_id = $1`,
+    const reference = await pool.query<{ building_id: string; status: string }>(
+      `select price.building_id, version.status
+       from rate_card_building_prices price
+       join rate_card_versions version on version.id = price.rate_card_version_id
+       where price.rate_card_version_id = $1`,
       [version.rows[0].id],
     );
-    expect(reference.rows).toEqual([{ building_id: buildingId }]);
+    expect(reference.rows).toEqual([{
+      building_id: buildingId,
+      status: "published",
+    }]);
 
     const audit = await pool.query<{
       entity_id: string;
@@ -275,6 +286,77 @@ describe("IRIS-keyed building publication", () => {
       erp_building_id: null,
       erp_link_status: "manual_only",
     }]);
+    const audit = await pool.query(
+      "select id from audit_events where import_job_id = $1",
+      [jobId],
+    );
+    expect(audit.rowCount).toBe(0);
+    const job = await pool.query<{ state: string; published_by: string | null }>(
+      "select state, published_by from import_jobs where id = $1",
+      [jobId],
+    );
+    expect(job.rows).toEqual([{
+      state: "ready_to_publish",
+      published_by: null,
+    }]);
+  });
+
+  test("rejects a stale complete before snapshot and publishes no rows", async () => {
+    const actor = await seedPublisher();
+    const suffix = randomUUID();
+    const staleIrisId = `STALE-${suffix}`;
+    const addedIrisId = `STALE-ADDED-${suffix}`;
+    const seeded = await pool.query<{ id: string }>(
+      `insert into buildings (
+         iris_building_id, name, building_type, grade_resource, area, city,
+         cbd_area, sub_district, address, data_source, status
+       ) values (
+         $1, 'Live New Name', 'Office', 'A', 'Central', 'Jakarta',
+         'CBD', 'Setiabudi', 'Live Address', 'building_team', 'active'
+       ) returning id`,
+      [staleIrisId],
+    );
+    const staleBefore = {
+      id: seeded.rows[0].id,
+      ...building(staleIrisId, {
+        buildingName: "Staged Old Name",
+        buildingType: "Office",
+        area: "Central",
+        city: "Jakarta",
+        cbdArea: "CBD",
+        subDistrict: "Setiabudi",
+        address: "Live Address",
+      }),
+    };
+    const jobId = await seedReadyBuildingJob(actor.id, [
+      {
+        type: "added",
+        entityKey: addedIrisId,
+        before: null,
+        after: building(addedIrisId),
+      },
+      {
+        type: "modified",
+        entityKey: staleIrisId,
+        before: staleBefore,
+        after: { ...staleBefore, city: "Bandung" },
+      },
+    ]);
+
+    await expect(publishImport(jobId, actor)).rejects.toMatchObject({
+      key: "IMPORT_CHANGE_STALE",
+    });
+
+    const added = await pool.query(
+      "select id from buildings where iris_building_id = $1",
+      [addedIrisId],
+    );
+    expect(added.rowCount).toBe(0);
+    const live = await pool.query<{ name: string; city: string }>(
+      "select name, city from buildings where iris_building_id = $1",
+      [staleIrisId],
+    );
+    expect(live.rows).toEqual([{ name: "Live New Name", city: "Jakarta" }]);
     const audit = await pool.query(
       "select id from audit_events where import_job_id = $1",
       [jobId],
