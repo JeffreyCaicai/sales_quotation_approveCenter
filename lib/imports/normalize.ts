@@ -82,6 +82,14 @@ function assertRowLimit(rows: SourceRow[]): void {
   if (rows.length - 1 > MAX_ROWS) throw new ImportParseError("import.error.row_limit_exceeded");
 }
 
+function assertBuildingTemplateVersion(sheets: Map<string, ParsedSheet>): void {
+  const rows = requiredSheet(sheets, "Instructions");
+  const versionRow = rows.find((row) => headerText(row.cells[0]) === "Template Version");
+  if (!versionRow || headerText(versionRow.cells[1]) !== TEMPLATE_VERSION_V2) {
+    throw new ImportParseError("import.error.template_version");
+  }
+}
+
 function normalizeBuildings(rows: SourceRow[]): BuildingImport {
   rows = nonBlankRows(rows);
   assertRowLimit(rows);
@@ -192,6 +200,7 @@ export async function parseImportFiles(dataType: "building" | "rate_card", files
     if (extension(file.filename) === ".xlsx") {
       const sheets = await parseWorkbook(file.body);
       assertAllowedSheets(sheets, ["Instructions", "Data"]);
+      assertBuildingTemplateVersion(sheets);
       return normalizeBuildings(requiredSheet(sheets, "Data"));
     }
     if (extension(file.filename) === ".csv") return normalizeBuildings(parseCsv(file.body));

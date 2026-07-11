@@ -43,6 +43,18 @@ function modified(before = current()): ImportChange {
 }
 
 describe("building publication preflight", () => {
+  test("rejects inactive-to-active publication even when every descriptor changes", () => {
+    const before = current({ operationalStatus: "inactive", buildingName: "Former Tower" });
+    expect(() => assertBuildingChangePublishable({
+      type: "modified",
+      entityKey: before.irisBuildingId,
+      before,
+      after: building({ operationalStatus: "active", buildingName: "Replacement Tower", address: "New address" }),
+    }, before)).toThrowError(expect.objectContaining({
+      key: "IMPORT_BUILDING_REACTIVATION_REQUIRES_ADMIN_WORKFLOW",
+    }));
+  });
+
   test.each([
     ["id", { id: "00000000-0000-4000-8000-000000000002" }],
     ["IRIS Building ID", { irisBuildingId: "B-OTHER" }],

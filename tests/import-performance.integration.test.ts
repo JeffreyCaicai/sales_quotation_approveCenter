@@ -28,7 +28,10 @@ describe("representative building import performance", () => {
     const startedAt = performance.now();
     const parsed = await parseImportFiles("building", [fixture()]);
     const parsedAt = performance.now();
-    const errors = validateBuildingRows(parsed.rows, { buildings: [] });
+    const errors = validateBuildingRows(parsed.rows, {
+      buildings: [],
+      controlledValues: { buildingTypes: ["Office"], gradeResources: ["Grade A"] },
+    });
     const validatedAt = performance.now();
     const changes = calculateBuildingDiff(parsed.rows, { buildings: [] });
     const finishedAt = performance.now();

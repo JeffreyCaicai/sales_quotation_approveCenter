@@ -2,6 +2,7 @@ import { describe, expect, expectTypeOf, test } from "vitest";
 
 import type { BuildingRow } from "@/lib/imports/template-v2";
 import {
+  BuildingReactivationError,
   buildingIdentityKey,
   calculateBuildingDiff,
   type BuildingDiffSnapshot,
@@ -49,6 +50,13 @@ function current(
 }
 
 describe("IRIS-keyed building differences", () => {
+  test("does not disguise an inactive-to-active takeover as a modified descriptor", () => {
+    expect(() => calculateBuildingDiff([
+      building({ buildingName: "Replacement Tower", operationalStatus: "active" }),
+    ], { buildings: [current({ status: "inactive", buildingName: "Former Tower" })] }))
+      .toThrow(BuildingReactivationError);
+  });
+
   test("uses the exact trimmed IRIS ID as the identity key", () => {
     expect(buildingIdentityKey(building({ irisBuildingId: " B003004 " }))).toBe("B003004");
   });

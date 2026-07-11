@@ -4,6 +4,7 @@ import { AuthError } from "@/lib/auth/session";
 const mocks = vi.hoisted(() => ({
   requirePermission: vi.fn(),
   createImportJob: vi.fn(),
+  processImport: vi.fn(),
 }));
 
 vi.mock("@/lib/auth/session", async (importActual) => ({
@@ -13,6 +14,7 @@ vi.mock("@/lib/auth/session", async (importActual) => ({
 vi.mock("@/lib/imports/create-job", () => ({
   createImportJob: mocks.createImportJob,
 }));
+vi.mock("@/lib/imports/process-import", () => ({ processImport: mocks.processImport }));
 
 import { POST } from "@/app/api/imports/route";
 
@@ -32,17 +34,19 @@ describe("imports route authorization boundary", () => {
     const user = { id: "user", permissions: ["data.import.building"] };
     mocks.requirePermission.mockResolvedValue(user);
     mocks.createImportJob.mockResolvedValue({ jobId: "job", state: "uploaded" });
+    mocks.processImport.mockResolvedValue({ jobId: "job", state: "ready_to_publish" });
     const form = new FormData();
-    form.set("templateVersion", "v1");
+    form.set("templateVersion", "TMN-IMPORT-2");
     form.append("files", new File([new Uint8Array([1])], "building.csv", { type: "text/csv" }));
     const response = await POST(new Request("https://quotation.test/api/imports?dataType=building", { method: "POST", body: form }));
     expect(mocks.requirePermission).toHaveBeenCalledWith("data.import.building");
     expect(mocks.createImportJob).toHaveBeenCalledWith(
-      expect.objectContaining({ dataType: "building", templateVersion: "v1", files: [expect.objectContaining({ filename: "building.csv", mimeType: "text/csv", body: expect.any(Uint8Array) })] }),
+      expect.objectContaining({ dataType: "building", templateVersion: "TMN-IMPORT-2", files: [expect.objectContaining({ filename: "building.csv", mimeType: "text/csv", body: expect.any(Uint8Array) })] }),
       user,
     );
     expect(response.status).toBe(201);
-    await expect(response.json()).resolves.toEqual({ jobId: "job", state: "uploaded" });
+    expect(mocks.processImport).toHaveBeenCalledWith("job", user);
+    await expect(response.json()).resolves.toEqual({ jobId: "job", state: "ready_to_publish" });
   });
 
   test("does not consume multipart bytes before authentication succeeds", async () => {

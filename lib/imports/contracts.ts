@@ -17,6 +17,7 @@ export type ImportErrorKey =
   | "IMPORT_DUPLICATE_PUBLISHED"
   | "IMPORT_CHECKSUM_INVALID"
   | "IMPORT_ENVELOPE_INVALID"
+  | "IMPORT_TEMPLATE_VERSION_INVALID"
   | "IMPORT_CLEANUP_PENDING"
   | "IMPORT_CREATE_FAILED"
   | "PERMISSION_DENIED"
@@ -48,6 +49,8 @@ export interface CreateImportJobInput {
   templateVersion: string;
   files: readonly PreparedUploadFile[];
 }
+
+export const CANONICAL_IMPORT_TEMPLATE_VERSION = "TMN-IMPORT-2" as const;
 
 export interface PreparedUploadFile {
   filename: string;

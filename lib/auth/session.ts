@@ -193,3 +193,18 @@ export async function requirePermission(
   if (!token) throw new AuthError(401, "AUTH_REQUIRED");
   return authorizeSessionToken(token, permission, loadDatabaseUser);
 }
+
+export async function requireSession(): Promise<SessionUser> {
+  const token = (await cookies()).get(SESSION_COOKIE_NAME)?.value;
+  if (!token) throw new AuthError(401, "AUTH_REQUIRED");
+  const claims = await verifySessionToken(token);
+  const loaded = await loadDatabaseUser(claims.sub!);
+  if (!loaded || loaded.status !== "active") throw new AuthError(401, "AUTH_REQUIRED");
+  return {
+    id: loaded.id,
+    email: loaded.email,
+    displayName: loaded.displayName,
+    status: "active",
+    permissions: permissions.filter((permission) => loaded.permissions.includes(permission)),
+  };
+}

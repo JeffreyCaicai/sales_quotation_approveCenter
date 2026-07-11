@@ -29,7 +29,13 @@ function building(overrides: Partial<BuildingRow> = {}): BuildingRow {
 function snapshot(
   buildings: BuildingValidationSnapshot["buildings"] = [],
 ): BuildingValidationSnapshot {
-  return { buildings };
+  return {
+    buildings,
+    controlledValues: {
+      buildingTypes: ["Apartment", "Office"],
+      gradeResources: ["Grade A", "Grade B"],
+    },
+  };
 }
 
 function rateCard(overrides: Partial<RateCardImport> = {}): RateCardImport {
@@ -46,6 +52,40 @@ function rateCard(overrides: Partial<RateCardImport> = {}): RateCardImport {
 }
 
 describe("building identity validation", () => {
+  test("rejects blank required descriptors and unknown controlled values", () => {
+    const errors = validateBuildingRows([
+      building({ buildingName: "  ", address: "\t", buildingType: "Mall", gradeResource: "Grade Z" }),
+    ], snapshot());
+
+    expect(errors.map((item) => item.key)).toEqual([
+      "import.error.address_required",
+      "import.error.building_name_required",
+      "import.error.building_type_invalid",
+      "import.error.grade_resource_invalid",
+    ]);
+  });
+
+  test("fails the whole building batch when controlled-value configuration is absent", () => {
+    const errors = validateBuildingRows([building(), building({ rowNumber: 3, irisBuildingId: "B003005" })], {
+      buildings: [],
+    });
+    expect(errors).toEqual([{
+      sheet: "Data",
+      rowNumber: 0,
+      column: "Building Type / Grade Resource",
+      key: "import.error.building_controlled_values_unavailable",
+      params: {},
+    }]);
+  });
+
+  test("rejects inactive-to-active reactivation through ordinary imports", () => {
+    expect(validateBuildingRows([building()], snapshot([{
+      id: "uuid-a", irisBuildingId: "B003004", erpBuildingId: null, status: "inactive",
+    }]))).toContainEqual(expect.objectContaining({
+      key: "import.error.building_reactivation_requires_admin_workflow",
+    }));
+  });
+
   test("accepts a minimal identity and status snapshot", () => {
     expect(validateBuildingRows([
       building({ irisBuildingId: "B000006", erpBuildingId: "ERP-01" }),

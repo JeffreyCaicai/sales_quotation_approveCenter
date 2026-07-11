@@ -40,6 +40,15 @@ export interface NormalizedCurrentBuilding extends NormalizedBuilding {
   id: string;
 }
 
+export class BuildingReactivationError extends Error {
+  readonly key = "IMPORT_BUILDING_REACTIVATION_REQUIRES_ADMIN_WORKFLOW";
+
+  constructor(public readonly irisBuildingId: string) {
+    super("IMPORT_BUILDING_REACTIVATION_REQUIRES_ADMIN_WORKFLOW");
+    this.name = "BuildingReactivationError";
+  }
+}
+
 interface BaseImportChange {
   entityKey: string;
   after: NormalizedBuilding;
@@ -76,6 +85,9 @@ export function calculateBuildingDiff(
     }
 
     const before = normalizeSnapshotBuilding(current);
+    if (before.operationalStatus === "inactive" && after.operationalStatus === "active") {
+      throw new BuildingReactivationError(entityKey);
+    }
     if (deepEqual(before, after)) {
       return { type: "unchanged", entityKey, before, after };
     }

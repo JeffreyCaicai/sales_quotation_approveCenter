@@ -27,8 +27,34 @@ function workbookFile(filename: string, sheets: Record<string, unknown[][]>) {
 }
 
 describe("TMN-IMPORT-2 parser", () => {
+  test.each([undefined, "TMN-IMPORT-1"])(
+    "rejects a Building workbook whose Instructions version cell is %s",
+    async (version) => {
+      const instructions = version === undefined
+        ? [["Workbook", "Buildings Import Template"]]
+        : [["Template Version", version]];
+      const file = workbookFile("building-version.xlsx", {
+        Instructions: instructions,
+        Data: [
+          ["IRIS Building ID", "ERP Building ID", "Building Name", "Building Type", "Grade Resource", "Area", "City", "CBD Area", "Sub-District", "Address", "Operational Status", "Data Source"],
+          ["B003004", "", "Building", "Apartment", "Grade A", "", "", "", "", "Address", "active", "building_team"],
+        ],
+      });
+
+      await expect(parseImportFiles("building", [file])).rejects.toMatchObject({
+        key: "import.error.template_version",
+      });
+    },
+  );
+
   test("parses active buildings without ERP IDs", async () => {
-    const result = await parseImportFiles("building", [await fixture("buildings-valid.xlsx")]);
+    const result = await parseImportFiles("building", [workbookFile("buildings-valid.xlsx", {
+      Instructions: [["Template Version", "TMN-IMPORT-2"]],
+      Data: [
+        ["IRIS Building ID", "ERP Building ID", "Building Name", "Building Type", "Grade Resource", "Area", "City", "CBD Area", "Sub-District", "Address", "Operational Status", "Data Source"],
+        [" B003004 ", " ", " Apartment 19th Avenue ", "Apartment", "Grade A", "West Jakarta", "Jakarta", "", "Cengkareng", "Jl. Daan Mogot", "active", "building_team"],
+      ],
+    })]);
 
     expect(result).toMatchObject({
       templateVersion: "TMN-IMPORT-2",
@@ -93,7 +119,14 @@ describe("TMN-IMPORT-2 parser", () => {
   });
 
   test("retains duplicate IRIS IDs for the validation stage", async () => {
-    const result = await parseImportFiles("building", [await fixture("buildings-duplicate-iris.xlsx")]);
+    const headers = ["IRIS Building ID", "ERP Building ID", "Building Name", "Building Type", "Grade Resource", "Area", "City", "CBD Area", "Sub-District", "Address", "Operational Status", "Data Source"];
+    const result = await parseImportFiles("building", [workbookFile("buildings-duplicate-iris.xlsx", {
+      Instructions: [["Template Version", "TMN-IMPORT-2"]],
+      Data: [headers,
+        ["B003004", "", "First", "Apartment", "Grade A", "", "", "", "", "Address", "active", "building_team"],
+        ["B003004", "", "Second", "Apartment", "Grade A", "", "", "", "", "Address", "active", "building_team"],
+      ],
+    })]);
 
     expect(result.rows.map((row) => row.irisBuildingId)).toEqual(["B003004", "B003004"]);
   });
@@ -138,14 +171,17 @@ describe("TMN-IMPORT-2 parser", () => {
       `B${String(index).padStart(6, "0")}`, "", `Building ${index}`, "", "", "", "", "", "", "Address", "active", "building_team",
     ]);
 
-    await expect(parseImportFiles("building", [workbookFile("too-many.xlsx", { Data: [headers, ...rows] })]))
+    await expect(parseImportFiles("building", [workbookFile("too-many.xlsx", {
+      Instructions: [["Template Version", "TMN-IMPORT-2"]],
+      Data: [headers, ...rows],
+    })]))
       .rejects.toMatchObject({ key: "import.error.row_limit_exceeded" });
   });
 
   test("rejects workbook sheets other than Data and Instructions", async () => {
     const headers = ["IRIS Building ID", "ERP Building ID", "Building Name", "Building Type", "Grade Resource", "Area", "City", "CBD Area", "Sub-District", "Address", "Operational Status", "Data Source"];
     const file = workbookFile("unknown-sheet.xlsx", {
-      Instructions: [["Populate the Data sheet"]],
+      Instructions: [["Template Version", "TMN-IMPORT-2"]],
       Data: [headers, ["B003004", "", "Building", "", "", "", "", "", "", "Address", "active", "building_team"]],
       Surprise: [["not allowed"]],
     });
@@ -167,6 +203,7 @@ describe("TMN-IMPORT-2 parser", () => {
   test("retains physical XLSX row numbers across leading and internal blank rows", async () => {
     const headers = ["IRIS Building ID", "ERP Building ID", "Building Name", "Building Type", "Grade Resource", "Area", "City", "CBD Area", "Sub-District", "Address", "Operational Status", "Data Source"];
     const file = workbookFile("blank-rows.xlsx", {
+      Instructions: [["Template Version", "TMN-IMPORT-2"]],
       Data: [
         [],
         [],

@@ -5,6 +5,7 @@ export interface PendingObject {
 }
 
 export interface ObjectStore {
+  readImmutable(key: string, sha256: string): Promise<Uint8Array>;
   putImmutable(
     key: string,
     body: Uint8Array,

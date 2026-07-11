@@ -2,6 +2,7 @@ import * as XLSX from "xlsx";
 
 import { ImportParseError, type SourceRow } from "@/lib/imports/template-v2";
 import { inspectXlsxContainer } from "@/lib/imports/xlsx-container";
+import { ImportError } from "@/lib/imports/contracts";
 
 export interface ParsedSheet {
   name: string;
@@ -17,7 +18,14 @@ function hasFormula(workbook: XLSX.WorkBook): boolean {
 }
 
 export async function parseWorkbook(body: Uint8Array): Promise<Map<string, ParsedSheet>> {
-  await inspectXlsxContainer(body);
+  try {
+    await inspectXlsxContainer(body);
+  } catch (error) {
+    if (error instanceof ImportError) {
+      throw new ImportParseError("import.error.file_invalid");
+    }
+    throw error;
+  }
   let workbook: XLSX.WorkBook;
   try {
     workbook = XLSX.read(body, {

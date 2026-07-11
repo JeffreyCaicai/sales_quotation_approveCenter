@@ -55,6 +55,12 @@ class FakeStore implements ObjectStore {
   cleanupAttempts = 0;
   private puts = 0;
 
+  async readImmutable(key: string): Promise<Uint8Array> {
+    const body = this.objects.get(key);
+    if (!body) throw new Error("missing");
+    return body;
+  }
+
   async putImmutable(
     key: string,
     body: Uint8Array,
@@ -156,6 +162,16 @@ function dependencies(repository = new FakeRepository(), store = new FakeStore()
 }
 
 describe("manual import upload contract", () => {
+  test("rejects a caller-selected template version before reserving storage", async () => {
+    const deps = dependencies();
+    await expect(createImportJob(
+      { dataType: "building", templateVersion: "TMN-IMPORT-1", files: [upload("building.csv", "text/csv", new TextEncoder().encode("x"))] },
+      actor(["data.import.building"]),
+      deps,
+    )).rejects.toMatchObject({ status: 400, key: "IMPORT_TEMPLATE_VERSION_INVALID" });
+    expect(deps.objectStore.objects.size).toBe(0);
+  });
+
   test.each([
     ["macro.xlsm", "application/vnd.ms-excel.sheet.macroEnabled.12", xlsmBytes, "IMPORT_FILE_TYPE_INVALID"],
     ["../building.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", xlsxBytes, "IMPORT_FILENAME_INVALID"],
@@ -166,7 +182,7 @@ describe("manual import upload contract", () => {
   ])("rejects invalid file %s with a stable key", async (name, type, bytes, key) => {
     await expect(
       createImportJob(
-        { dataType: "building", templateVersion: "v1", files: [upload(name, type, bytes)] },
+        { dataType: "building", templateVersion: "TMN-IMPORT-2", files: [upload(name, type, bytes)] },
         actor(["data.import.building"]),
         dependencies(),
       ),
@@ -176,7 +192,7 @@ describe("manual import upload contract", () => {
   test("rejects callers without the exact data-type permission", async () => {
     await expect(
       createImportJob(
-        { dataType: "building", templateVersion: "v1", files: [upload("building.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", xlsxBytes)] },
+        { dataType: "building", templateVersion: "TMN-IMPORT-2", files: [upload("building.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", xlsxBytes)] },
         actor(["data.import.package"]),
         dependencies(),
       ),
@@ -186,7 +202,7 @@ describe("manual import upload contract", () => {
   test("fails closed for an unknown data type", async () => {
     await expect(
       createImportJob(
-        { dataType: "unknown" as "building", templateVersion: "v1", files: [upload("building.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", xlsxBytes)] },
+        { dataType: "unknown" as "building", templateVersion: "TMN-IMPORT-2", files: [upload("building.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", xlsxBytes)] },
         actor(["data.import.building"]),
         dependencies(),
       ),
@@ -196,7 +212,7 @@ describe("manual import upload contract", () => {
   test("stores a valid xlsx under a server-generated key with its content SHA-256", async () => {
     const deps = dependencies();
     const result = await createImportJob(
-      { dataType: "building", templateVersion: "v1", files: [upload("My Building.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", xlsxBytes)] },
+      { dataType: "building", templateVersion: "TMN-IMPORT-2", files: [upload("My Building.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", xlsxBytes)] },
       actor(["data.import.building"]),
       deps,
     );
@@ -224,7 +240,7 @@ describe("manual import upload contract", () => {
     deps.repository.duplicates.add(`building:${checksum}`);
     await expect(
       createImportJob(
-        { dataType: "building", templateVersion: "v1", files: [upload("building.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", xlsxBytes)] },
+        { dataType: "building", templateVersion: "TMN-IMPORT-2", files: [upload("building.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", xlsxBytes)] },
         actor(["data.import.building"]),
         deps,
       ),
@@ -237,7 +253,7 @@ describe("manual import upload contract", () => {
     bytes.set([0x50, 0x4b, 0x03, 0x04]);
     await expect(
       createImportJob(
-        { dataType: "building", templateVersion: "v1", files: [upload("building.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", bytes)] },
+        { dataType: "building", templateVersion: "TMN-IMPORT-2", files: [upload("building.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", bytes)] },
         actor(["data.import.building"]),
         dependencies(),
       ),
@@ -252,7 +268,7 @@ describe("rate-card batches and compensation", () => {
   test("requires either one xlsx or the exact four CSV filenames", async () => {
     await expect(
       createImportJob(
-        { dataType: "rate_card", templateVersion: "v1", files: csvFiles().slice(0, 3) },
+        { dataType: "rate_card", templateVersion: "TMN-IMPORT-2", files: csvFiles().slice(0, 3) },
         actor(["rate_card.upload"]),
         dependencies(),
       ),
@@ -262,7 +278,7 @@ describe("rate-card batches and compensation", () => {
   test("derives the batch checksum from a filename-sorted file manifest", async () => {
     const deps = dependencies();
     await createImportJob(
-      { dataType: "rate_card", templateVersion: "v1", files: csvFiles().reverse() },
+      { dataType: "rate_card", templateVersion: "TMN-IMPORT-2", files: csvFiles().reverse() },
       actor(["rate_card.upload"]),
       deps,
     );
@@ -283,7 +299,7 @@ describe("rate-card batches and compensation", () => {
 
     await expect(
       createImportJob(
-        { dataType: "rate_card", templateVersion: "v1", files: csvFiles() },
+        { dataType: "rate_card", templateVersion: "TMN-IMPORT-2", files: csvFiles() },
         actor(["rate_card.upload"]),
         deps,
       ),
@@ -298,7 +314,7 @@ describe("rate-card batches and compensation", () => {
     repository.atomicDuplicate = true;
     const deps = dependencies(repository);
     await expect(createImportJob(
-      { dataType: "rate_card", templateVersion: "v1", files: csvFiles() },
+      { dataType: "rate_card", templateVersion: "TMN-IMPORT-2", files: csvFiles() },
       actor(["rate_card.upload"]),
       deps,
     )).rejects.toMatchObject({ status: 409, key: "IMPORT_DUPLICATE_PUBLISHED" });
@@ -312,7 +328,7 @@ describe("rate-card batches and compensation", () => {
     const store = new FakeStore();
     store.failCleanupAttempts = 3;
     await expect(createImportJob(
-      { dataType: "building", templateVersion: "v1", files: [upload("building.csv", "text/csv", new TextEncoder().encode("code\nB-1"))] },
+      { dataType: "building", templateVersion: "TMN-IMPORT-2", files: [upload("building.csv", "text/csv", new TextEncoder().encode("code\nB-1"))] },
       actor(["data.import.building"]),
       dependencies(repository, store),
     )).rejects.toMatchObject({ status: 500, key: "IMPORT_CLEANUP_PENDING" });

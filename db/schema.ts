@@ -194,6 +194,9 @@ export const buildings = pgTable(
     updatedAt: updatedAt(),
   },
   (table) => [
+    check("buildings_iris_building_id_not_blank_check", sql`regexp_replace(${table.irisBuildingId}, '\\s', '', 'g') <> ''`),
+    check("buildings_name_not_blank_check", sql`regexp_replace(${table.name}, '\\s', '', 'g') <> ''`),
+    check("buildings_address_not_blank_check", sql`regexp_replace(${table.address}, '\\s', '', 'g') <> ''`),
     uniqueIndex("buildings_erp_building_id_unique")
       .on(table.erpBuildingId)
       .where(sql`${table.erpBuildingId} is not null`),
@@ -208,6 +211,23 @@ export const buildings = pgTable(
       "buildings_data_source_check",
       sql`${table.dataSource} in ('building_team', 'erp')`,
     ),
+  ],
+);
+
+export const buildingControlledValues = pgTable(
+  "building_controlled_values",
+  {
+    id: id(),
+    field: text("field").notNull(),
+    value: text("value").notNull(),
+    status: entityStatusEnum("status").notNull().default("active"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (table) => [
+    check("building_controlled_values_field_check", sql`${table.field} in ('building_type', 'grade_resource')`),
+    check("building_controlled_values_value_not_blank_check", sql`btrim(${table.value}) <> ''`),
+    unique("building_controlled_values_field_value_unique").on(table.field, table.value),
   ],
 );
 

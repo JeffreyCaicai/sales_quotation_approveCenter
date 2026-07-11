@@ -185,6 +185,7 @@ class ReconcileStore implements ObjectStore {
   deletes = 0;
   commits = 0;
   failDeletes = 0;
+  async readImmutable(): Promise<Uint8Array> { throw new Error("not used"); }
   async putImmutable(): Promise<PendingObject> { throw new Error("unused"); }
   async getSignedDownloadUrl() { return ""; }
   async cleanupPending(object: PendingObject) { this.deletes += 1; if (this.deletes <= this.failDeletes) throw new Error("delete failed"); this.pending = this.pending.filter((item) => item.key !== object.key); return "deleted" as const; }

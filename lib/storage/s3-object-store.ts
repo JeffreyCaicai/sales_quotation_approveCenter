@@ -120,6 +120,20 @@ export class S3ObjectStore implements ObjectStore {
     }
   }
 
+  async readImmutable(key: string, sha256: string): Promise<Uint8Array> {
+    try {
+      const result = await this.client.send(new GetObjectCommand({ Bucket: this.config.bucket, Key: key }));
+      if (result.Metadata?.sha256 !== sha256 || !result.Body) throw storageSyncError();
+      const body = await result.Body.transformToByteArray();
+      const actual = (await import("node:crypto")).createHash("sha256").update(body).digest("hex");
+      if (actual !== sha256) throw storageSyncError();
+      return body;
+    } catch (error) {
+      if (error instanceof ImportError) throw error;
+      throw storageSyncError(error);
+    }
+  }
+
   private async probeObject(
     key: string,
     attemptId?: string,

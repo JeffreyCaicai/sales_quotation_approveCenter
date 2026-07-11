@@ -39,7 +39,7 @@ describe("durable upload lease orchestration", () => {
     };
     let sequence = 0;
     await expect(createImportJob(
-      { dataType: "building", templateVersion: "v1", files: [preparedCsv()] },
+      { dataType: "building", templateVersion: "TMN-IMPORT-2", files: [preparedCsv()] },
       actor,
       {
         repository: repository as never,
@@ -78,7 +78,7 @@ describe("durable upload lease orchestration", () => {
     const files = ["metadata.csv", "building-prices.csv", "package-prices.csv", "package-buildings.csv"]
       .map((filename) => ({ filename, mimeType: "text/csv", body: new TextEncoder().encode("code\n1") }));
     await expect(createImportJob(
-      { dataType: "rate_card", templateVersion: "v1", files },
+      { dataType: "rate_card", templateVersion: "TMN-IMPORT-2", files },
       { ...actor, permissions: ["rate_card.upload"] },
       { repository: repository as never, objectStore: store, now: () => new Date("2026-07-11T00:00:00Z"), randomUUID: () => `00000000-0000-4000-8000-${String(++sequence).padStart(12, "0")}` },
     )).resolves.toMatchObject({ state: "uploaded" });

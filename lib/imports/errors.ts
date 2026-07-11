@@ -2,7 +2,7 @@ export interface ImportValidationError {
   sheet: string;
   rowNumber: number;
   column: string;
-  key: `import.error.${string}`;
+  key: `import.error.${string}` | "file.formula_not_allowed";
   params: Record<string, string | number>;
 }
 

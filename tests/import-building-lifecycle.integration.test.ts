@@ -62,7 +62,10 @@ async function applyMigrations(db: PGlite) {
 }
 
 function validationSnapshot(id: string, erpBuildingId: string | null, status: "active" | "inactive", irisBuildingId = "B003004"): BuildingValidationSnapshot {
-  return { buildings: [{ id, irisBuildingId, erpBuildingId, status }] };
+  return {
+    buildings: [{ id, irisBuildingId, erpBuildingId, status }],
+    controlledValues: { buildingTypes: ["Apartment"], gradeResources: ["Grade A"] },
+  };
 }
 
 function diffSnapshot(id: string, erpBuildingId: string | null, status: "active" | "inactive", irisBuildingId = "B003004"): BuildingDiffSnapshot {
@@ -97,7 +100,10 @@ describe("IRIS identity lifecycle in executable PostgreSQL-compatible coverage",
     await applyMigrations(db);
 
     const manual = await parseImportFiles("building", [buildingFile()]);
-    expect(validateBuildingRows(manual.rows, { buildings: [] })).toEqual([]);
+    expect(validateBuildingRows(manual.rows, {
+      buildings: [],
+      controlledValues: { buildingTypes: ["Apartment"], gradeResources: ["Grade A"] },
+    })).toEqual([]);
     expect(calculateBuildingDiff(manual.rows, { buildings: [] })[0]).toMatchObject({ type: "added", entityKey: "B003004" });
 
     const user = await db.query<{ id: string }>(`insert into users (email, password_hash, display_name) values ('lifecycle@example.test', 'test-only-hash', 'Lifecycle') returning id`);
@@ -159,7 +165,13 @@ describe("IRIS identity lifecycle in executable PostgreSQL-compatible coverage",
 async function nativeBuildingSnapshot(irisBuildingId: string): Promise<{ validation: BuildingValidationSnapshot; diff: BuildingDiffSnapshot }> {
   const result = await pool!.query<{ id: string; erp_building_id: string | null; name: string; building_type: string | null; grade_resource: string | null; area: string | null; city: string | null; cbd_area: string | null; sub_district: string | null; address: string; status: "active" | "inactive"; data_source: "building_team" | "erp" }>(`select id, erp_building_id, name, building_type, grade_resource, area, city, cbd_area, sub_district, address, status, data_source from buildings where iris_building_id = $1`, [irisBuildingId]);
   const row = result.rows[0];
-  if (!row) return { validation: { buildings: [] }, diff: { buildings: [] } };
+  if (!row) return {
+    validation: {
+      buildings: [],
+      controlledValues: { buildingTypes: ["Apartment"], gradeResources: ["Grade A"] },
+    },
+    diff: { buildings: [] },
+  };
   return {
     validation: validationSnapshot(row.id, row.erp_building_id, row.status, irisBuildingId),
     diff: { buildings: [{ id: row.id, irisBuildingId, erpBuildingId: row.erp_building_id, buildingName: row.name, buildingType: row.building_type, gradeResource: row.grade_resource, area: row.area, city: row.city, cbdArea: row.cbd_area, subDistrict: row.sub_district, address: row.address, status: row.status, dataSource: row.data_source }] },

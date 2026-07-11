@@ -16,6 +16,7 @@ import type {
   NormalizedBuilding,
   NormalizedCurrentBuilding,
 } from "@/lib/imports/diff";
+import { publishRateCardImport } from "@/lib/imports/publish-rate-card";
 
 const BUILDING_IMPORT_PERMISSION = "data.import.building";
 const IMPORT_PUBLICATION_LOCK_NAME = "import-publish-data-type-v1";
@@ -33,6 +34,7 @@ export type PublicationErrorKey =
   | "IMPORT_CHANGE_INVALID"
   | "IMPORT_CHANGE_TYPE_INVALID"
   | "IMPORT_CHANGE_STALE"
+  | "IMPORT_BUILDING_REACTIVATION_REQUIRES_ADMIN_WORKFLOW"
   | "PERMISSION_DENIED";
 
 export class PublicationError extends Error {
@@ -46,6 +48,18 @@ export class PublicationError extends Error {
 }
 
 export async function publishImport(
+  jobId: string,
+  actor: SessionUser,
+): Promise<PublicationResult> {
+  const [candidate] = await getDb().select({ dataType: importJobs.dataType })
+    .from(importJobs).where(eq(importJobs.id, jobId)).limit(1);
+  if (!candidate) throw new PublicationError("IMPORT_JOB_NOT_FOUND", 404);
+  return candidate.dataType === "rate_card"
+    ? publishRateCardImport(jobId, actor)
+    : publishBuildingImport(jobId, actor);
+}
+
+async function publishBuildingImport(
   jobId: string,
   actor: SessionUser,
 ): Promise<PublicationResult> {
@@ -260,6 +274,15 @@ export function assertBuildingChangePublishable(
   }
 
   const equalPayloads = normalizedBuildingEqual(change.before, change.after);
+  if (
+    change.before.operationalStatus === "inactive"
+    && change.after.operationalStatus === "active"
+  ) {
+    throw new PublicationError(
+      "IMPORT_BUILDING_REACTIVATION_REQUIRES_ADMIN_WORKFLOW",
+      409,
+    );
+  }
   const isDeactivation = change.before.operationalStatus === "active"
     && change.after.operationalStatus === "inactive";
 
@@ -366,6 +389,7 @@ function parseNormalizedBuilding(value: unknown): NormalizedBuilding {
     || value.irisBuildingId !== value.irisBuildingId.trim()
     || !nullableString(value.erpBuildingId)
     || typeof value.buildingName !== "string"
+    || value.buildingName.trim().length === 0
     || !nullableString(value.buildingType)
     || !nullableString(value.gradeResource)
     || !nullableString(value.area)
@@ -373,6 +397,7 @@ function parseNormalizedBuilding(value: unknown): NormalizedBuilding {
     || !nullableString(value.cbdArea)
     || !nullableString(value.subDistrict)
     || typeof value.address !== "string"
+    || value.address.trim().length === 0
     || (value.operationalStatus !== "active" && value.operationalStatus !== "inactive")
     || (value.dataSource !== "building_team" && value.dataSource !== "erp")
   ) {

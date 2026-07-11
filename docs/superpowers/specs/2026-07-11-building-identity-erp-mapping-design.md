@@ -1,7 +1,8 @@
 # Building Identity and ERP Mapping Design
 
-**Date:** 2026-07-11  
-**Status:** Approved  
+**Date:** 2026-07-11
+
+**Status:** Approved
 **Scope:** Building identity, manual building-master imports, Rate Card references, and future ERP synchronization
 
 ## 1. Context
@@ -118,4 +119,3 @@ This contract requires a new template version. Previously published import recor
 - Duplicate ERP mappings are rejected before publication.
 - Inactive buildings remain visible in history but cannot enter a new Rate Card.
 - All identity and mapping changes are auditable.
-

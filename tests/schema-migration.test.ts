@@ -7,6 +7,7 @@ import { afterEach, describe, expect, test } from "vitest";
 const expectedTables = [
   "audit_events",
   "brands",
+  "building_controlled_values",
   "buildings",
   "customers",
   "import_changes",
@@ -204,6 +205,22 @@ describe("generated PostgreSQL migration", () => {
       update buildings set iris_building_id = 'B999999'
       where id = '${first.rows[0].id}'
     `)).rejects.toThrow(/iris building id is immutable/i);
+
+    await expect(db.query(`
+      update buildings set id = '00000000-0000-4000-8000-000000000099'
+      where id = '${first.rows[0].id}'
+    `)).rejects.toThrow(/building uuid is immutable/i);
+
+    for (const values of [
+      ["   ", "Tower", "Jakarta"],
+      ["B000099", "  ", "Jakarta"],
+      ["B000098", "Tower", "\t"],
+    ]) {
+      await expect(db.query(`
+        insert into buildings (iris_building_id, name, address)
+        values ('${values[0]}', '${values[1]}', '${values[2]}')
+      `)).rejects.toThrow(/buildings_.*_not_blank_check/i);
+    }
 
     const blanks = await db.query<{
       erp_building_id: string | null;

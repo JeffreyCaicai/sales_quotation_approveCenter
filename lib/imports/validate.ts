@@ -14,16 +14,38 @@ export interface BuildingValidationSnapshotItem {
 
 export interface BuildingValidationSnapshot {
   buildings: BuildingValidationSnapshotItem[];
+  controlledValues?: BuildingControlledValuesSnapshot;
+}
+
+export interface BuildingControlledValuesSnapshot {
+  buildingTypes: readonly string[];
+  gradeResources: readonly string[];
 }
 
 export function validateBuildingRows(
   rows: BuildingRow[],
   snapshot: BuildingValidationSnapshot,
 ): ImportValidationError[] {
+  if (
+    !snapshot.controlledValues
+    || snapshot.controlledValues.buildingTypes.length === 0
+    || snapshot.controlledValues.gradeResources.length === 0
+  ) {
+    return [error(
+      0,
+      "Building Type / Grade Resource",
+      "import.error.building_controlled_values_unavailable",
+    )];
+  }
   const errors: ImportValidationError[] = [];
   const rowsByIrisId = groupRows(rows, (row) => row.irisBuildingId.trim());
   const rowsByErpId = groupRows(rows, (row) => normalizeExternalId(row.erpBuildingId));
   const currentByErpId = new Map<string, BuildingValidationSnapshotItem>();
+  const currentByIrisId = new Map(
+    snapshot.buildings.map((item) => [item.irisBuildingId.trim(), item]),
+  );
+  const buildingTypes = new Set(snapshot.controlledValues.buildingTypes);
+  const gradeResources = new Set(snapshot.controlledValues.gradeResources);
 
   for (const item of snapshot.buildings) {
     const erpBuildingId = normalizeExternalId(item.erpBuildingId);
@@ -34,6 +56,19 @@ export function validateBuildingRows(
     const irisBuildingId = row.irisBuildingId.trim();
     const erpBuildingId = normalizeExternalId(row.erpBuildingId);
 
+    if (row.buildingName.trim().length === 0) {
+      errors.push(error(row.rowNumber, "Building Name", "import.error.building_name_required"));
+    }
+    if (row.address.trim().length === 0) {
+      errors.push(error(row.rowNumber, "Address", "import.error.address_required"));
+    }
+    if (!row.buildingType || !buildingTypes.has(row.buildingType.trim())) {
+      errors.push(error(row.rowNumber, "Building Type", "import.error.building_type_invalid"));
+    }
+    if (!row.gradeResource || !gradeResources.has(row.gradeResource.trim())) {
+      errors.push(error(row.rowNumber, "Grade Resource", "import.error.grade_resource_invalid"));
+    }
+
     if (irisBuildingId.length === 0) {
       errors.push(error(row.rowNumber, "IRIS Building ID", "import.error.iris_building_id_required"));
     } else if ((rowsByIrisId.get(irisBuildingId)?.length ?? 0) > 1) {
@@ -41,6 +76,18 @@ export function validateBuildingRows(
         row.rowNumber,
         "IRIS Building ID",
         "import.error.iris_building_id_duplicate",
+        { irisBuildingId },
+      ));
+    }
+
+    if (
+      currentByIrisId.get(irisBuildingId)?.status === "inactive"
+      && row.operationalStatus === "active"
+    ) {
+      errors.push(error(
+        row.rowNumber,
+        "Operational Status",
+        "import.error.building_reactivation_requires_admin_workflow",
         { irisBuildingId },
       ));
     }
