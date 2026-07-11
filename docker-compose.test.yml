@@ -1,0 +1,24 @@
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_DB: quotation_test
+      POSTGRES_USER: quotation_test
+      POSTGRES_PASSWORD: quotation_test_only
+    ports:
+      - "55432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U quotation_test -d quotation_test"]
+      interval: 2s
+      timeout: 2s
+      retries: 15
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: quotation_test
+      MINIO_ROOT_PASSWORD: quotation_test_only_secret
+    ports:
+      - "59000:9000"
+      - "59001:9001"

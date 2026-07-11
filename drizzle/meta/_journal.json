@@ -1,5 +1,13 @@
 {
   "version": "7",
   "dialect": "sqlite",
-  "entries": []
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1783767067564,
+      "tag": "0000_powerful_spirit",
+      "breakpoints": true
+    }
+  ]
 }

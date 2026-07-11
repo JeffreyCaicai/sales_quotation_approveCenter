@@ -163,6 +163,7 @@ git commit -m "refactor: move quotation app to node runtime"
 - Create: `db/enums.ts`
 - Create: `scripts/migrate.ts`
 - Create: `tests/schema.test.ts`
+- Create: `tests/schema-migration.test.ts`
 - Create: `docker-compose.test.yml`
 
 **Interfaces:**
@@ -191,6 +192,8 @@ Run: `npx vitest run tests/schema.test.ts`
 
 Expected: FAIL because the tables do not exist.
 
+Install the in-process PostgreSQL test engine with `npm install -D @electric-sql/pglite`. It is test-only; production database access remains `pg` through `DATABASE_URL`.
+
 - [ ] **Step 3: Define exact enum unions**
 
 ```ts
@@ -211,22 +214,24 @@ Use PostgreSQL UUID primary keys with `defaultRandom()`, `timestamp(..., { withT
 
 Set `drizzle.config.ts` dialect to `postgresql`, schema to `./db/schema.ts`, and output to `./drizzle`. Implement `scripts/migrate.ts` with `migrate(getDb(), { migrationsFolder: "drizzle" })`, close the pool in `finally`, and exit nonzero on failure.
 
-- [ ] **Step 6: Generate and test the migration against PostgreSQL 17**
+- [ ] **Step 6: Generate and test the PostgreSQL migration locally**
 
-Run: `docker compose -f docker-compose.test.yml up -d postgres`
+Run: `npm run db:generate`
 
-Run: `DATABASE_URL=postgres://quotation:quotation@localhost:55432/quotation npm run db:generate && DATABASE_URL=postgres://quotation:quotation@localhost:55432/quotation npm run db:migrate`
+In `tests/schema-migration.test.ts`, create a fresh in-memory `PGlite`, execute every generated Drizzle SQL migration in journal order, and query `information_schema.tables`, `information_schema.table_constraints`, and `pg_indexes` to verify all tables, foreign keys, unique constraints, and required indexes. Close PGlite after each test.
 
-Run: `npx vitest run tests/schema.test.ts`
+Run: `npx vitest run tests/schema.test.ts tests/schema-migration.test.ts`
 
-Expected: migration and test PASS; all sixteen tables exist. `users` includes `passwordHash`, active status, immutable email, and timestamps; `user_permissions` has a composite unique constraint on user ID and permission key.
+Expected: migration and tests PASS in the PostgreSQL-compatible in-process engine; all sixteen tables exist. `users` includes `passwordHash`, active status, immutable email, and timestamps; `user_permissions` has a composite unique constraint on user ID and permission key.
 
 `docker-compose.test.yml` defines both PostgreSQL 17 on `localhost:55432` and MinIO on `localhost:59000`, with test-only credentials that are not reused by production.
+
+Native PostgreSQL 17 verification of the same generated migrations is repeated when Docker becomes available in Tasks 10–12; PGlite is never used by production code.
 
 - [ ] **Step 7: Commit the persistence foundation**
 
 ```bash
-git add db scripts drizzle drizzle.config.ts docker-compose.test.yml tests/schema.test.ts package.json package-lock.json
+git add db scripts drizzle drizzle.config.ts docker-compose.test.yml tests/schema.test.ts tests/schema-migration.test.ts package.json package-lock.json
 git commit -m "feat: add stage 2 postgres schema"
 ```
 
