@@ -6,6 +6,7 @@ import {
   type BuildingImport,
   type BuildingRow,
   type RateCardImport,
+  type SourceRow,
 } from "@/lib/imports/template-v2";
 import { parseCsv } from "@/lib/imports/parse-csv";
 import { parseWorkbook, type ParsedSheet } from "@/lib/imports/parse-workbook";
@@ -51,12 +52,12 @@ function headerText(value: unknown): string {
   return String(value);
 }
 
-function nonBlankRows(rows: unknown[][]): unknown[][] {
-  return rows.filter((row) => row.some((value) => text(value) !== ""));
+function nonBlankRows(rows: SourceRow[]): SourceRow[] {
+  return rows.filter((row) => row.cells.some((value) => text(value) !== ""));
 }
 
-function assertHeaders(sheet: string, rows: unknown[][], expected: readonly string[]): Map<string, number> {
-  const actual = (rows[0] ?? []).map(headerText);
+function assertHeaders(sheet: string, rows: SourceRow[], expected: readonly string[]): Map<string, number> {
+  const actual = (rows[0]?.cells ?? []).map(headerText);
   for (const header of actual) {
     if (!expected.includes(header)) {
       throw new ImportParseError("import.error.unknown_column", { sheet, column: header });
@@ -73,29 +74,29 @@ function assertHeaders(sheet: string, rows: unknown[][], expected: readonly stri
   return new Map(actual.map((header, index) => [header, index]));
 }
 
-function value(row: unknown[], columns: Map<string, number>, header: string): unknown {
-  return row[columns.get(header)!];
+function value(row: SourceRow, columns: Map<string, number>, header: string): unknown {
+  return row.cells[columns.get(header)!];
 }
 
-function assertRowLimit(rows: unknown[][]): void {
+function assertRowLimit(rows: SourceRow[]): void {
   if (rows.length - 1 > MAX_ROWS) throw new ImportParseError("import.error.row_limit_exceeded");
 }
 
-function normalizeBuildings(rows: unknown[][]): BuildingImport {
+function normalizeBuildings(rows: SourceRow[]): BuildingImport {
   rows = nonBlankRows(rows);
   assertRowLimit(rows);
   const columns = assertHeaders("Data", rows, BUILDING_HEADERS);
-  const normalized: BuildingRow[] = rows.slice(1).map((row, index) => {
+  const normalized: BuildingRow[] = rows.slice(1).map((row) => {
     const operationalStatus = text(value(row, columns, "Operational Status"));
     const dataSource = text(value(row, columns, "Data Source"));
     if (operationalStatus !== "active" && operationalStatus !== "inactive") {
-      throw new ImportParseError("import.error.value_invalid", { sheet: "Data", rowNumber: index + 2, column: "Operational Status" });
+      throw new ImportParseError("import.error.value_invalid", { sheet: "Data", rowNumber: row.rowNumber, column: "Operational Status" });
     }
     if (dataSource !== "building_team" && dataSource !== "erp") {
-      throw new ImportParseError("import.error.value_invalid", { sheet: "Data", rowNumber: index + 2, column: "Data Source" });
+      throw new ImportParseError("import.error.value_invalid", { sheet: "Data", rowNumber: row.rowNumber, column: "Data Source" });
     }
     return {
-      rowNumber: index + 2,
+      rowNumber: row.rowNumber,
       irisBuildingId: text(value(row, columns, "IRIS Building ID")),
       erpBuildingId: nullable(value(row, columns, "ERP Building ID")),
       buildingName: text(value(row, columns, "Building Name")),
@@ -113,7 +114,7 @@ function normalizeBuildings(rows: unknown[][]): BuildingImport {
   return { templateVersion: TEMPLATE_VERSION_V2, rows: normalized };
 }
 
-function requiredSheet(sheets: Map<string, ParsedSheet>, name: string): unknown[][] {
+function requiredSheet(sheets: Map<string, ParsedSheet>, name: string): SourceRow[] {
   const sheet = sheets.get(name);
   if (!sheet) throw new ImportParseError("import.error.missing_sheet", { sheet: name });
   return nonBlankRows(sheet.rows);
@@ -127,8 +128,8 @@ function assertAllowedSheets(sheets: Map<string, ParsedSheet>, allowed: readonly
   }
 }
 
-function metadata(rows: unknown[][]): Map<string, unknown> {
-  return new Map(rows.map((row) => [text(row[0]), row[1]]));
+function metadata(rows: SourceRow[]): Map<string, unknown> {
+  return new Map(rows.map((row) => [text(row.cells[0]), row.cells[1]]));
 }
 
 function normalizeRateCard(sheets: Map<string, ParsedSheet>): RateCardImport {
@@ -154,18 +155,18 @@ function normalizeRateCard(sheets: Map<string, ParsedSheet>): RateCardImport {
     versionCode: text(fields.get("Version Code")),
     effectiveDate: dateText(fields.get("Effective Date")),
     currency: "IDR",
-    buildingPrices: buildingRows.slice(1).map((row, index) => ({
-      rowNumber: index + 2,
+    buildingPrices: buildingRows.slice(1).map((row) => ({
+      rowNumber: row.rowNumber,
       irisBuildingId: text(value(row, buildingColumns, "IRIS Building ID")),
       priceIdr: text(value(row, buildingColumns, "Price IDR")),
     })),
-    packagePrices: packagePriceRows.slice(1).map((row, index) => ({
-      rowNumber: index + 2,
+    packagePrices: packagePriceRows.slice(1).map((row) => ({
+      rowNumber: row.rowNumber,
       packageCode: text(value(row, packagePriceColumns, "Package Code")),
       priceIdr: text(value(row, packagePriceColumns, "Price IDR")),
     })),
-    packageBuildings: packageBuildingRows.slice(1).map((row, index) => ({
-      rowNumber: index + 2,
+    packageBuildings: packageBuildingRows.slice(1).map((row) => ({
+      rowNumber: row.rowNumber,
       packageCode: text(value(row, packageBuildingColumns, "Package Code")),
       irisBuildingId: text(value(row, packageBuildingColumns, "IRIS Building ID")),
     })),

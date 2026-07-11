@@ -1,11 +1,11 @@
 import * as XLSX from "xlsx";
 
-import { ImportParseError } from "@/lib/imports/template-v2";
+import { ImportParseError, type SourceRow } from "@/lib/imports/template-v2";
 import { inspectXlsxContainer } from "@/lib/imports/xlsx-container";
 
 export interface ParsedSheet {
   name: string;
-  rows: unknown[][];
+  rows: SourceRow[];
 }
 
 function hasFormula(workbook: XLSX.WorkBook): boolean {
@@ -32,13 +32,15 @@ export async function parseWorkbook(body: Uint8Array): Promise<Map<string, Parse
   }
   if (hasFormula(workbook)) throw new ImportParseError("file.formula_not_allowed");
 
-  return new Map(workbook.SheetNames.map((name) => [name, {
-    name,
-    rows: XLSX.utils.sheet_to_json<unknown[]>(workbook.Sheets[name], {
+  return new Map(workbook.SheetNames.map((name) => {
+    const sheet = workbook.Sheets[name];
+    const startRow = sheet["!ref"] ? XLSX.utils.decode_range(sheet["!ref"]).s.r + 1 : 1;
+    const rows = XLSX.utils.sheet_to_json<unknown[]>(sheet, {
       header: 1,
       raw: true,
       defval: "",
-      blankrows: false,
-    }),
-  }]));
+      blankrows: true,
+    }).map((cells, index) => ({ rowNumber: startRow + index, cells }));
+    return [name, { name, rows }];
+  }));
 }

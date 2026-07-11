@@ -21,6 +21,11 @@ export const RATE_CARD_HEADERS = {
   "Package Buildings": ["Package Code", "IRIS Building ID"],
 } as const;
 
+export interface SourceRow {
+  rowNumber: number;
+  cells: unknown[];
+}
+
 export interface BuildingRow {
   rowNumber: number;
   irisBuildingId: string;

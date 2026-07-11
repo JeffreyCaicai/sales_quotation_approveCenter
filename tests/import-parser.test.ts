@@ -163,4 +163,53 @@ describe("TMN-IMPORT-2 parser", () => {
       body: new TextEncoder().encode(csv),
     }])).rejects.toMatchObject({ key: "import.error.unknown_column" });
   });
+
+  test("retains physical XLSX row numbers across leading and internal blank rows", async () => {
+    const headers = ["IRIS Building ID", "ERP Building ID", "Building Name", "Building Type", "Grade Resource", "Area", "City", "CBD Area", "Sub-District", "Address", "Operational Status", "Data Source"];
+    const file = workbookFile("blank-rows.xlsx", {
+      Data: [
+        [],
+        [],
+        headers,
+        ["B003004", "", "First", "", "", "", "", "", "", "Address", "active", "building_team"],
+        [],
+        ["B003005", "", "Second", "", "", "", "", "", "", "Address", "inactive", "erp"],
+      ],
+    });
+
+    const result = await parseImportFiles("building", [file]);
+    expect(result.rows.map((row) => row.rowNumber)).toEqual([4, 6]);
+  });
+
+  test("retains physical CSV row numbers and reports invalid values at their source row", async () => {
+    const headers = "IRIS Building ID,ERP Building ID,Building Name,Building Type,Grade Resource,Area,City,CBD Area,Sub-District,Address,Operational Status,Data Source";
+    const valid = "B003004,,First,,,,,,,Address,active,building_team";
+    const invalid = "B003005,,Second,,,,,,,Address,retired,erp";
+    const body = new TextEncoder().encode(`\n\n${headers}\n${valid}\n\n${invalid}\n`);
+
+    await expect(parseImportFiles("building", [{ filename: "blank-rows.csv", body }]))
+      .rejects.toMatchObject({
+        key: "import.error.value_invalid",
+        details: { rowNumber: 6, column: "Operational Status" },
+      });
+  });
+
+  test("retains physical Rate Card section row numbers", async () => {
+    const file = workbookFile("rate-card-blank-rows.xlsx", {
+      Metadata: [
+        ["Template Version", "TMN-IMPORT-2"],
+        ["Version Code", "RC-BLANKS"],
+        ["Effective Date", "2026-08-01"],
+        ["Currency", "IDR"],
+      ],
+      "Building Prices": [[], ["IRIS Building ID", "Price IDR"], [], ["B003004", "1000000"]],
+      "Package Prices": [[], [], ["Package Code", "Price IDR"], ["PKG-01", "1500000"]],
+      "Package Buildings": [["Package Code", "IRIS Building ID"], [], [], ["PKG-01", "B003004"]],
+    });
+
+    const result = await parseImportFiles("rate_card", [file]);
+    expect(result.buildingPrices[0].rowNumber).toBe(4);
+    expect(result.packagePrices[0].rowNumber).toBe(4);
+    expect(result.packageBuildings[0].rowNumber).toBe(4);
+  });
 });
