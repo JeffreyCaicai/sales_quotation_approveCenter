@@ -23,6 +23,7 @@ export type ImportErrorKey =
   | "STORAGE_CONFIGURATION_ERROR"
   | "STORAGE_OBJECT_COLLISION"
   | "STORAGE_WRITE_FAILED"
+  | "STORAGE_SYNC_FAILED"
   | "STORAGE_EXPIRY_INVALID";
 
 export class ImportError extends Error {

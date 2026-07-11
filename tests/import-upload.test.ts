@@ -408,4 +408,66 @@ describe("S3 immutable adapter contract", () => {
     await expect(store.cleanupPending({ key: "imports/key", attemptId: "foreign", versionId: "v-foreign" })).resolves.toBe("not_owned");
     expect(calls.filter((name) => name === "DeleteObjectCommand")).toHaveLength(0);
   });
+
+  test.each([
+    ["Head transient", "head-timeout"],
+    ["GetTag transient", "tag-timeout"],
+    ["missing", "missing"],
+    ["not owned", "foreign"],
+    ["pending tag failure", "put-tag-failure"],
+  ])("fails storage sync for %s instead of treating it as absent", async (_label, scenario) => {
+    const send = vi.fn(async (command: { constructor: { name: string } }) => {
+      const name = command.constructor.name;
+      if (name === "HeadObjectCommand") {
+        if (scenario === "head-timeout") throw Object.assign(new Error("timeout"), { name: "TimeoutError" });
+        if (scenario === "missing") throw Object.assign(new Error("missing"), { name: "NotFound", $metadata: { httpStatusCode: 404 } });
+        return { VersionId: "v1", Metadata: { state: "pending", attemptid: "attempt" } };
+      }
+      if (name === "GetObjectTaggingCommand") {
+        if (scenario === "tag-timeout") throw Object.assign(new Error("timeout"), { name: "TimeoutError" });
+        return { TagSet: [{ Key: "state", Value: "pending" }, { Key: "attemptId", Value: scenario === "foreign" ? "other" : "attempt" }] };
+      }
+      if (name === "PutObjectTaggingCommand" && scenario === "put-tag-failure") throw new Error("tag failed");
+      return {};
+    });
+    const store = new S3ObjectStore(
+      { endpoint: "http://minio:9000", region: "us-east-1", bucket: "imports", accessKeyId: "access", secretAccessKey: "secret" },
+      { send } as never,
+      vi.fn(),
+    );
+    await expect(store.commitPending({ key: "imports/key", attemptId: "attempt", versionId: "v1" })).rejects.toMatchObject({ key: "STORAGE_SYNC_FAILED" });
+    expect(send.mock.calls.filter(([command]) => command.constructor.name === "DeleteObjectCommand")).toHaveLength(0);
+  });
+
+  test("treats already committed ownership as idempotent and never deletes it", async () => {
+    const send = vi.fn(async (command: { constructor: { name: string } }) => {
+      if (command.constructor.name === "HeadObjectCommand") return { VersionId: "v1", Metadata: { state: "committed", attemptid: "attempt" } };
+      if (command.constructor.name === "GetObjectTaggingCommand") return { TagSet: [{ Key: "state", Value: "committed" }, { Key: "attemptId", Value: "attempt" }] };
+      return {};
+    });
+    const store = new S3ObjectStore(
+      { endpoint: "http://minio:9000", region: "us-east-1", bucket: "imports", accessKeyId: "access", secretAccessKey: "secret" },
+      { send } as never,
+      vi.fn(),
+    );
+    const object = { key: "imports/key", attemptId: "attempt", versionId: "v1" };
+    await expect(store.commitPending(object)).resolves.toBeUndefined();
+    await expect(store.cleanupPending(object)).resolves.toBe("not_owned");
+    expect(send.mock.calls.some(([command]) => command.constructor.name === "PutObjectTaggingCommand")).toBe(false);
+    expect(send.mock.calls.some(([command]) => command.constructor.name === "DeleteObjectCommand")).toBe(false);
+  });
+
+  test("fails reconciliation discovery when a listed object's ownership probe is unknown", async () => {
+    const send = vi.fn(async (command: { constructor: { name: string } }) => {
+      if (command.constructor.name === "ListObjectsV2Command") return { Contents: [{ Key: "imports/key" }], IsTruncated: false };
+      if (command.constructor.name === "HeadObjectCommand") throw Object.assign(new Error("timeout"), { name: "TimeoutError" });
+      return {};
+    });
+    const store = new S3ObjectStore(
+      { endpoint: "http://minio:9000", region: "us-east-1", bucket: "imports", accessKeyId: "access", secretAccessKey: "secret" },
+      { send } as never,
+      vi.fn(),
+    );
+    await expect(store.listPendingObjects()).rejects.toMatchObject({ key: "STORAGE_SYNC_FAILED" });
+  });
 });

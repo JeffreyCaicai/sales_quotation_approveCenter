@@ -124,7 +124,7 @@ describe("Postgres atomic duplicate gate", () => {
   });
 
   test("finalizer-first references make a later reconciler commit tags and never delete", async () => {
-    const state = { jobState: "uploading", lease: new Date("2026-07-11T00:15:00Z") as Date | null, references: false };
+    const state = { jobState: "uploading", lease: new Date("2026-07-11T00:15:00Z") as Date | null, references: false, failureSummary: "IMPORT_STORAGE_SYNC_PENDING" as string | null };
     mocks.getDb.mockReturnValue(statefulLeaseDatabase(state));
     const repository = new PostgresImportJobRepository();
     await expect(repository.finalizeUpload({
@@ -140,10 +140,21 @@ describe("Postgres atomic duplicate gate", () => {
     expect(state).toMatchObject({ jobState: "uploaded", references: true });
     expect(commit).toHaveBeenCalledTimes(1);
     expect(cleanup).not.toHaveBeenCalled();
+    expect(state.failureSummary).toBeNull();
+  });
+
+  test("keeps the storage warning when reconciliation cannot confirm all tags", async () => {
+    const state = { jobState: "uploaded", lease: null as Date | null, references: true, failureSummary: "IMPORT_STORAGE_SYNC_PENDING" as string | null };
+    mocks.getDb.mockReturnValue(statefulLeaseDatabase(state));
+    await expect(new PostgresImportJobRepository().reconcileUploadAttempt(
+      "00000000-0000-4000-8000-000000000003", new Date(), [],
+      { cleanup: vi.fn(), commit: vi.fn(async () => { throw new Error("tag timeout"); }) },
+    )).rejects.toThrow("tag timeout");
+    expect(state.failureSummary).toBe("IMPORT_STORAGE_SYNC_PENDING");
   });
 });
 
-function statefulLeaseDatabase(state: { jobState: string; lease: Date | null; references: boolean }) {
+function statefulLeaseDatabase(state: { jobState: string; lease: Date | null; references: boolean; failureSummary?: string | null }) {
   return {
     transaction: async (operation: (transaction: unknown) => Promise<unknown>) => {
       let selects = 0;
@@ -155,9 +166,10 @@ function statefulLeaseDatabase(state: { jobState: string; lease: Date | null; re
           return state.references ? [{ id: "reference" }] : [];
         } }) }) }),
         insert: () => ({ values: async () => { state.references = true; } }),
-        update: () => ({ set: (values: { state?: string; uploadLeaseExpiresAt?: Date | null }) => ({ where: async () => {
+        update: () => ({ set: (values: { state?: string; uploadLeaseExpiresAt?: Date | null; failureSummary?: string | null }) => ({ where: async () => {
           if (values.state) state.jobState = values.state;
           if (values.uploadLeaseExpiresAt !== undefined) state.lease = values.uploadLeaseExpiresAt;
+          if (values.failureSummary !== undefined) state.failureSummary = values.failureSummary;
         } }) }),
       };
       return operation(tx);

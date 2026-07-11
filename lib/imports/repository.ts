@@ -218,6 +218,13 @@ export class PostgresImportJobRepository implements ImportJobRepository {
         .limit(1);
       if (job.state === "uploaded" || reference) {
         await operations.commit();
+        await tx.update(importJobs).set({
+          failureSummary: null,
+          updatedAt: now,
+        }).where(and(
+          eq(importJobs.id, job.id),
+          eq(importJobs.failureSummary, "IMPORT_STORAGE_SYNC_PENDING"),
+        ));
         return "committed" as const;
       }
       if (job.state === "uploading" && job.lease && job.lease > now) {

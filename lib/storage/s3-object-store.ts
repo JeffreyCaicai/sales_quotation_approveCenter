@@ -8,6 +8,8 @@ import {
   PutObjectTaggingCommand,
   S3Client,
   type S3ClientConfig,
+  type HeadObjectCommandOutput,
+  type GetObjectTaggingCommandOutput,
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
@@ -27,6 +29,26 @@ type Presign = (
   command: GetObjectCommand,
   options: { expiresIn: number },
 ) => Promise<string>;
+
+type ObjectProbe =
+  | { kind: "pending_owned" | "committed_owned"; object: PendingObject }
+  | { kind: "not_owned" | "missing" }
+  | { kind: "unknown"; cause: unknown };
+
+function isMissing(error: unknown): boolean {
+  const candidate = error as { name?: string; $metadata?: { httpStatusCode?: number } };
+  return candidate.$metadata?.httpStatusCode === 404 ||
+    candidate.name === "NotFound" ||
+    candidate.name === "NoSuchKey";
+}
+
+function storageSyncError(cause?: unknown): ImportError {
+  const error = new ImportError(500, "STORAGE_SYNC_FAILED");
+  if (cause !== undefined) {
+    Object.defineProperty(error, "cause", { value: cause, enumerable: false });
+  }
+  return error;
+}
 
 export class S3ObjectStore implements ObjectStore {
   constructor(
@@ -92,58 +114,74 @@ export class S3ObjectStore implements ObjectStore {
       if (status === 412 || (error as { name?: string }).name === "PreconditionFailed") {
         throw new ImportError(409, "STORAGE_OBJECT_COLLISION");
       }
-      const owned = await this.probePending(key, attemptId);
-      if (owned) return owned;
+      const probe = await this.probeObject(key, attemptId);
+      if (probe.kind === "pending_owned") return probe.object;
       throw new ImportError(500, "STORAGE_WRITE_FAILED");
     }
   }
 
-  private async probePending(
+  private async probeObject(
     key: string,
     attemptId?: string,
     versionId?: string,
-  ): Promise<PendingObject | null> {
+  ): Promise<ObjectProbe> {
+    let head: HeadObjectCommandOutput;
     try {
-      const head = await this.client.send(new HeadObjectCommand({
+      head = await this.client.send(new HeadObjectCommand({
         Bucket: this.config.bucket, Key: key, VersionId: versionId,
       }));
-      const tags = await this.client.send(new GetObjectTaggingCommand({
+    } catch (error) {
+      return isMissing(error) ? { kind: "missing" } : { kind: "unknown", cause: error };
+    }
+    let tags: GetObjectTaggingCommandOutput;
+    try {
+      tags = await this.client.send(new GetObjectTaggingCommand({
         Bucket: this.config.bucket, Key: key, VersionId: versionId ?? head.VersionId,
       }));
-      const tagMap = Object.fromEntries((tags.TagSet ?? []).map((tag) => [tag.Key, tag.Value]));
-      const owner = tagMap.attemptId ?? head.Metadata?.attemptid;
-      const state = tagMap.state ?? head.Metadata?.state;
-      if (state !== "pending" || !owner || (attemptId && owner !== attemptId)) return null;
-      if (versionId && head.VersionId && head.VersionId !== versionId) return null;
-      return { key, attemptId: owner, versionId: head.VersionId ?? versionId };
-    } catch {
-      return null;
+    } catch (error) {
+      return isMissing(error) ? { kind: "missing" } : { kind: "unknown", cause: error };
     }
+    const tagMap = Object.fromEntries((tags.TagSet ?? []).map((tag) => [tag.Key, tag.Value]));
+    const owner = tagMap.attemptId ?? head.Metadata?.attemptid;
+    const state = tagMap.state ?? head.Metadata?.state;
+    if (!owner || (attemptId && owner !== attemptId)) return { kind: "not_owned" };
+    if (versionId && head.VersionId && head.VersionId !== versionId) return { kind: "not_owned" };
+    const object = { key, attemptId: owner, versionId: head.VersionId ?? versionId };
+    if (state === "pending") return { kind: "pending_owned", object };
+    if (state === "committed") return { kind: "committed_owned", object };
+    return { kind: "not_owned" };
   }
 
   async cleanupPending(object: PendingObject): Promise<"deleted" | "not_owned"> {
-    const owned = await this.probePending(object.key, object.attemptId, object.versionId);
-    if (!owned) return "not_owned";
+    const probe = await this.probeObject(object.key, object.attemptId, object.versionId);
+    if (probe.kind === "unknown") throw storageSyncError(probe.cause);
+    if (probe.kind !== "pending_owned") return "not_owned";
     await this.client.send(new DeleteObjectCommand({
       Bucket: this.config.bucket,
       Key: object.key,
-      VersionId: owned.versionId,
+      VersionId: probe.object.versionId,
     }));
     return "deleted";
   }
 
   async commitPending(object: PendingObject): Promise<void> {
-    const owned = await this.probePending(object.key, object.attemptId, object.versionId);
-    if (!owned) return;
-    await this.client.send(new PutObjectTaggingCommand({
-      Bucket: this.config.bucket,
-      Key: object.key,
-      VersionId: owned.versionId,
-      Tagging: { TagSet: [
-        { Key: "state", Value: "committed" },
-        { Key: "attemptId", Value: object.attemptId },
-      ] },
-    }));
+    const probe = await this.probeObject(object.key, object.attemptId, object.versionId);
+    if (probe.kind === "committed_owned") return;
+    if (probe.kind === "unknown") throw storageSyncError(probe.cause);
+    if (probe.kind !== "pending_owned") throw storageSyncError();
+    try {
+      await this.client.send(new PutObjectTaggingCommand({
+        Bucket: this.config.bucket,
+        Key: object.key,
+        VersionId: probe.object.versionId,
+        Tagging: { TagSet: [
+          { Key: "state", Value: "committed" },
+          { Key: "attemptId", Value: object.attemptId },
+        ] },
+      }));
+    } catch (error) {
+      throw storageSyncError(error);
+    }
   }
 
   async listPendingObjects(): Promise<PendingObject[]> {
@@ -157,8 +195,9 @@ export class S3ObjectStore implements ObjectStore {
       }));
       for (const item of page.Contents ?? []) {
         if (!item.Key) continue;
-        const owned = await this.probePending(item.Key);
-        if (owned) pending.push(owned);
+        const probe = await this.probeObject(item.Key);
+        if (probe.kind === "unknown") throw storageSyncError(probe.cause);
+        if (probe.kind === "pending_owned") pending.push(probe.object);
       }
       token = page.IsTruncated ? page.NextContinuationToken : undefined;
     } while (token);
