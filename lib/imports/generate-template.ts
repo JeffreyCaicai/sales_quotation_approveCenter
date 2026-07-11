@@ -16,6 +16,12 @@ export async function generateImportTemplate(
     throw new Error(`Unsupported template version: ${templateVersion}`);
   }
   return readFile(
-    join(process.cwd(), "public", "templates", "v2", templateFilename[dataType]),
+    join(
+      process.cwd(),
+      "server-assets",
+      "templates",
+      "v2",
+      templateFilename[dataType],
+    ),
   );
 }

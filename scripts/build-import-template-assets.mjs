@@ -6,7 +6,7 @@ import { FileBlob, SpreadsheetFile, Workbook } from "@oai/artifact-tool";
 
 const repoRoot = path.resolve(process.argv[2] ?? process.cwd());
 const renderRoot = path.resolve(process.argv[3] ?? path.join(repoRoot, "work", "template-renders"));
-const staticRoot = path.join(repoRoot, "public", "templates", "v2");
+const serverAssetRoot = path.join(repoRoot, "server-assets", "templates", "v2");
 const constants = await import(
   pathToFileURL(path.join(repoRoot, "lib", "imports", "template-v2.ts")).href
 );
@@ -254,9 +254,9 @@ async function verifyAndExport(workbook, filename, keyRanges) {
   console.log(`FORMULA_ERRORS ${filename}`);
   console.log(errors.ndjson);
 
-  await fs.mkdir(staticRoot, { recursive: true });
+  await fs.mkdir(serverAssetRoot, { recursive: true });
   const output = await SpreadsheetFile.exportXlsx(workbook);
-  const exportedPath = path.join(staticRoot, filename);
+  const exportedPath = path.join(serverAssetRoot, filename);
   await output.save(exportedPath);
 
   const reopened = await SpreadsheetFile.importXlsx(await FileBlob.load(exportedPath));
@@ -291,4 +291,4 @@ await verifyAndExport(buildRateCardWorkbook(), "04_Rate_Card_Template.xlsx", [
   ["Package Buildings", "A1:B2"],
 ]);
 
-console.log(`EXPORTED ${TEMPLATE_VERSION_V2} assets to ${staticRoot}`);
+console.log(`EXPORTED ${TEMPLATE_VERSION_V2} assets to ${serverAssetRoot}`);

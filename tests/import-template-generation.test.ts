@@ -1,3 +1,6 @@
+import { access, readFile } from "node:fs/promises";
+import { join } from "node:path";
+
 import { describe, expect, test } from "vitest";
 import * as XLSX from "xlsx";
 
@@ -8,11 +11,33 @@ import {
   TEMPLATE_VERSION_V2,
 } from "@/lib/imports/template-v2";
 
+const SERVER_TEMPLATE_ROOT = join(process.cwd(), "server-assets", "templates", "v2");
+const PUBLIC_TEMPLATE_ROOT = join(process.cwd(), "public", "templates", "v2");
+const FORMULA_ERROR_TOKENS = new Set(["#REF!", "#DIV/0!", "#VALUE!", "#NAME?", "#N/A"]);
+
+function readWorkbook(buffer: Buffer): XLSX.WorkBook {
+  return XLSX.read(buffer, { type: "buffer", cellFormula: true, cellDates: false });
+}
+
 function rows(buffer: Buffer, sheetName: string): unknown[][] {
-  const workbook = XLSX.read(buffer, { type: "buffer", cellFormula: true });
+  const workbook = readWorkbook(buffer);
   const sheet = workbook.Sheets[sheetName];
   expect(sheet, `missing ${sheetName} worksheet`).toBeDefined();
   return XLSX.utils.sheet_to_json(sheet, { header: 1, raw: true, defval: null });
+}
+
+function expectNoFormulasOrErrors(workbook: XLSX.WorkBook): void {
+  for (const sheetName of workbook.SheetNames) {
+    const sheet = workbook.Sheets[sheetName];
+    for (const [address, cell] of Object.entries(sheet)) {
+      if (address.startsWith("!")) continue;
+      expect(cell.f, `${sheetName}!${address} contains a formula`).toBeUndefined();
+      expect(cell.t, `${sheetName}!${address} is an Excel error cell`).not.toBe("e");
+      if (typeof cell.v === "string") {
+        expect(FORMULA_ERROR_TOKENS.has(cell.v), `${sheetName}!${address} contains ${cell.v}`).toBe(false);
+      }
+    }
+  }
 }
 
 describe("formal TMN-IMPORT-2 templates", () => {
@@ -73,5 +98,59 @@ describe("formal TMN-IMPORT-2 templates", () => {
     await expect(
       generateImportTemplate("building", "TMN-IMPORT-1" as typeof TEMPLATE_VERSION_V2),
     ).rejects.toThrow(/unsupported template version/i);
+  });
+
+  test("keeps protected templates out of the directly served public directory", async () => {
+    for (const filename of [
+      "02_Buildings_Template.xlsx",
+      "04_Rate_Card_Template.xlsx",
+    ]) {
+      await expect(access(join(PUBLIC_TEMPLATE_ROOT, filename))).rejects.toMatchObject({
+        code: "ENOENT",
+      });
+      await expect(access(join(SERVER_TEMPLATE_ROOT, filename))).resolves.toBeUndefined();
+    }
+  });
+
+  test("committed server-only workbooks retain their exact schema and safe cell types", async () => {
+    const building = readWorkbook(
+      await readFile(join(SERVER_TEMPLATE_ROOT, "02_Buildings_Template.xlsx")),
+    );
+    expect(building.SheetNames).toEqual(["Instructions", "Data"]);
+    expect(XLSX.utils.sheet_to_json(building.Sheets.Data, {
+      header: 1,
+      raw: true,
+      defval: null,
+    })[0]).toEqual([...BUILDING_HEADERS]);
+    expect(building.Sheets.Data.B2).toBeUndefined();
+    expectNoFormulasOrErrors(building);
+
+    const rateCard = readWorkbook(
+      await readFile(join(SERVER_TEMPLATE_ROOT, "04_Rate_Card_Template.xlsx")),
+    );
+    expect(rateCard.SheetNames).toEqual([
+      "Instructions",
+      "Metadata",
+      "Building Prices",
+      "Package Prices",
+      "Package Buildings",
+    ]);
+    expect(rateCard.Sheets.Metadata.B1?.v).toBe(TEMPLATE_VERSION_V2);
+    expect(["n", "d"]).toContain(rateCard.Sheets.Metadata.B3?.t);
+    expect(rateCard.Sheets.Metadata.B3?.t).not.toBe("s");
+    for (const [sheetName, headers] of Object.entries(RATE_CARD_HEADERS)) {
+      expect(XLSX.utils.sheet_to_json(rateCard.Sheets[sheetName], {
+        header: 1,
+        raw: true,
+        defval: null,
+      })[0]).toEqual([...headers]);
+    }
+    for (const address of ["B2"] as const) {
+      const buildingPrice = rateCard.Sheets["Building Prices"][address]?.v;
+      const packagePrice = rateCard.Sheets["Package Prices"][address]?.v;
+      expect(Number.isInteger(buildingPrice)).toBe(true);
+      expect(Number.isInteger(packagePrice)).toBe(true);
+    }
+    expectNoFormulasOrErrors(rateCard);
   });
 });

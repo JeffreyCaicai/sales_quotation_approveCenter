@@ -38,6 +38,34 @@ describe("formal template download route", () => {
     expect(mocks.generateImportTemplate).not.toHaveBeenCalled();
   });
 
+  test("returns 403 without reading the template when the exact permission is missing", async () => {
+    mocks.requirePermission.mockRejectedValue(
+      new AuthError(403, "PERMISSION_DENIED"),
+    );
+
+    const response = await GET(
+      new Request("https://quotation.test/api/templates/rate_card"),
+      context("rate_card"),
+    );
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toEqual({ error: "PERMISSION_DENIED" });
+    expect(mocks.requirePermission).toHaveBeenCalledWith("rate_card.upload");
+    expect(mocks.generateImportTemplate).not.toHaveBeenCalled();
+  });
+
+  test("returns a safe 404 for an unknown template without authenticating", async () => {
+    const response = await GET(
+      new Request("https://quotation.test/api/templates/../../secrets"),
+      context("../../secrets"),
+    );
+
+    expect(response.status).toBe(404);
+    await expect(response.json()).resolves.toEqual({ error: "TEMPLATE_NOT_FOUND" });
+    expect(mocks.requirePermission).not.toHaveBeenCalled();
+    expect(mocks.generateImportTemplate).not.toHaveBeenCalled();
+  });
+
   test.each([
     ["building", "data.import.building", "02_Buildings_Template.xlsx"],
     ["rate_card", "rate_card.upload", "04_Rate_Card_Template.xlsx"],
@@ -60,6 +88,8 @@ describe("formal template download route", () => {
     expect(response.headers.get("content-disposition")).toBe(
       `attachment; filename="${filename}"`,
     );
+    expect(response.headers.get("cache-control")).toBe("private, no-store");
+    expect(response.headers.get("content-disposition")).not.toContain(dataType);
     expect(Buffer.from(await response.arrayBuffer())).toEqual(bytes);
   });
 });
