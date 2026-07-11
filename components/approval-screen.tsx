@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { BUILDINGS, CUSTOMERS, PACKAGES, USERS } from "@/lib/mock-data";
 import { canApproveQuote, getDiscountBand } from "@/lib/quotation";
+import type { TranslationKey } from "@/lib/i18n";
 import type { Quote, User } from "@/lib/types";
 
 import { useLocale } from "./locale-provider";
@@ -24,7 +25,7 @@ export function ApprovalScreen({ quote, actor, onApprove, onReturn, onBack }: Ap
   const { t, formatNumber } = useLocale();
   const [decision, setDecision] = useState<Decision | null>(null);
   const [reason, setReason] = useState("");
-  const [reasonError, setReasonError] = useState("");
+  const [reasonError, setReasonError] = useState<TranslationKey | null>(null);
   const dialogRef = useRef<HTMLDialogElement>(null);
   const restoreFocusRef = useRef<HTMLElement | null>(null);
   const customer = CUSTOMERS.find((item) => item.id === quote.customerId);
@@ -54,13 +55,13 @@ export function ApprovalScreen({ quote, actor, onApprove, onReturn, onBack }: Ap
   const closeDialog = () => {
     setDecision(null);
     setReason("");
-    setReasonError("");
+    setReasonError(null);
   };
 
   const confirmReturn = () => {
     const normalizedReason = reason.trim();
     if (!normalizedReason) {
-      setReasonError(t("validation.returnReasonRequired"));
+      setReasonError("validation.returnReasonRequired");
       return;
     }
     onReturn(normalizedReason);
@@ -93,7 +94,7 @@ export function ApprovalScreen({ quote, actor, onApprove, onReturn, onBack }: Ap
               <div><dt>{t("approval.customer")}</dt><dd>{customer?.name ?? t("dashboard.unknownCustomer")}</dd></div>
               <div><dt>{t("approval.brand")}</dt><dd>{brand?.name ?? t("approval.unknownBrand")}</dd></div>
               <div><dt>{t("approval.owner")}</dt><dd>{owner?.name ?? quote.salesId}</dd></div>
-              <div><dt>{t("approval.parameters")}</dt><dd>{formatNumber(quote.weeks)} {t("wizard.weekUnit")} · {formatNumber(quote.spots)} Spot · {formatNumber(quote.bonus)} Bonus</dd></div>
+              <div><dt>{t("approval.parameters")}</dt><dd>{formatNumber(quote.weeks)} {t("wizard.weekUnit")} · {formatNumber(quote.spots)} {t("commercial.spot")} · {formatNumber(quote.bonus)} {t("commercial.bonus")}</dd></div>
             </dl>
           </section>
 
@@ -181,11 +182,11 @@ export function ApprovalScreen({ quote, actor, onApprove, onReturn, onBack }: Ap
                 placeholder={t("approval.returnPlaceholder")}
                 onChange={(event) => {
                   setReason(event.target.value);
-                  if (reasonError) setReasonError("");
+                  if (reasonError) setReasonError(null);
                 }}
               />
               <small id="return-reason-help">{t("approval.returnHelp")}</small>
-              {reasonError ? <span className="field-error" id="return-reason-error" role="alert">{reasonError}</span> : null}
+              {reasonError ? <span className="field-error" id="return-reason-error" role="alert">{t(reasonError)}</span> : null}
             </label>
           ) : (
             <p>{t("approval.approvalRecordNotice", { outcome: t(quote.discount > 70 && actor.role === "manager" ? "approval.approveToCeo" : "approval.approveFinal") })}</p>

@@ -12,6 +12,7 @@ import {
   translations,
 } from "../lib/i18n.ts";
 import { resetQuotes } from "../lib/store.ts";
+import * as quotationDomain from "../lib/quotation.ts";
 
 test("English is the default when storage is unavailable or empty", () => {
   assert.equal(loadLocale(), "en");
@@ -130,6 +131,7 @@ test("quotation workflow dictionaries cover validation, decisions, versions, and
     "approval.actionApproved",
     "approval.actionReturned",
     "progress.latestReturnReason",
+    "progress.approved",
     "progress.backToWorkspace",
     "progress.backToQuotation",
     "history.versionHistory",
@@ -144,6 +146,9 @@ test("quotation workflow dictionaries cover validation, decisions, versions, and
     "quotation.appendix",
     "quotation.approvalRecord",
     "quotation.print",
+    "commercial.spot",
+    "commercial.bonus",
+    "commercial.rateCard",
   ] as const;
   const englishLeaves = dictionaryLeaves(translations.en);
   const chineseLeaves = dictionaryLeaves(translations["zh-CN"]);
@@ -153,6 +158,19 @@ test("quotation workflow dictionaries cover validation, decisions, versions, and
     assert.equal(typeof chineseLeaves[key], "string", `Chinese is missing ${key}`);
     assert.notEqual(englishLeaves[key], "", `English ${key} is empty`);
     assert.notEqual(chineseLeaves[key], "", `Chinese ${key} is empty`);
+  }
+});
+
+test("every exported domain validation key exists in both dictionaries", () => {
+  const validationKeys = (quotationDomain as unknown as Record<string, unknown>).VALIDATION_KEYS;
+  assert.ok(Array.isArray(validationKeys), "quotation domain must export VALIDATION_KEYS");
+  const englishLeaves = dictionaryLeaves(translations.en);
+  const chineseLeaves = dictionaryLeaves(translations["zh-CN"]);
+
+  for (const key of validationKeys) {
+    assert.equal(typeof key, "string");
+    assert.equal(typeof englishLeaves[key], "string", `English is missing ${key}`);
+    assert.equal(typeof chineseLeaves[key], "string", `Chinese is missing ${key}`);
   }
 });
 
@@ -169,7 +187,29 @@ test("quotation workflow components render copy through the locale context", () 
     const source = readFileSync(new URL(`../components/${componentName}`, import.meta.url), "utf8");
     assert.match(source, /useLocale\(\)/, `${componentName} must subscribe to locale changes`);
     assert.doesNotMatch(source, /[\u3400-\u9fff]/, `${componentName} contains untranslated UI copy`);
+    assert.doesNotMatch(
+      source,
+      /(?:label=")?(?:Spot|Bonus|Rate Card)(?:"|\s*<|\s*\{|\s*$)|}\s*(?:Spot|Bonus)\b|>\s*Rate Card\b/m,
+      `${componentName} contains a raw commercial label`,
+    );
   }
+});
+
+test("approved progress takes precedence over prior returns and pending fallbacks", () => {
+  const source = readFileSync(new URL("../components/quote-progress-screen.tsx", import.meta.url), "utf8");
+
+  assert.match(source, /const isApproved = quote\.status === "approved"/);
+  assert.match(source, /\{isApproved \? \([\s\S]*?t\("progress\.approved"\)[\s\S]*?\) : latestReturn \? \(/);
+  assert.doesNotMatch(source, /quote\.status === "pending_ceo" \? "progress\.waitingCeo" : "progress\.waitingManager"/);
+});
+
+test("return reason errors retain a key so an open dialog follows locale changes", () => {
+  const source = readFileSync(new URL("../components/approval-screen.tsx", import.meta.url), "utf8");
+
+  assert.match(source, /useState<TranslationKey \| null>\(null\)/);
+  assert.match(source, /setReasonError\("validation\.returnReasonRequired"\)/);
+  assert.match(source, /reasonError \? [\s\S]*?\{t\(reasonError\)\}[\s\S]*? : null/);
+  assert.doesNotMatch(source, /setReasonError\(t\(/);
 });
 
 test("resetting quotation data does not remove the locale preference", () => {

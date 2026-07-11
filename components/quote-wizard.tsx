@@ -611,7 +611,7 @@ function ReviewStep({
         <div><dt>{t("wizard.customer")}</dt><dd>{customerName}</dd></div>
         <div><dt>{t("wizard.brand")}</dt><dd>{brandName}</dd></div>
         <div><dt>{t("wizard.placementMode")}</dt><dd>{mode ? t(mode === "building" ? "wizard.buildingMode" : "wizard.packageMode") : t("wizard.notSelected")}</dd></div>
-        <div><dt>{t("wizard.parameters")}</dt><dd>{formatNumber(values.weeks)} {t("wizard.weekUnit")} · {formatNumber(values.spots)} Spot · {formatNumber(values.bonus)} Bonus</dd></div>
+        <div><dt>{t("wizard.parameters")}</dt><dd>{formatNumber(values.weeks)} {t("wizard.weekUnit")} · {formatNumber(values.spots)} {t("commercial.spot")} · {formatNumber(values.bonus)} {t("commercial.bonus")}</dd></div>
         <div className="review-grid__wide"><dt>{t("wizard.resources")}</dt><dd>{resources.join(locale === "zh-CN" ? "、" : ", ") || t("wizard.notSelected")}</dd></div>
         <div className="review-grid__wide"><dt>{t("wizard.approvalPath")}</dt><dd><strong>{t(approval.labelKey)}</strong></dd></div>
       </dl>

@@ -65,9 +65,9 @@ function SnapshotSummary({ snapshot }: { snapshot: QuoteVersionSnapshot }) {
       <dl className="version-summary-grid">
         <div><dt>{t("history.clientBrand")}</dt><dd>{customer?.name ?? snapshot.customerId}<small>{brand?.name ?? snapshot.brandId}</small></dd></div>
         <div><dt>{t("history.resources")}</dt><dd>{t(snapshot.placementMode === "package" ? "history.packageMode" : "history.buildingMode")}<small>{resources.map((item) => item.name).join(locale === "zh-CN" ? "、" : ", ")}</small></dd></div>
-        <div><dt>{t("history.parameters")}</dt><dd>{formatNumber(snapshot.weeks)} {t("wizard.weekUnit")} · {formatNumber(snapshot.spots)} Spot<small>{formatNumber(snapshot.bonus)} Bonus</small></dd></div>
+        <div><dt>{t("history.parameters")}</dt><dd>{formatNumber(snapshot.weeks)} {t("wizard.weekUnit")} · {formatNumber(snapshot.spots)} {t("commercial.spot")}<small>{formatNumber(snapshot.bonus)} {t("commercial.bonus")}</small></dd></div>
         <div><dt>{t("history.audienceMetrics")}</dt><dd>{t("history.dailyTraffic", { value: formatNumber(snapshot.traffic) })}<small>{t("history.monthlyImpressions", { value: formatNumber(snapshot.impressions) })}</small></dd></div>
-        <div><dt>{t("history.discount")}</dt><dd>{formatNumber(snapshot.discount)}%<small>Rate Card <Money amount={snapshot.pricing.basePrice} /></small></dd></div>
+        <div><dt>{t("history.discount")}</dt><dd>{formatNumber(snapshot.discount)}%<small>{t("commercial.rateCard")} <Money amount={snapshot.pricing.basePrice} /></small></dd></div>
         <div><dt>{t("history.totalWithTax")}</dt><dd><Money amount={snapshot.pricing.total} /><small>{t("history.netPrice", { amount: formatMoney(snapshot.pricing.netPrice) })}</small></dd></div>
       </dl>
     </section>

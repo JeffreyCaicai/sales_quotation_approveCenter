@@ -126,9 +126,11 @@ test("replaces the disposable starter with the quotation workspace", async () =>
   assert.match(approvalScreen, /t\("approval\.calculationDetails"\)/);
   assert.match(approvalScreen, /<QuoteVersionHistory/);
   assert.match(approvalScreen, /<dialog/);
-  assert.match(approvalScreen, /t\("validation\.returnReasonRequired"\)/);
+  assert.match(approvalScreen, /setReasonError\("validation\.returnReasonRequired"\)/);
+  assert.match(approvalScreen, /\{t\(reasonError\)\}/);
   assert.match(approvalScreen, /<QuoteVersionHistory/);
   assert.match(quoteProgressScreen, /export function QuoteProgressScreen/);
+  assert.match(quoteProgressScreen, /t\("progress\.approved"\)/);
   assert.match(quoteProgressScreen, /t\("progress\.latestReturnReason"\)/);
   assert.match(quoteProgressScreen, /isReturned \? "progress\.salesActionNeeded" : "progress\.priorReturn"/);
   assert.match(quoteProgressScreen, /t\("progress\.reviseResubmit"\)/);
@@ -146,8 +148,8 @@ test("replaces the disposable starter with the quotation workspace", async () =>
   assert.match(quotationScreen, /t\("quotation\.clientAndBrand"\)/);
   assert.match(quotationScreen, /t\("quotation\.salesOwner"\)/);
   assert.match(quotationScreen, /t\("quotation\.campaignPeriod"\)/);
-  assert.match(quotationScreen, /Spot/);
-  assert.match(quotationScreen, /Bonus/);
+  assert.match(quotationScreen, /t\("commercial\.spot"\)/);
+  assert.match(quotationScreen, /t\("commercial\.bonus"\)/);
   assert.match(quotationScreen, /t\("quotation\.dailyTraffic"\)/);
   assert.match(quotationScreen, /t\("quotation\.monthlyImpressions"\)/);
   assert.match(quotationScreen, /<th className="align-right">\{t\("quotation\.campaignAmount"\)\}<\/th>/);

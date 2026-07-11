@@ -289,6 +289,7 @@ interface Dictionary {
     currentProgress: string;
     waitingCeo: string;
     waitingManager: string;
+    approved: string;
     readOnlyHelp: string;
     editHelp: string;
     reviseResubmit: string;
@@ -383,6 +384,11 @@ interface Dictionary {
     standard: string;
     elevated: string;
     executive: string;
+  };
+  commercial: {
+    spot: string;
+    bonus: string;
+    rateCard: string;
   };
   modal: {
     close: string;
@@ -591,7 +597,7 @@ export const translations: Record<Locale, Dictionary> = {
     progress: {
       eyebrow: "Quote Progress", title: "Quotation progress & versions", currentVersion: "Current V{version}", readOnly: "Read-only details",
       salesActionNeeded: "Sales action required", priorReturn: "Previous return feedback", latestReturnReason: "Latest return reason", currentProgress: "Current approval progress",
-      waitingCeo: "Awaiting final CEO approval", waitingManager: "Awaiting Sales Manager approval", readOnlyHelp: "The quotation is in a read-only approval flow. Locked commercial terms and every approval event appear below.",
+      waitingCeo: "Awaiting final CEO approval", waitingManager: "Awaiting Sales Manager approval", approved: "Quotation approved", readOnlyHelp: "The quotation is in a read-only approval flow. Locked commercial terms and every approval event appear below.",
       editHelp: "Review the return feedback and original version terms before editing.", reviseResubmit: "Revise and resubmit", backToWorkspace: "Back to dashboard", backToQuotation: "Back to formal Quotation",
     },
     history: {
@@ -629,6 +635,11 @@ export const translations: Record<Locale, Dictionary> = {
       standard: "Standard",
       elevated: "Attention",
       executive: "High risk",
+    },
+    commercial: {
+      spot: "Spot",
+      bonus: "Bonus",
+      rateCard: "Rate Card",
     },
     modal: {
       close: "Close dialog",
@@ -818,7 +829,7 @@ export const translations: Record<Locale, Dictionary> = {
     },
     progress: {
       eyebrow: "报价进度", title: "报价进度与版本", currentVersion: "当前 V{version}", readOnly: "只读详情", salesActionNeeded: "需要销售处理", priorReturn: "上一轮退回意见",
-      latestReturnReason: "最新退回原因", currentProgress: "当前审批进度", waitingCeo: "等待 CEO 最终审批", waitingManager: "等待销售主管审批",
+      latestReturnReason: "最新退回原因", currentProgress: "当前审批进度", waitingCeo: "等待 CEO 最终审批", waitingManager: "等待销售主管审批", approved: "报价已批准",
       readOnlyHelp: "报价当前处于只读审批流程。下方记录展示已锁定的商业条件与全部审批事件。", editHelp: "请先确认退回意见与原版本条件，再进入编辑流程。",
       reviseResubmit: "修改并重新提交", backToWorkspace: "返回工作台", backToQuotation: "返回正式报价",
     },
@@ -853,6 +864,11 @@ export const translations: Record<Locale, Dictionary> = {
       standard: "标准",
       elevated: "关注",
       executive: "高风险",
+    },
+    commercial: {
+      spot: "Spot",
+      bonus: "Bonus",
+      rateCard: "Rate Card",
     },
     modal: {
       close: "关闭弹窗",

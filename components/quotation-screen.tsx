@@ -106,8 +106,8 @@ export function QuotationScreen({ quote, onBack, onPrint, onViewHistory }: Quota
             </table>
           </div>
           <div className="quotation-delivery-grid" aria-label={t("quotation.deliveryMetrics")}>
-            <Metric label="Spot" value={`${formatNumber(quote.spots)} ${t("quotation.occurrenceUnit")}`} />
-            <Metric label="Bonus" value={`${formatNumber(quote.bonus)} ${t("quotation.occurrenceUnit")}`} />
+            <Metric label={t("commercial.spot")} value={`${formatNumber(quote.spots)} ${t("quotation.occurrenceUnit")}`} />
+            <Metric label={t("commercial.bonus")} value={`${formatNumber(quote.bonus)} ${t("quotation.occurrenceUnit")}`} />
             <Metric label={t("quotation.dailyTraffic")} value={formatNumber(traffic)} />
             <Metric label={t("quotation.monthlyImpressions")} value={formatNumber(impressions)} />
           </div>

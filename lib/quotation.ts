@@ -17,6 +17,29 @@ interface QuoteReferenceData {
   packages: readonly SalesPackage[];
 }
 
+const VALIDATION = {
+  customerRequired: "validation.customerRequired",
+  brandRequired: "validation.brandRequired",
+  placementModeRequired: "validation.placementModeRequired",
+  placementRequired: "validation.placementRequired",
+  weeksPositiveInteger: "validation.weeksPositiveInteger",
+  spotsPositiveInteger: "validation.spotsPositiveInteger",
+  bonusNonnegativeInteger: "validation.bonusNonnegativeInteger",
+  discountRange: "validation.discountRange",
+  basePriceFiniteNonnegative: "validation.basePriceFiniteNonnegative",
+  taxRateFiniteNonnegative: "validation.taxRateFiniteNonnegative",
+  trafficNonnegativeInteger: "validation.trafficNonnegativeInteger",
+  impressionsNonnegativeInteger: "validation.impressionsNonnegativeInteger",
+  customerOwned: "validation.customerOwned",
+  brandBelongsToCustomer: "validation.brandBelongsToCustomer",
+  resourceModeMismatch: "validation.resourceModeMismatch",
+  basePriceMismatch: "validation.basePriceMismatch",
+  returnReasonRequired: "validation.returnReasonRequired",
+} as const;
+
+export const VALIDATION_KEYS = Object.values(VALIDATION);
+export type ValidationKey = (typeof VALIDATION)[keyof typeof VALIDATION];
+
 export function getDiscountBand(discount: number): DiscountBand {
   if (discount <= 60) return "standard";
   if (discount <= 70) return "elevated";
@@ -43,38 +66,38 @@ export function calculatePricing(input: QuoteInput): PricingSummary {
   };
 }
 
-export function validateQuote(input: QuoteInput): Record<string, string> {
-  const errors: Record<string, string> = {};
+export function validateQuote(input: QuoteInput): Record<string, ValidationKey> {
+  const errors: Record<string, ValidationKey> = {};
 
-  if (!input.customerId) errors.customerId = "validation.customerRequired";
-  if (!input.brandId) errors.brandId = "validation.brandRequired";
-  if (!input.placementMode) errors.placementMode = "validation.placementModeRequired";
+  if (!input.customerId) errors.customerId = VALIDATION.customerRequired;
+  if (!input.brandId) errors.brandId = VALIDATION.brandRequired;
+  if (!input.placementMode) errors.placementMode = VALIDATION.placementModeRequired;
   if (!input.placementIds?.length) {
-    errors.placementIds = "validation.placementRequired";
+    errors.placementIds = VALIDATION.placementRequired;
   }
   if (!Number.isInteger(input.weeks) || (input.weeks ?? 0) <= 0) {
-    errors.weeks = "validation.weeksPositiveInteger";
+    errors.weeks = VALIDATION.weeksPositiveInteger;
   }
   if (!Number.isInteger(input.spots) || (input.spots ?? 0) <= 0) {
-    errors.spots = "validation.spotsPositiveInteger";
+    errors.spots = VALIDATION.spotsPositiveInteger;
   }
   if (!Number.isInteger(input.bonus ?? 0) || (input.bonus ?? 0) < 0) {
-    errors.bonus = "validation.bonusNonnegativeInteger";
+    errors.bonus = VALIDATION.bonusNonnegativeInteger;
   }
   if (!Number.isFinite(input.discount) || input.discount < 0 || input.discount > 100) {
-    errors.discount = "validation.discountRange";
+    errors.discount = VALIDATION.discountRange;
   }
   if (input.basePrice !== undefined && (!Number.isFinite(input.basePrice) || input.basePrice < 0)) {
-    errors.basePrice = "validation.basePriceFiniteNonnegative";
+    errors.basePrice = VALIDATION.basePriceFiniteNonnegative;
   }
   if (input.taxRate !== undefined && (!Number.isFinite(input.taxRate) || input.taxRate < 0)) {
-    errors.taxRate = "validation.taxRateFiniteNonnegative";
+    errors.taxRate = VALIDATION.taxRateFiniteNonnegative;
   }
   if (input.traffic !== undefined && (!Number.isInteger(input.traffic) || input.traffic < 0)) {
-    errors.traffic = "validation.trafficNonnegativeInteger";
+    errors.traffic = VALIDATION.trafficNonnegativeInteger;
   }
   if (input.impressions !== undefined && (!Number.isInteger(input.impressions) || input.impressions < 0)) {
-    errors.impressions = "validation.impressionsNonnegativeInteger";
+    errors.impressions = VALIDATION.impressionsNonnegativeInteger;
   }
 
   return errors;
@@ -126,14 +149,14 @@ export function validateQuoteReferences(
   input: QuoteInput,
   salesId: string,
   references: QuoteReferenceData,
-): Record<string, string> {
-  const errors: Record<string, string> = {};
+): Record<string, ValidationKey> {
+  const errors: Record<string, ValidationKey> = {};
   const customer = references.customers.find((item) => item.id === input.customerId);
 
   if (!customer || customer.salesId !== salesId) {
-    errors.customerId = "validation.customerOwned";
+    errors.customerId = VALIDATION.customerOwned;
   } else if (!customer.brands.some((brand) => brand.id === input.brandId)) {
-    errors.brandId = "validation.brandBelongsToCustomer";
+    errors.brandId = VALIDATION.brandBelongsToCustomer;
   }
 
   const resourceIds = input.placementIds ?? [];
@@ -151,7 +174,7 @@ export function validateQuoteReferences(
     || (input.placementMode === "package" && resourceIds.length !== 1);
 
   if (resourceIds.length > 0 && hasWrongResource) {
-    errors.placementIds = "validation.resourceModeMismatch";
+    errors.placementIds = VALIDATION.resourceModeMismatch;
   } else if (
     resourceIds.length > 0
     && selectedResources.every((resource) => resource !== undefined)
@@ -163,7 +186,7 @@ export function validateQuoteReferences(
       * ((input.weeks ?? 0) / 4),
     );
     if (!Number.isFinite(input.basePrice) || input.basePrice !== expectedBasePrice) {
-      errors.basePrice = "validation.basePriceMismatch";
+      errors.basePrice = VALIDATION.basePriceMismatch;
     }
   }
 
@@ -301,7 +324,7 @@ export function returnQuote(quote: Quote, actor: User, reason: string): Quote {
   assertApprovalTransition(quote, actor);
 
   const comment = reason.trim();
-  if (!comment) throw new Error("validation.returnReasonRequired");
+  if (!comment) throw new Error(VALIDATION.returnReasonRequired);
 
   const now = new Date().toISOString();
   const eventNumber = quote.approvalHistory.length + 1;

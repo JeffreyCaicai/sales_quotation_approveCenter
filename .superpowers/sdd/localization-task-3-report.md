@@ -37,3 +37,18 @@ Results:
 
 - `quotation-app.tsx` was updated in addition to the brief's primary component list because it owns the progress screen's back-label selection and the final persistability guard. Both now use stable localized keys.
 - The app continues to print a single Quotation DOM tree, so there is no hidden second-language print content.
+
+## Corrective follow-up
+
+- Approved progress now has an explicit localized state that takes precedence over prior return feedback and pending-stage fallbacks.
+- Return-dialog validation stores a `TranslationKey`, so an already visible error updates immediately when the locale changes.
+- `Spot`, `Bonus`, and `Rate Card` UI labels now render through typed `commercial.*` dictionary keys in the wizard, approval details, version snapshots, and formal Quotation.
+- The domain exports a typed `VALIDATION_KEYS` set derived from the constants used by its validators. Localization tests verify every exported key exists in both dictionaries.
+
+Corrective TDD evidence:
+
+- RED localization: 8 passed / 5 failed on the missing approved key/branch, missing validation-key export, raw commercial labels, and translated error state.
+- RED rendered contract: 4 passed / 1 failed on stale translated-error and raw-label assertions.
+- GREEN localization: 13 / 13.
+- GREEN logic: 53 / 53.
+- GREEN rendered HTML: 5 / 5.

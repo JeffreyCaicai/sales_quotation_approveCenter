@@ -15,6 +15,7 @@ export function QuoteProgressScreen({ quote, backLabel, onBack, onEdit }: QuoteP
   const { t } = useLocale();
   const latestReturn = getLatestReturn(quote.approvalHistory);
   const isReturned = quote.status === "returned";
+  const isApproved = quote.status === "approved";
 
   return (
     <div className="quote-progress-screen">
@@ -31,7 +32,11 @@ export function QuoteProgressScreen({ quote, backLabel, onBack, onEdit }: QuoteP
         </div>
       </header>
 
-      {latestReturn ? (
+      {isApproved ? (
+        <section className="progress-callout" aria-label={t("progress.currentProgress")} role="status" aria-live="polite">
+          <strong>{t("progress.approved")}</strong>
+        </section>
+      ) : latestReturn ? (
         <section className="latest-return" aria-labelledby="latest-return-heading">
           <div>
             <span>{t(isReturned ? "progress.salesActionNeeded" : "progress.priorReturn")}</span>
@@ -42,7 +47,7 @@ export function QuoteProgressScreen({ quote, backLabel, onBack, onEdit }: QuoteP
         </section>
       ) : (
         <section className="progress-callout" aria-label={t("progress.currentProgress")}>
-          <strong>{t(quote.status === "pending_ceo" ? "progress.waitingCeo" : "progress.waitingManager")}</strong>
+          <strong>{t(pendingProgressKey(quote.status))}</strong>
           <p>{t("progress.readOnlyHelp")}</p>
         </section>
       )}
@@ -57,6 +62,11 @@ export function QuoteProgressScreen({ quote, backLabel, onBack, onEdit }: QuoteP
       ) : null}
     </div>
   );
+}
+
+function pendingProgressKey(status: Quote["status"]) {
+  if (status === "pending_ceo") return "progress.waitingCeo" as const;
+  return "progress.waitingManager" as const;
 }
 
 function getLatestReturn(history: ApprovalEvent[]) {
