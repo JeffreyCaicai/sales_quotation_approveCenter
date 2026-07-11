@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 
 import { describe, expect, test, vi } from "vitest";
+import * as XLSX from "xlsx";
 
 import type { SessionUser } from "@/lib/auth/session";
 import {
@@ -10,7 +11,9 @@ import {
 } from "@/lib/imports/contracts";
 import { createImportJob } from "@/lib/imports/create-job";
 import { submitNormalizedImport } from "@/lib/imports/ingestion-service";
-import type { ObjectStore } from "@/lib/storage/object-store";
+import { normalizedChecksum } from "@/lib/imports/canonical-json";
+import { reconcilePendingObjects } from "@/lib/imports/reconcile-pending-objects";
+import type { ObjectStore, PendingObject } from "@/lib/storage/object-store";
 import { S3ObjectStore } from "@/lib/storage/s3-object-store";
 
 const actorId = "12e7130a-8321-4d8f-a6ea-312950722854";
@@ -33,28 +36,54 @@ function upload(
   return new File([bytes.slice().buffer as ArrayBuffer], name, { type });
 }
 
-const xlsxBytes = new Uint8Array([0x50, 0x4b, 0x03, 0x04, 1, 2, 3, 4]);
+function workbookBytes(bookType: "xlsx" | "xlsm" = "xlsx"): Uint8Array {
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([["code"], ["B-1"]]), "Data");
+  return new Uint8Array(XLSX.write(workbook, { type: "buffer", bookType }));
+}
+
+const xlsxBytes = workbookBytes();
+const xlsmBytes = workbookBytes("xlsm");
 
 class FakeStore implements ObjectStore {
   readonly objects = new Map<string, Uint8Array>();
   readonly cleaned: string[] = [];
+  readonly committed: string[] = [];
+  readonly pending = new Map<string, PendingObject>();
   failPutAt?: number;
+  failCleanupAttempts = 0;
+  cleanupAttempts = 0;
   private puts = 0;
 
   async putImmutable(
     key: string,
     body: Uint8Array,
-  ): Promise<void> {
+    _contentType: string,
+    _sha256: string,
+    attemptId: string,
+  ): Promise<PendingObject> {
     this.puts += 1;
     if (this.puts === this.failPutAt) throw new Error("put failed");
     if (this.objects.has(key)) throw new Error("immutable collision");
     this.objects.set(key, body);
+    const pending = { key, attemptId, versionId: `version-${this.puts}` };
+    this.pending.set(key, pending);
+    return pending;
   }
 
-  async deleteUncommitted(key: string): Promise<void> {
-    this.cleaned.push(key);
-    this.objects.delete(key);
+  async cleanupPending(object: PendingObject): Promise<"deleted" | "not_owned"> {
+    this.cleanupAttempts += 1;
+    if (this.cleanupAttempts <= this.failCleanupAttempts) throw new Error("delete failed");
+    const owned = this.pending.get(object.key);
+    if (!owned || owned.attemptId !== object.attemptId) return "not_owned";
+    this.cleaned.push(object.key);
+    this.objects.delete(object.key);
+    this.pending.delete(object.key);
+    return "deleted";
   }
+
+  async commitPending(object: PendingObject): Promise<void> { this.committed.push(object.key); this.pending.delete(object.key); }
+  async listPendingObjects(): Promise<PendingObject[]> { return [...this.pending.values()]; }
 
   async getSignedDownloadUrl(key: string, expiresSeconds: number) {
     return `https://objects.test/${key}?expires=${expiresSeconds}`;
@@ -65,13 +94,15 @@ class FakeRepository implements ImportJobRepository {
   readonly jobs: UploadedJobRecord[] = [];
   duplicates = new Set<string>();
   failCreate = false;
+  atomicDuplicate = false;
 
   async hasPublishedChecksum(dataType: string, checksum: string) {
     return this.duplicates.has(`${dataType}:${checksum}`);
   }
 
-  async createUploadedJob(record: UploadedJobRecord): Promise<void> {
+  async createUploadedJob(record: UploadedJobRecord): Promise<void | "duplicate"> {
     if (this.failCreate) throw new Error("database failed");
+    if (this.atomicDuplicate) return "duplicate";
     this.jobs.push(structuredClone(record));
   }
 }
@@ -88,7 +119,7 @@ function dependencies(repository = new FakeRepository(), store = new FakeStore()
 
 describe("manual import upload contract", () => {
   test.each([
-    ["macro.xlsm", "application/vnd.ms-excel.sheet.macroEnabled.12", xlsxBytes, "IMPORT_FILE_TYPE_INVALID"],
+    ["macro.xlsm", "application/vnd.ms-excel.sheet.macroEnabled.12", xlsmBytes, "IMPORT_FILE_TYPE_INVALID"],
     ["../building.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", xlsxBytes, "IMPORT_FILENAME_INVALID"],
     ["building.xlsx", "text/csv", xlsxBytes, "IMPORT_FILE_TYPE_INVALID"],
     ["building.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", new Uint8Array([1, 2, 3]), "IMPORT_FILE_SIGNATURE_INVALID"],
@@ -220,7 +251,35 @@ describe("rate-card batches and compensation", () => {
       ),
     ).rejects.toMatchObject({ status: 500, key: "IMPORT_CREATE_FAILED" });
     expect(store.objects.size).toBe(0);
-    expect(store.cleaned).toHaveLength(failure === "object storage" ? 3 : 4);
+    expect(store.cleaned).toHaveLength(failure === "object storage" ? 2 : 4);
+  });
+
+  test("cleans pending objects when the in-transaction duplicate recheck wins the race", async () => {
+    const repository = new FakeRepository();
+    repository.atomicDuplicate = true;
+    const deps = dependencies(repository);
+    await expect(createImportJob(
+      { dataType: "rate_card", templateVersion: "v1", files: csvFiles() },
+      actor(["rate_card.upload"]),
+      deps,
+    )).rejects.toMatchObject({ status: 409, key: "IMPORT_DUPLICATE_PUBLISHED" });
+    expect(deps.objectStore.objects.size).toBe(0);
+    expect(deps.objectStore.cleaned).toHaveLength(4);
+  });
+
+  test("leaves a durable pending signal when cleanup retries fail and reconciliation later recovers", async () => {
+    const repository = new FakeRepository();
+    repository.failCreate = true;
+    const store = new FakeStore();
+    store.failCleanupAttempts = 3;
+    await expect(createImportJob(
+      { dataType: "building", templateVersion: "v1", files: [upload("building.csv", "text/csv", new TextEncoder().encode("code\nB-1"))] },
+      actor(["data.import.building"]),
+      dependencies(repository, store),
+    )).rejects.toMatchObject({ status: 500, key: "IMPORT_CLEANUP_PENDING" });
+    expect(store.pending.size).toBe(1);
+    await expect(reconcilePendingObjects(store, { hasObjectKeyReference: async () => false })).resolves.toEqual({ committed: 0, deleted: 1 });
+    expect(store.pending.size).toBe(0);
   });
 });
 
@@ -228,11 +287,12 @@ describe("normalized manual/CRM ingestion boundary", () => {
   test("uses identical staging shapes and keeps source type as the only difference", async () => {
     const repository = new FakeRepository();
     const deps = dependencies(repository);
+    const payload = { rows: [{ customerCode: "C-1", name: "Customer" }] };
     const normalized = {
       dataType: "customer_brand" as const,
       templateVersion: "v1",
-      checksum: "a".repeat(64),
-      payload: { rows: [{ customerCode: "C-1", name: "Customer" }] },
+      checksum: normalizedChecksum({ dataType: "customer_brand", templateVersion: "v1", payload }),
+      payload,
     };
     await submitNormalizedImport(normalized, "manual", actor(["data.import.customer_brand"]), deps);
     await submitNormalizedImport(normalized, "crm", actor(["data.import.customer_brand"]), deps);
@@ -249,7 +309,8 @@ describe("normalized manual/CRM ingestion boundary", () => {
   });
 
   test("rejects invalid source values and missing permissions", async () => {
-    const normalized = { dataType: "building" as const, templateVersion: "v1", checksum: "b".repeat(64), payload: { rows: [] } };
+    const payload = { rows: [] };
+    const normalized = { dataType: "building" as const, templateVersion: "v1", checksum: normalizedChecksum({ dataType: "building", templateVersion: "v1", payload }), payload };
     await expect(submitNormalizedImport(normalized, "api" as "crm", actor(["data.import.building"]), dependencies())).rejects.toMatchObject({ status: 400, key: "IMPORT_SOURCE_INVALID" });
     await expect(submitNormalizedImport(normalized, "crm", actor([]), dependencies())).rejects.toMatchObject({ status: 403, key: "PERMISSION_DENIED" });
   });
@@ -259,7 +320,7 @@ describe("normalized manual/CRM ingestion boundary", () => {
     repository.failCreate = true;
     await expect(
       submitNormalizedImport(
-        { dataType: "package", templateVersion: "v1", checksum: "c".repeat(64), payload: { rows: [] } },
+        { dataType: "package", templateVersion: "v1", checksum: normalizedChecksum({ dataType: "package", templateVersion: "v1", payload: { rows: [] } }), payload: { rows: [] } },
         "crm",
         actor(["data.import.package"]),
         dependencies(repository),
@@ -277,11 +338,36 @@ describe("S3 immutable adapter contract", () => {
       { send } as never,
       presign,
     );
-    await store.putImmutable("imports/key", new Uint8Array([1]), "text/csv", "f".repeat(64));
+    await store.putImmutable("imports/key", new Uint8Array([1]), "text/csv", "f".repeat(64), "attempt-1");
     await expect(store.getSignedDownloadUrl("imports/key", 301)).resolves.toBe("https://signed.test/object");
-    expect(send.mock.calls[0][0].input).toMatchObject({ Bucket: "imports", Key: "imports/key", IfNoneMatch: "*", ChecksumSHA256: expect.any(String) });
+    expect(send.mock.calls[0][0].input).toMatchObject({ Bucket: "imports", Key: "imports/key", IfNoneMatch: "*", ChecksumSHA256: expect.any(String), Metadata: { sha256: "f".repeat(64), state: "pending", attemptid: "attempt-1" }, Tagging: expect.stringContaining("state=pending") });
     expect(presign).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ input: { Bucket: "imports", Key: "imports/key" } }), { expiresIn: 301 });
     await expect(store.getSignedDownloadUrl("imports/key", 0)).rejects.toMatchObject({ key: "STORAGE_EXPIRY_INVALID" });
     expect(() => S3ObjectStore.fromEnv({})).toThrowError(expect.objectContaining({ key: "STORAGE_CONFIGURATION_ERROR" }));
+  });
+
+  test("never deletes a conditional-put collision and probes ambiguous ownership", async () => {
+    const calls: string[] = [];
+    const send = vi.fn(async (command: { constructor: { name: string }; input: Record<string, unknown> }) => {
+      calls.push(command.constructor.name);
+      if (command.constructor.name === "PutObjectCommand") throw Object.assign(new Error("timeout"), { name: "TimeoutError" });
+      if (command.constructor.name === "HeadObjectCommand") return { VersionId: "v-owned", Metadata: { state: "pending", attemptid: "attempt-owned" } };
+      if (command.constructor.name === "GetObjectTaggingCommand") return { TagSet: [{ Key: "state", Value: "pending" }, { Key: "attemptId", Value: "attempt-owned" }] };
+      return {};
+    });
+    const store = new S3ObjectStore(
+      { endpoint: "http://minio:9000", region: "us-east-1", bucket: "imports", accessKeyId: "access", secretAccessKey: "secret" },
+      { send } as never,
+      vi.fn(),
+    );
+    await expect(store.putImmutable("imports/key", new Uint8Array([1]), "text/csv", "f".repeat(64), "attempt-owned")).resolves.toEqual({ key: "imports/key", attemptId: "attempt-owned", versionId: "v-owned" });
+    expect(calls).toEqual(["PutObjectCommand", "HeadObjectCommand", "GetObjectTaggingCommand"]);
+
+    send.mockImplementationOnce(async () => { throw Object.assign(new Error("collision"), { name: "PreconditionFailed", $metadata: { httpStatusCode: 412 } }); });
+    await expect(store.putImmutable("imports/collision", new Uint8Array([2]), "text/csv", "e".repeat(64), "attempt-new")).rejects.toMatchObject({ key: "STORAGE_OBJECT_COLLISION" });
+    expect(calls.filter((name) => name === "DeleteObjectCommand")).toHaveLength(0);
+
+    await expect(store.cleanupPending({ key: "imports/key", attemptId: "foreign", versionId: "v-foreign" })).resolves.toBe("not_owned");
+    expect(calls.filter((name) => name === "DeleteObjectCommand")).toHaveLength(0);
   });
 });

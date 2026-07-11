@@ -15,9 +15,14 @@ export type ImportErrorKey =
   | "IMPORT_FILE_EMPTY"
   | "IMPORT_TOTAL_SIZE_EXCEEDED"
   | "IMPORT_DUPLICATE_PUBLISHED"
+  | "IMPORT_CHECKSUM_INVALID"
+  | "IMPORT_ENVELOPE_INVALID"
+  | "IMPORT_CLEANUP_PENDING"
   | "IMPORT_CREATE_FAILED"
   | "PERMISSION_DENIED"
   | "STORAGE_CONFIGURATION_ERROR"
+  | "STORAGE_OBJECT_COLLISION"
+  | "STORAGE_WRITE_FAILED"
   | "STORAGE_EXPIRY_INVALID";
 
 export class ImportError extends Error {
@@ -67,7 +72,7 @@ export interface UploadedJobRecord {
 
 export interface ImportJobRepository {
   hasPublishedChecksum(dataType: string, checksum: string): Promise<boolean>;
-  createUploadedJob(record: UploadedJobRecord): Promise<void>;
+  createUploadedJob(record: UploadedJobRecord): Promise<void | "duplicate">;
 }
 
 export interface ImportJobDependencies {

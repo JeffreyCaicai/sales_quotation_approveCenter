@@ -6,6 +6,7 @@ import type {
   ImportJobRepository,
   UploadedJobRecord,
 } from "@/lib/imports/contracts";
+import { acquireImportChecksumLock } from "@/lib/imports/import-lock";
 
 const publishedStates = [
   "published",
@@ -30,8 +31,19 @@ export class PostgresImportJobRepository implements ImportJobRepository {
     return Boolean(found);
   }
 
-  async createUploadedJob(record: UploadedJobRecord): Promise<void> {
-    await getDb().transaction(async (tx) => {
+  async createUploadedJob(record: UploadedJobRecord): Promise<void | "duplicate"> {
+    return getDb().transaction(async (tx) => {
+      await acquireImportChecksumLock(tx, record.dataType, record.checksum);
+      const [duplicate] = await tx
+        .select({ id: importJobs.id })
+        .from(importJobs)
+        .where(and(
+          eq(importJobs.dataType, record.dataType),
+          eq(importJobs.checksum, record.checksum),
+          inArray(importJobs.state, publishedStates),
+        ))
+        .limit(1);
+      if (duplicate) return "duplicate" as const;
       await tx.insert(importJobs).values({
         id: record.id,
         dataType: record.dataType,
@@ -52,6 +64,16 @@ export class PostgresImportJobRepository implements ImportJobRepository {
           })),
         );
       }
+      return undefined;
     });
+  }
+
+  async hasObjectKeyReference(key: string): Promise<boolean> {
+    const [found] = await getDb()
+      .select({ id: importFiles.id })
+      .from(importFiles)
+      .where(eq(importFiles.objectStorageKey, key))
+      .limit(1);
+    return Boolean(found);
   }
 }

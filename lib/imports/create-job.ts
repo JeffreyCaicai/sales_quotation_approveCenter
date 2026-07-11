@@ -11,7 +11,10 @@ import {
   type ImportJobDependencies,
 } from "@/lib/imports/contracts";
 import { PostgresImportJobRepository } from "@/lib/imports/repository";
+import { cleanupPendingWithRetry } from "@/lib/imports/reconcile-pending-objects";
+import { inspectXlsxContainer } from "@/lib/imports/xlsx-container";
 import { S3ObjectStore } from "@/lib/storage/s3-object-store";
+import type { PendingObject } from "@/lib/storage/object-store";
 
 const MAX_TOTAL_BYTES = 25 * 1024 * 1024;
 const XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
@@ -89,6 +92,7 @@ async function validateTypeAndSignature(
         (body[2] === 0x05 && body[3] === 0x06) ||
         (body[2] === 0x07 && body[3] === 0x08));
     if (!zipSignature) throw new ImportError(400, "IMPORT_FILE_SIGNATURE_INVALID");
+    await inspectXlsxContainer(body);
     return;
   }
   if (ext === ".csv") {
@@ -175,6 +179,7 @@ export async function createImportJob(
 
   const deps = dependencies ?? defaultDependencies();
   const jobId = deps.randomUUID();
+  const attemptId = deps.randomUUID();
   const date = deps.now();
   const files: ImportFileRecord[] = prepared.map(({ file, body, checksum }) => ({
     objectStorageKey: `imports/${date.getUTCFullYear()}/${String(date.getUTCMonth() + 1).padStart(2, "0")}/${jobId}/original/${deps.randomUUID()}`,
@@ -189,19 +194,20 @@ export async function createImportJob(
     throw new ImportError(409, "IMPORT_DUPLICATE_PUBLISHED");
   }
 
-  const attemptedKeys: string[] = [];
+  const pendingObjects: PendingObject[] = [];
   try {
     for (let index = 0; index < files.length; index += 1) {
       const file = files[index];
-      attemptedKeys.push(file.objectStorageKey);
-      await deps.objectStore.putImmutable(
+      const pending = await deps.objectStore.putImmutable(
         file.objectStorageKey,
         prepared[index].body,
         file.mimeType,
         file.checksum,
+        attemptId,
       );
+      pendingObjects.push(pending);
     }
-    await deps.repository.createUploadedJob({
+    const createResult = await deps.repository.createUploadedJob({
       id: jobId,
       dataType,
       templateVersion: input.templateVersion,
@@ -213,12 +219,18 @@ export async function createImportJob(
       createdAt: date.toISOString(),
       files,
     });
+    if (createResult === "duplicate") {
+      throw new ImportError(409, "IMPORT_DUPLICATE_PUBLISHED");
+    }
   } catch (error) {
-    await Promise.allSettled(
-      attemptedKeys.map((key) => deps.objectStore.deleteUncommitted(key)),
-    );
+    for (const pending of pendingObjects) {
+      await cleanupPendingWithRetry(deps.objectStore, pending);
+    }
     if (error instanceof ImportError) throw error;
     throw new ImportError(500, "IMPORT_CREATE_FAILED");
+  }
+  for (const pending of pendingObjects) {
+    try { await deps.objectStore.commitPending(pending); } catch { /* durable pending tag is reconciled */ }
   }
   return { jobId, state: "uploaded" };
 }
