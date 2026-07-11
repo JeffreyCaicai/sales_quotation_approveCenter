@@ -1,5 +1,6 @@
 import {
   bigint,
+  check,
   date,
   index,
   integer,
@@ -12,6 +13,7 @@ import {
   unique,
   uuid,
 } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 
 import {
   changeTypes,
@@ -172,27 +174,36 @@ export const salesPackages = pgTable("sales_packages", {
   updatedAt: updatedAt(),
 });
 
-export const rateCardVersions = pgTable("rate_card_versions", {
-  id: id(),
-  versionCode: text("version_code").notNull().unique(),
-  effectiveAt: timestamp("effective_at", { withTimezone: true }).notNull(),
-  currency: text("currency").notNull().default("IDR"),
-  status: importStateEnum("status").notNull().default("draft"),
-  importJobId: uuid("import_job_id")
-    .notNull()
-    .references(() => importJobs.id),
-  uploadedBy: uuid("uploaded_by")
-    .notNull()
-    .references(() => users.id),
-  publishedBy: uuid("published_by").references(() => users.id),
-  uploadedAt: timestamp("uploaded_at", { withTimezone: true })
-    .notNull()
-    .defaultNow(),
-  publishedAt: timestamp("published_at", { withTimezone: true }),
-  activatedAt: timestamp("activated_at", { withTimezone: true }),
-  createdAt: createdAt(),
-  updatedAt: updatedAt(),
-});
+export const rateCardVersions = pgTable(
+  "rate_card_versions",
+  {
+    id: id(),
+    versionCode: text("version_code").notNull().unique(),
+    effectiveAt: timestamp("effective_at", { withTimezone: true }).notNull(),
+    currency: text("currency").notNull().default("IDR"),
+    status: importStateEnum("status").notNull().default("draft"),
+    importJobId: uuid("import_job_id")
+      .notNull()
+      .references(() => importJobs.id),
+    uploadedBy: uuid("uploaded_by")
+      .notNull()
+      .references(() => users.id),
+    publishedBy: uuid("published_by").references(() => users.id),
+    uploadedAt: timestamp("uploaded_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    publishedAt: timestamp("published_at", { withTimezone: true }),
+    activatedAt: timestamp("activated_at", { withTimezone: true }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (table) => [
+    check(
+      "rate_card_versions_currency_idr_check",
+      sql`${table.currency} = 'IDR'`,
+    ),
+  ],
+);
 
 export const rateCardBuildingPrices = pgTable(
   "rate_card_building_prices",

@@ -53,7 +53,10 @@ const expectedForeignKeys = [
   "user_permissions.user_id",
 ];
 
-type Journal = { entries: Array<{ idx: number; tag: string }> };
+type Journal = {
+  dialect: string;
+  entries: Array<{ idx: number; tag: string }>;
+};
 
 async function applyMigrations(db: PGlite) {
   const migrationsDir = resolve(process.cwd(), "drizzle");
@@ -72,11 +75,77 @@ async function applyMigrations(db: PGlite) {
   }
 }
 
+async function seedDraftRateCard(db: PGlite) {
+  const users = await db.query<{ id: string }>(`
+    insert into users (email, password_hash, display_name)
+    values
+      ('uploader@example.com', 'test-only-hash', 'Uploader'),
+      ('other@example.com', 'test-only-hash', 'Other User')
+    returning id
+  `);
+  const importJob = await db.query<{ id: string }>(`
+    insert into import_jobs (data_type, template_version, checksum, uploaded_by)
+    values ('rate_card', 'v1', 'rate-card-checksum', '${users.rows[0].id}')
+    returning id
+  `);
+  const buildings = await db.query<{ id: string }>(`
+    insert into buildings (building_code, name, location)
+    values ('BLD-001', 'Building One', 'Jakarta'),
+           ('BLD-002', 'Building Two', 'Jakarta')
+    returning id
+  `);
+  const packages = await db.query<{ id: string }>(`
+    insert into sales_packages (package_code, name)
+    values ('PKG-001', 'Package One'), ('PKG-002', 'Package Two')
+    returning id
+  `);
+  const version = await db.query<{ id: string }>(`
+    insert into rate_card_versions (
+      version_code, effective_at, import_job_id, uploaded_by
+    ) values (
+      'RC-001', '2026-08-01T00:00:00+07:00',
+      '${importJob.rows[0].id}', '${users.rows[0].id}'
+    ) returning id
+  `);
+
+  await db.exec(`
+    insert into rate_card_building_prices (
+      rate_card_version_id, building_id, price_idr
+    ) values ('${version.rows[0].id}', '${buildings.rows[0].id}', 1000000);
+    insert into rate_card_package_configs (
+      rate_card_version_id, package_id, price_idr
+    ) values ('${version.rows[0].id}', '${packages.rows[0].id}', 1500000);
+    insert into rate_card_package_buildings (
+      rate_card_version_id, package_id, building_id
+    ) values (
+      '${version.rows[0].id}', '${packages.rows[0].id}', '${buildings.rows[0].id}'
+    );
+  `);
+
+  return {
+    userIds: users.rows.map((row) => row.id),
+    importJobId: importJob.rows[0].id,
+    buildingIds: buildings.rows.map((row) => row.id),
+    packageIds: packages.rows.map((row) => row.id),
+    versionId: version.rows[0].id,
+  };
+}
+
 describe("generated PostgreSQL migration", () => {
   let db: PGlite | undefined;
 
   afterEach(async () => {
     await db?.close();
+  });
+
+  test("declares PostgreSQL migration metadata", async () => {
+    const journal = JSON.parse(
+      await readFile(
+        resolve(process.cwd(), "drizzle/meta/_journal.json"),
+        "utf8",
+      ),
+    ) as Journal;
+    expect(journal.dialect).toBe("postgresql");
   });
 
   test("creates the Stage 2 tables, constraints, and indexes", async () => {
@@ -174,5 +243,127 @@ describe("generated PostgreSQL migration", () => {
         where id = '${inserted.rows[0].id}'
       `),
     ).rejects.toThrow(/users\.email is immutable/);
+  });
+
+  test("rejects a Rate Card currency other than IDR", async () => {
+    db = new PGlite();
+    await applyMigrations(db);
+    const seed = await seedDraftRateCard(db);
+
+    await expect(
+      db.query(`
+        insert into rate_card_versions (
+          version_code, effective_at, currency, import_job_id, uploaded_by
+        ) values (
+          'RC-USD', '2026-08-01T00:00:00+07:00', 'USD',
+          '${seed.importJobId}', '${seed.userIds[0]}'
+        )
+      `),
+    ).rejects.toThrow(/rate_card_versions_currency_idr_check/);
+  });
+
+  test("freezes published Rate Card data and enforces lifecycle transitions", async () => {
+    db = new PGlite();
+    await applyMigrations(db);
+    const seed = await seedDraftRateCard(db);
+
+    await db.exec(`
+      update rate_card_versions
+      set status = 'published',
+          published_by = '${seed.userIds[0]}',
+          published_at = now()
+      where id = '${seed.versionId}'
+    `);
+
+    await expect(
+      db.exec(`
+        update rate_card_versions
+        set version_code = 'RC-CHANGED'
+        where id = '${seed.versionId}'
+      `),
+    ).rejects.toThrow(/published rate card version business fields are immutable/);
+    await expect(
+      db.exec(`
+        update rate_card_versions
+        set uploaded_by = '${seed.userIds[1]}'
+        where id = '${seed.versionId}'
+      `),
+    ).rejects.toThrow(/published rate card version business fields are immutable/);
+    await expect(
+      db.exec(`
+        update rate_card_versions
+        set published_by = '${seed.userIds[1]}'
+        where id = '${seed.versionId}'
+      `),
+    ).rejects.toThrow(/published rate card version business fields are immutable/);
+
+    await expect(
+      db.exec(`
+        update rate_card_building_prices
+        set price_idr = 2000000
+        where rate_card_version_id = '${seed.versionId}'
+      `),
+    ).rejects.toThrow(/published rate card child rows are immutable/);
+    await expect(
+      db.exec(`
+        delete from rate_card_package_configs
+        where rate_card_version_id = '${seed.versionId}'
+      `),
+    ).rejects.toThrow(/published rate card child rows are immutable/);
+    await expect(
+      db.exec(`
+        insert into rate_card_package_buildings (
+          rate_card_version_id, package_id, building_id
+        ) values (
+          '${seed.versionId}', '${seed.packageIds[0]}', '${seed.buildingIds[1]}'
+        )
+      `),
+    ).rejects.toThrow(/published rate card child rows are immutable/);
+
+    const emptyVersion = await db.query<{ id: string }>(`
+      insert into rate_card_versions (
+        version_code, effective_at, import_job_id, uploaded_by
+      ) values (
+        'RC-EMPTY', '2026-09-01T00:00:00+07:00',
+        '${seed.importJobId}', '${seed.userIds[0]}'
+      ) returning id
+    `);
+    await db.exec(`
+      update rate_card_versions
+      set status = 'published', published_at = now()
+      where id = '${emptyVersion.rows[0].id}'
+    `);
+    await expect(
+      db.exec(`
+        delete from rate_card_versions where id = '${emptyVersion.rows[0].id}'
+      `),
+    ).rejects.toThrow(/published rate card version cannot be deleted/);
+
+    await expect(
+      db.exec(`
+        update rate_card_versions
+        set status = 'superseded'
+        where id = '${seed.versionId}'
+      `),
+    ).rejects.toThrow(/invalid rate card lifecycle transition/);
+
+    await db.exec(`
+      update rate_card_versions
+      set status = 'active', activated_at = now()
+      where id = '${seed.versionId}';
+      update rate_card_versions
+      set status = 'superseded'
+      where id = '${seed.versionId}';
+      update rate_card_versions
+      set status = 'active', activated_at = now()
+      where id = '${seed.versionId}';
+      update rate_card_versions
+      set status = 'rolled_back'
+      where id = '${seed.versionId}';
+    `);
+    const finalState = await db.query<{ status: string }>(`
+      select status from rate_card_versions where id = '${seed.versionId}'
+    `);
+    expect(finalState.rows[0].status).toBe("rolled_back");
   });
 });
