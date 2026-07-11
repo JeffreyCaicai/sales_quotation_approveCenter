@@ -46,11 +46,26 @@ export interface NormalizedImport {
 
 export interface CreateImportJobInput {
   dataType: ImportDataType;
-  templateVersion: string;
+  templateVersion: ImportTemplateVersion;
   files: readonly PreparedUploadFile[];
 }
 
+export const TEMPLATE_VERSION_V1 = "TMN-IMPORT-1" as const;
 export const CANONICAL_IMPORT_TEMPLATE_VERSION = "TMN-IMPORT-2" as const;
+export type ImportTemplateVersion = typeof TEMPLATE_VERSION_V1 | typeof CANONICAL_IMPORT_TEMPLATE_VERSION;
+
+export function canonicalTemplateVersionForDataType(dataType: ImportDataType): ImportTemplateVersion {
+  return dataType === "building" || dataType === "rate_card"
+    ? CANONICAL_IMPORT_TEMPLATE_VERSION
+    : TEMPLATE_VERSION_V1;
+}
+
+export function parseImportTemplateVersion(value: string): ImportTemplateVersion {
+  if (value !== TEMPLATE_VERSION_V1 && value !== CANONICAL_IMPORT_TEMPLATE_VERSION) {
+    throw new ImportError(400, "IMPORT_TEMPLATE_VERSION_INVALID");
+  }
+  return value;
+}
 
 export interface PreparedUploadFile {
   filename: string;

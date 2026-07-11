@@ -17,14 +17,18 @@ import type {
   NormalizedCurrentBuilding,
 } from "@/lib/imports/diff";
 import { publishRateCardImport } from "@/lib/imports/publish-rate-card";
+import { publicationLockIdentities } from "@/lib/imports/publication-locks";
 
 const BUILDING_IMPORT_PERMISSION = "data.import.building";
-const IMPORT_PUBLICATION_LOCK_NAME = "import-publish-data-type-v1";
 
 export interface PublicationResult {
   jobId: string;
   state: "published";
   publishedChanges: number;
+}
+
+export function orderBuildingChangesForLocking(changes: readonly ImportChange[]): ImportChange[] {
+  return [...changes].sort((left, right) => left.entityKey.localeCompare(right.entityKey));
 }
 
 export type PublicationErrorKey =
@@ -64,6 +68,9 @@ async function publishBuildingImport(
   actor: SessionUser,
 ): Promise<PublicationResult> {
   return getDb().transaction(async (tx) => {
+    for (const identity of publicationLockIdentities("building")) {
+      await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${identity}, 0))`);
+    }
     const [candidate] = await tx
       .select({ dataType: importJobs.dataType })
       .from(importJobs)
@@ -75,11 +82,6 @@ async function publishBuildingImport(
     if (candidate.dataType !== "building") {
       throw new PublicationError("IMPORT_DATA_TYPE_UNSUPPORTED", 400);
     }
-
-    const lockIdentity = `${IMPORT_PUBLICATION_LOCK_NAME}:${candidate.dataType}`;
-    await tx.execute(
-      sql`select pg_advisory_xact_lock(hashtextextended(${lockIdentity}, 0))`,
-    );
 
     const [job] = await tx
       .select({ state: importJobs.state, dataType: importJobs.dataType })
@@ -117,7 +119,7 @@ async function publishBuildingImport(
       string,
       NormalizedCurrentBuilding | null
     >();
-    for (const change of changes) {
+    for (const change of orderBuildingChangesForLocking(changes)) {
       const liveBefore = await selectBuildingForUpdate(
         tx,
         change.entityKey,

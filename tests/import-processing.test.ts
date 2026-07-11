@@ -6,7 +6,7 @@ import { processImport, validateRateCardForProcessing, type ImportProcessingRepo
 import type { RateCardImport } from "@/lib/imports/template-v2";
 import type { BuildingDiffSnapshot } from "@/lib/imports/diff";
 import type { BuildingValidationSnapshot } from "@/lib/imports/validate";
-import { PROCESSING_STALE_AFTER_MS, processingClaimIsStale } from "@/lib/imports/processing-repository";
+import { PROCESSING_STALE_AFTER_MS, assertPreliminaryDataType, processingClaimIsStale } from "@/lib/imports/processing-repository";
 
 const actor: SessionUser = {
   id: "actor-1", email: "actor@example.test", displayName: "Actor", status: "active",
@@ -187,5 +187,12 @@ describe("production import processing", () => {
       ...base,
       packageBuildings: [{ rowNumber: 2, packageCode: "P1", irisBuildingId: "B1" }],
     }, snapshot).map((error) => error.key)).toContain("import.error.package_membership_missing_price");
+    expect(validateRateCardForProcessing({ ...base, effectiveDate: "2026-02-30" }, snapshot))
+      .toContainEqual(expect.objectContaining({ sheet: "Metadata", column: "Effective Date", key: "import.error.value_invalid" }));
+  });
+
+  test("rejects a locked job whose data type changed after preliminary authorization", () => {
+    expect(() => assertPreliminaryDataType("building", "rate_card"))
+      .toThrowError(expect.objectContaining({ key: "IMPORT_JOB_NOT_PROCESSABLE" }));
   });
 });

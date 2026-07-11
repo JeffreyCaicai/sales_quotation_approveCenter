@@ -513,6 +513,22 @@ describe("generated PostgreSQL migration", () => {
     `)).rejects.toThrow(/published rate card child rows are immutable/i);
   });
 
+  test("normalizes existing controlled values before adding the trimmed constraint", async () => {
+    db = new PGlite();
+    await applyMigrations(db, 7);
+    await db.query(`insert into building_controlled_values (field, value) values ('building_type', E'  Office\t')`);
+    await applyMigrations(db, 8, 8);
+    const values = await db.query<{ value: string }>(`select value from building_controlled_values`);
+    expect(values.rows).toEqual([{ value: "Office" }]);
+  });
+
+  test("fails migration explicitly before normalized controlled-value collisions", async () => {
+    db = new PGlite();
+    await applyMigrations(db, 7);
+    await db.query(`insert into building_controlled_values (field, value) values ('building_type', 'Office'), ('building_type', ' Office ')`);
+    await expect(applyMigrations(db, 8, 8)).rejects.toThrow(/controlled value normalization collision/i);
+  });
+
   test("rejects a Rate Card currency other than IDR", async () => {
     db = new PGlite();
     await applyMigrations(db);

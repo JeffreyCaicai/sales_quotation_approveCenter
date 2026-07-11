@@ -12,6 +12,7 @@ import { validateBuildingRows, type BuildingValidationSnapshot } from "@/lib/imp
 import { S3ObjectStore } from "@/lib/storage/s3-object-store";
 import { TEMPLATE_VERSION_V2 } from "@/lib/imports/template-v2";
 import { ImportProcessingError } from "@/lib/imports/processing-errors";
+import { parseCalendarDateInJakarta, StrictCalendarDateError } from "@/lib/imports/calendar-date";
 
 export { ImportProcessingError } from "@/lib/imports/processing-errors";
 
@@ -172,7 +173,10 @@ export function validateRateCardForProcessing(
   if (!input.versionCode || snapshot.versionCodes.includes(input.versionCode)) {
     errors.push({ sheet: "Metadata", rowNumber: 2, column: "Version Code", key: "import.error.rate_card_version_invalid", params: { versionCode: input.versionCode } });
   }
-  if (!/^\d{4}-\d{2}-\d{2}$/u.test(input.effectiveDate)) {
+  try {
+    parseCalendarDateInJakarta(input.effectiveDate);
+  } catch (error) {
+    if (!(error instanceof StrictCalendarDateError)) throw error;
     errors.push({ sheet: "Metadata", rowNumber: 3, column: "Effective Date", key: "import.error.value_invalid", params: {} });
   }
   for (const row of [...input.buildingPrices, ...input.packagePrices]) {

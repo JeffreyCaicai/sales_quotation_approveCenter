@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 
 import type { ImportDataType } from "@/db/enums";
 import { AuthError, requirePermission } from "@/lib/auth/session";
-import { ImportError, permissionForDataType } from "@/lib/imports/contracts";
+import { ImportError, parseImportTemplateVersion, permissionForDataType } from "@/lib/imports/contracts";
 import { createImportJob } from "@/lib/imports/create-job";
 import { parseImportMultipart } from "@/lib/imports/multipart";
 
@@ -29,7 +29,7 @@ export async function POST(request: Request): Promise<NextResponse> {
     const result = await createImportJob(
       {
         dataType: rawDataType as ImportDataType,
-        templateVersion,
+        templateVersion: parseImportTemplateVersion(templateVersion),
         files,
       },
       actor,

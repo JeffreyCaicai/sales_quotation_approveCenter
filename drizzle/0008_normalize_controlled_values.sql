@@ -1,3 +1,30 @@
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM building_controlled_values
+    WHERE regexp_replace(value, '^\s+|\s+$', '', 'g') = ''
+  ) THEN
+    RAISE EXCEPTION 'controlled value normalization produced a blank code';
+  END IF;
+  IF EXISTS (
+    SELECT 1
+    FROM (
+      SELECT
+        regexp_replace(field, '^\s+|\s+$', '', 'g') AS normalized_field,
+        regexp_replace(value, '^\s+|\s+$', '', 'g') AS normalized_value
+      FROM building_controlled_values
+      GROUP BY 1, 2
+      HAVING count(*) > 1
+    ) collisions
+  ) THEN
+    RAISE EXCEPTION 'controlled value normalization collision';
+  END IF;
+END;
+$$;--> statement-breakpoint
+UPDATE building_controlled_values
+SET
+  field = regexp_replace(field, '^\s+|\s+$', '', 'g'),
+  value = regexp_replace(value, '^\s+|\s+$', '', 'g');--> statement-breakpoint
 CREATE FUNCTION normalize_building_controlled_value()
 RETURNS trigger
 LANGUAGE plpgsql

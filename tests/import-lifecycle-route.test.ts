@@ -62,4 +62,15 @@ describe("import lifecycle route authorization", () => {
     expect(mocks.publishImport).toHaveBeenCalledWith("job-1", actor);
     await expect(response.json()).resolves.toMatchObject({ state: "published" });
   });
+
+  test.each([new Error("database password leaked"), { secret: "raw non-error" }])(
+    "maps unknown processing failures to a generic 500",
+    async (failure) => {
+      mocks.requireSession.mockResolvedValue({ id: "actor" });
+      mocks.processImport.mockRejectedValue(failure);
+      const response = await processRoute(new Request("https://test/api/imports/job-1/process", { method: "POST" }), context);
+      expect(response.status).toBe(500);
+      await expect(response.json()).resolves.toEqual({ error: "IMPORT_PROCESS_FAILED" });
+    },
+  );
 });

@@ -5,7 +5,7 @@ import type { ImportDataType } from "@/db/enums";
 import type { SessionUser } from "@/lib/auth/session";
 import {
   ImportError,
-  CANONICAL_IMPORT_TEMPLATE_VERSION,
+  canonicalTemplateVersionForDataType,
   permissionForDataType,
   type CreateImportJobInput,
   type ImportFileRecord,
@@ -134,7 +134,8 @@ export async function createImportJob(
   dependencies?: ImportJobDependencies,
 ): Promise<{ jobId: string; state: "uploaded" }> {
   const dataType = assertPermission(input.dataType, actor);
-  if (input.templateVersion !== CANONICAL_IMPORT_TEMPLATE_VERSION) {
+  const canonicalTemplateVersion = canonicalTemplateVersionForDataType(dataType);
+  if (input.templateVersion !== canonicalTemplateVersion) {
     throw new ImportError(400, "IMPORT_TEMPLATE_VERSION_INVALID");
   }
   for (const file of input.files) validateFilename(file.filename);
@@ -175,7 +176,7 @@ export async function createImportJob(
   const reserveResult = await deps.repository.reserveUpload({
     id: jobId,
     dataType,
-    templateVersion: CANONICAL_IMPORT_TEMPLATE_VERSION,
+    templateVersion: canonicalTemplateVersion,
     checksum,
     sourceType: "manual",
     uploadedBy: actor.id,

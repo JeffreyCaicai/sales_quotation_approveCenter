@@ -173,6 +173,24 @@ describe("manual import upload contract", () => {
   });
 
   test.each([
+    ["customer_brand", "data.import.customer_brand"],
+    ["package", "data.import.package"],
+  ] as const)("preserves the TMN-IMPORT-1 upload contract for %s", async (dataType, permission) => {
+    const deps = dependencies();
+    await expect(createImportJob(
+      { dataType, templateVersion: "TMN-IMPORT-1", files: [upload(`${dataType}.csv`, "text/csv", new TextEncoder().encode("header\nvalue"))] },
+      actor([permission]),
+      deps,
+    )).resolves.toMatchObject({ state: "uploaded" });
+    expect(deps.repository.jobs[0].templateVersion).toBe("TMN-IMPORT-1");
+    await expect(createImportJob(
+      { dataType, templateVersion: "TMN-IMPORT-2", files: [upload(`${dataType}.csv`, "text/csv", new TextEncoder().encode("header\nother"))] },
+      actor([permission]),
+      dependencies(),
+    )).rejects.toMatchObject({ key: "IMPORT_TEMPLATE_VERSION_INVALID" });
+  });
+
+  test.each([
     ["macro.xlsm", "application/vnd.ms-excel.sheet.macroEnabled.12", xlsmBytes, "IMPORT_FILE_TYPE_INVALID"],
     ["../building.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", xlsxBytes, "IMPORT_FILENAME_INVALID"],
     ["building.xlsx", "text/csv", xlsxBytes, "IMPORT_FILE_TYPE_INVALID"],

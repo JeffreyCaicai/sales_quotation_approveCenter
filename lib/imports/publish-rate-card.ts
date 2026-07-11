@@ -1,10 +1,12 @@
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, sql } from "drizzle-orm";
 
 import { getDb } from "@/db";
 import { auditEvents, buildings, importJobs, rateCardBuildingPrices, rateCardPackageBuildings, rateCardPackageConfigs, rateCardVersions, salesPackages, userPermissions, users } from "@/db/schema";
 import type { SessionUser } from "@/lib/auth/session";
 import type { PublicationResult } from "@/lib/imports/publish";
 import { TEMPLATE_VERSION_V2, type RateCardImport } from "@/lib/imports/template-v2";
+import { parseCalendarDateInJakarta, StrictCalendarDateError } from "@/lib/imports/calendar-date";
+import { publicationLockIdentities } from "@/lib/imports/publication-locks";
 
 export type RateCardPublicationErrorKey =
   | "IMPORT_JOB_NOT_FOUND"
@@ -28,10 +30,8 @@ export interface ResolvedRateCardPublication {
   buildingIdByIris: Map<string, string>;
   packageIdByCode: Map<string, string>;
 }
-const IMPORT_PUBLICATION_LOCK_NAME = "import-publish-data-type-v1";
-
 export function jakartaMidnight(effectiveDate: string): Date {
-  return new Date(`${effectiveDate}T00:00:00+07:00`);
+  return parseCalendarDateInJakarta(effectiveDate);
 }
 
 export function assertRateCardPublicationSnapshot(
@@ -84,8 +84,10 @@ export function rateCardAuditMetadata(input: RateCardImport, resolved: ResolvedR
 
 export async function publishRateCardImport(jobId: string, actor: SessionUser): Promise<PublicationResult> {
   return getDb().transaction(async (tx) => {
-    await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`${IMPORT_PUBLICATION_LOCK_NAME}:rate_card`}, 0))`);
-    const [job] = await tx.select({ state: importJobs.state, dataType: importJobs.dataType, templateVersion: importJobs.templateVersion, normalizedPayload: importJobs.normalizedPayload, uploadedBy: importJobs.uploadedBy })
+    for (const identity of publicationLockIdentities("rate_card")) {
+      await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${identity}, 0))`);
+    }
+    const [job] = await tx.select({ state: importJobs.state, dataType: importJobs.dataType, templateVersion: importJobs.templateVersion, normalizedPayload: importJobs.normalizedPayload, uploadedBy: importJobs.uploadedBy, createdAt: importJobs.createdAt })
       .from(importJobs).where(eq(importJobs.id, jobId)).limit(1).for("update");
     if (!job) throw new RateCardPublicationError("IMPORT_JOB_NOT_FOUND", 404);
     if (job.dataType !== "rate_card") throw new RateCardPublicationError("IMPORT_CHANGE_INVALID", 400);
@@ -107,7 +109,7 @@ export async function publishRateCardImport(jobId: string, actor: SessionUser): 
     const irisIds = [...new Set([...input.buildingPrices.map((row) => row.irisBuildingId.trim()), ...input.packageBuildings.map((row) => row.irisBuildingId.trim())])];
     const packageCodes = [...new Set([...input.packagePrices.map((row) => row.packageCode.trim()), ...input.packageBuildings.map((row) => row.packageCode.trim())])];
     const lockedBuildings = irisIds.length === 0 ? [] : await tx.select({ id: buildings.id, irisBuildingId: buildings.irisBuildingId, status: buildings.status })
-      .from(buildings).where(inArray(buildings.irisBuildingId, irisIds)).for("update");
+      .from(buildings).where(inArray(buildings.irisBuildingId, irisIds)).orderBy(asc(buildings.irisBuildingId)).for("update");
     const lockedPackages = packageCodes.length === 0 ? [] : await tx.select({ id: salesPackages.id, packageCode: salesPackages.packageCode, status: salesPackages.status })
       .from(salesPackages).where(inArray(salesPackages.packageCode, packageCodes)).for("update");
     const resolved = assertRateCardPublicationSnapshot(input,
@@ -123,6 +125,7 @@ export async function publishRateCardImport(jobId: string, actor: SessionUser): 
       status: "draft",
       importJobId: jobId,
       uploadedBy: job.uploadedBy,
+      uploadedAt: job.createdAt,
       updatedAt: now,
     }).returning({ id: rateCardVersions.id });
 
@@ -159,8 +162,14 @@ async function assertCurrentRateCardPermission(tx: PublicationTransaction, actor
 function parseRateCardImport(value: unknown): RateCardImport {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new RateCardPublicationError("IMPORT_CHANGE_INVALID", 400);
   const item = value as Partial<RateCardImport>;
-  if (item.templateVersion !== TEMPLATE_VERSION_V2 || typeof item.versionCode !== "string" || item.versionCode.trim().length === 0 || !/^\d{4}-\d{2}-\d{2}$/u.test(String(item.effectiveDate)) || Number.isNaN(Date.parse(`${item.effectiveDate}T00:00:00.000Z`)) || item.currency !== "IDR" || !Array.isArray(item.buildingPrices) || !Array.isArray(item.packagePrices) || !Array.isArray(item.packageBuildings)) {
+  if (item.templateVersion !== TEMPLATE_VERSION_V2 || typeof item.versionCode !== "string" || item.versionCode.trim().length === 0 || typeof item.effectiveDate !== "string" || item.currency !== "IDR" || !Array.isArray(item.buildingPrices) || !Array.isArray(item.packagePrices) || !Array.isArray(item.packageBuildings)) {
     throw new RateCardPublicationError("IMPORT_CHANGE_INVALID", 400);
+  }
+  try {
+    parseCalendarDateInJakarta(item.effectiveDate);
+  } catch (error) {
+    if (error instanceof StrictCalendarDateError) throw new RateCardPublicationError("IMPORT_CHANGE_INVALID", 400);
+    throw error;
   }
   const parsed = item as RateCardImport;
   assertRateCardRows(parsed);

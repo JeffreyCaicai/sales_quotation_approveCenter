@@ -70,7 +70,7 @@ describe("imports route authorization boundary", () => {
     mocks.requirePermission.mockResolvedValue(user);
     mocks.createImportJob.mockResolvedValue({ jobId: `job-${dataType}`, state: "uploaded" });
     const form = new FormData();
-    form.set("templateVersion", "TMN-IMPORT-2");
+    form.set("templateVersion", "TMN-IMPORT-1");
     form.append("files", new File(["header\nvalue"], `${dataType}.csv`, { type: "text/csv" }));
     const response = await POST(new Request(`https://quotation.test/api/imports?dataType=${dataType}`, { method: "POST", body: form }));
     expect(mocks.requirePermission).toHaveBeenCalledWith(permission);

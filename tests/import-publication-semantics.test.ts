@@ -5,7 +5,7 @@ import type {
   NormalizedBuilding,
   NormalizedCurrentBuilding,
 } from "@/lib/imports/diff";
-import { assertBuildingChangePublishable } from "@/lib/imports/publish";
+import { assertBuildingChangePublishable, orderBuildingChangesForLocking } from "@/lib/imports/publish";
 
 function building(
   overrides: Partial<NormalizedBuilding> = {},
@@ -43,6 +43,13 @@ function modified(before = current()): ImportChange {
 }
 
 describe("building publication preflight", () => {
+  test("orders building row locks deterministically by IRIS ID", () => {
+    const first = current({ irisBuildingId: "B002" });
+    const second = current({ id: "00000000-0000-4000-8000-000000000002", irisBuildingId: "B001" });
+    expect(orderBuildingChangesForLocking([modified(first), modified(second)]).map((change) => change.entityKey))
+      .toEqual(["B001", "B002"]);
+  });
+
   test("rejects inactive-to-active publication even when every descriptor changes", () => {
     const before = current({ operationalStatus: "inactive", buildingName: "Former Tower" });
     expect(() => assertBuildingChangePublishable({

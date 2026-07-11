@@ -18,8 +18,6 @@ export async function POST(
     if (error instanceof AuthError || error instanceof ImportProcessingError) {
       return NextResponse.json({ error: error.key }, { status: error.status });
     }
-    const key = error instanceof Error ? error.message : "IMPORT_PROCESS_FAILED";
-    const status = key === "IMPORT_JOB_NOT_FOUND" ? 404 : key === "PERMISSION_DENIED" ? 403 : 409;
-    return NextResponse.json({ error: key }, { status });
+    return NextResponse.json({ error: "IMPORT_PROCESS_FAILED" }, { status: 500 });
   }
 }

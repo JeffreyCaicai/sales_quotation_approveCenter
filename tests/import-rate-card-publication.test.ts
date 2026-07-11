@@ -2,6 +2,7 @@ import { describe, expect, test } from "vitest";
 
 import { assertRateCardPublicationSnapshot, jakartaMidnight, rateCardAuditMetadata } from "@/lib/imports/publish-rate-card";
 import type { RateCardImport } from "@/lib/imports/template-v2";
+import { publicationLockIdentities } from "@/lib/imports/publication-locks";
 
 const input: RateCardImport = {
   templateVersion: "TMN-IMPORT-2", versionCode: "RC-1", effectiveDate: "2026-08-01", currency: "IDR",
@@ -78,5 +79,16 @@ describe("Rate Card publication transaction preflight", () => {
       packageConfigs: [{ packageCode: "P1", packageId: "package-uuid", priceIdr: "200" }],
       packageMemberships: [{ packageId: "package-uuid", buildingId: "building-uuid" }],
     });
+  });
+
+  test("uses the shared building-reference lock before each type-specific lock", () => {
+    expect(publicationLockIdentities("building")).toEqual([
+      "import-publish-building-references-v1",
+      "import-publish-data-type-v1:building",
+    ]);
+    expect(publicationLockIdentities("rate_card")).toEqual([
+      "import-publish-building-references-v1",
+      "import-publish-data-type-v1:rate_card",
+    ]);
   });
 });

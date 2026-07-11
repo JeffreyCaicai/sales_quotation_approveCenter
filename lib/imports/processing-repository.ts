@@ -15,6 +15,10 @@ export function processingClaimIsStale(updatedAt: Date, now: Date): boolean {
   return updatedAt.getTime() <= now.getTime() - PROCESSING_STALE_AFTER_MS;
 }
 
+export function assertPreliminaryDataType(preliminary: string, locked: string): void {
+  if (preliminary !== locked) throw new ImportProcessingError("IMPORT_JOB_NOT_PROCESSABLE", 409);
+}
+
 const processingPermission = {
   customer_brand: "data.import.customer_brand",
   building: "data.import.building",
@@ -45,6 +49,7 @@ export class PostgresImportProcessingRepository implements ImportProcessingRepos
       const [job] = await tx.select({ id: importJobs.id, dataType: importJobs.dataType, templateVersion: importJobs.templateVersion, state: importJobs.state, updatedAt: importJobs.updatedAt })
         .from(importJobs).where(eq(importJobs.id, jobId)).limit(1).for("update");
       if (!job) throw new ImportProcessingError("IMPORT_JOB_NOT_FOUND", 404);
+      assertPreliminaryDataType(candidate.dataType, job.dataType);
       const reclaiming = job.state === "validating" && processingClaimIsStale(job.updatedAt, now);
       if (job.state !== "uploaded" && !reclaiming) return { kind: "terminal" as const, state: job.state };
 
