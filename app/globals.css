@@ -76,6 +76,46 @@ button {
   border: 0;
 }
 
+.language-switcher {
+  position: fixed;
+  right: 18px;
+  bottom: 18px;
+  z-index: 30;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  max-width: min(100% - 36px, 320px);
+  padding: 4px;
+  border: 1px solid var(--line-strong);
+  border-radius: 12px;
+  background: rgba(255, 254, 250, 0.96);
+  box-shadow: 0 12px 32px rgba(21, 38, 56, 0.14);
+  backdrop-filter: blur(12px);
+}
+
+.language-switcher button {
+  min-height: 40px;
+  padding: 7px 12px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ink-soft);
+  font-size: 12px;
+  font-weight: 800;
+  white-space: normal;
+  cursor: pointer;
+}
+
+.language-switcher button:hover {
+  background: var(--surface-soft);
+  color: var(--ink);
+}
+
+.language-switcher button[data-selected="true"] {
+  background: var(--teal-soft);
+  color: var(--teal-dark);
+}
+
 .eyebrow {
   margin: 0 0 8px;
   color: var(--teal-dark);
@@ -978,6 +1018,11 @@ button {
 }
 
 @media (max-width: 760px) {
+  .language-switcher {
+    right: 14px;
+    bottom: 84px;
+    max-width: calc(100% - 28px);
+  }
   body { font-size: 14px; }
   .login-screen { padding: 20px 18px 40px; }
   .login-panel { margin-top: 65px; }
@@ -1189,6 +1234,7 @@ button {
   .demo-notice,
   .mobile-nav,
   .quotation-toolbar,
+  .language-switcher,
   button { display: none !important; }
   .app-main { width: 100%; margin: 0; padding: 0; }
   .quotation-document { width: 100%; max-width: none; margin: 0; padding: 0; border: 0; box-shadow: none; }

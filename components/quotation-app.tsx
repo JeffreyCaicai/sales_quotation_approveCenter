@@ -18,6 +18,8 @@ import { AppShell } from "./app-shell";
 import { ApprovalScreen } from "./approval-screen";
 import { DashboardScreen } from "./dashboard-screen";
 import { LoginScreen } from "./login-screen";
+import { LanguageSwitcher } from "./language-switcher";
+import { LocaleProvider } from "./locale-provider";
 import { QuoteWizard } from "./quote-wizard";
 import { QuoteProgressScreen } from "./quote-progress-screen";
 import { QuotationScreen } from "./quotation-screen";
@@ -33,6 +35,15 @@ interface WizardSession {
 }
 
 export function QuotationApp() {
+  return (
+    <LocaleProvider>
+      <LanguageSwitcher />
+      <QuotationWorkspace />
+    </LocaleProvider>
+  );
+}
+
+function QuotationWorkspace() {
   const [user, setUser] = useState<User | null>(null);
   const [quotes, setQuotes] = useState<Quote[]>(() => loadQuotes());
   const [placeholder, setPlaceholder] = useState<PlaceholderState | null>(null);
