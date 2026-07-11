@@ -15,6 +15,13 @@
       "when": 1783767713537,
       "tag": "0001_mean_unus",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1783768196396,
+      "tag": "0002_lock_rate_card_parent",
+      "breakpoints": true
     }
   ]
 }

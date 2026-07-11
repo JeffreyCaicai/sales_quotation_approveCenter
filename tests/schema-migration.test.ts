@@ -148,6 +148,24 @@ describe("generated PostgreSQL migration", () => {
     expect(journal.dialect).toBe("postgresql");
   });
 
+  test("locks both old and new parents before allowing child mutations", async () => {
+    db = new PGlite();
+    await applyMigrations(db);
+    const result = await db.query<{ definition: string }>(`
+      select pg_get_functiondef(
+        'protect_published_rate_card_child'::regproc
+      ) as definition
+    `);
+    const definition = result.rows[0].definition.replace(/\s+/g, " ");
+
+    expect(definition).toMatch(
+      /WHERE id = OLD\.rate_card_version_id FOR NO KEY UPDATE;/i,
+    );
+    expect(definition).toMatch(
+      /WHERE id = NEW\.rate_card_version_id FOR NO KEY UPDATE;/i,
+    );
+  });
+
   test("creates the Stage 2 tables, constraints, and indexes", async () => {
     db = new PGlite();
     await applyMigrations(db);
