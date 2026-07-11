@@ -74,7 +74,7 @@ export function validateBuildingRows(
 }
 
 export function validateRateCardBuildings(
-  input: RateCardImport,
+  input: Pick<RateCardImport, "buildingPrices" | "packageBuildings">,
   snapshot: BuildingValidationSnapshot,
 ): ImportValidationError[] {
   const errors: ImportValidationError[] = [];

@@ -123,6 +123,11 @@ enforce explicit server-side membership or allowlist checks.
 - New Rate Card prices and package memberships resolve IRIS Building IDs to
   active building UUIDs. Deactivation blocks new references but does not alter
   published Rate Cards or their historical package membership.
+- The production publication boundary for those references is
+  `resolveRateCardBuildingReferences`: it rejects missing, inactive, and
+  duplicate IRIS references before returning internal UUIDs. The complete
+  generic Rate Card publisher is intentionally deferred to the later Rate Card
+  publication stage.
 
 ## Learn More
 

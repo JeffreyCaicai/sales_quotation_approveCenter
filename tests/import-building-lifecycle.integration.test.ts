@@ -10,6 +10,10 @@ import type { SessionUser } from "@/lib/auth/session";
 import { calculateBuildingDiff, type BuildingDiffSnapshot, type ImportChange } from "@/lib/imports/diff";
 import { parseImportFiles } from "@/lib/imports/normalize";
 import { publishImport } from "@/lib/imports/publish";
+import {
+  RateCardBuildingResolutionError,
+  resolveRateCardBuildingReferences,
+} from "@/lib/imports/resolve-rate-card-building-references";
 import type { BuildingImport } from "@/lib/imports/template-v2";
 import { validateBuildingRows, validateRateCardBuildings, type BuildingValidationSnapshot } from "@/lib/imports/validate";
 
@@ -18,22 +22,30 @@ const pool = connectionString ? new Pool({ connectionString, max: 4 }) : null;
 
 const BUILDING_HEADER = "IRIS Building ID,ERP Building ID,Building Name,Building Type,Grade Resource,Area,City,CBD Area,Sub-District,Address,Operational Status,Data Source";
 
-function buildingFile(erpBuildingId = "", operationalStatus = "active") {
+function buildingFile(
+  irisBuildingId = "B003004",
+  erpBuildingId = "",
+  operationalStatus = "active",
+) {
   return {
     filename: "building.csv",
     body: new TextEncoder().encode([
       BUILDING_HEADER,
-      `B003004,${erpBuildingId},Apartment 19th Avenue,Apartment,Grade A,West Jakarta,Jakarta,,Cengkareng,Jl. Daan Mogot,${operationalStatus},building_team`,
+      `${irisBuildingId},${erpBuildingId},Apartment 19th Avenue,Apartment,Grade A,West Jakarta,Jakarta,,Cengkareng,Jl. Daan Mogot,${operationalStatus},building_team`,
     ].join("\n")),
   };
 }
 
-function rateCardFiles(versionCode: string) {
+function rateCardFiles(
+  versionCode: string,
+  irisBuildingId = "B003004",
+  packageCode = "PKG-IRIS",
+) {
   return [
     { filename: "metadata.csv", body: new TextEncoder().encode(`Template Version,TMN-IMPORT-2\nVersion Code,${versionCode}\nEffective Date,2026-08-01\nCurrency,IDR`) },
-    { filename: "building-prices.csv", body: new TextEncoder().encode("IRIS Building ID,Price IDR\nB003004,1000000") },
-    { filename: "package-prices.csv", body: new TextEncoder().encode("Package Code,Price IDR\nPKG-IRIS,1500000") },
-    { filename: "package-buildings.csv", body: new TextEncoder().encode("Package Code,IRIS Building ID\nPKG-IRIS,B003004") },
+    { filename: "building-prices.csv", body: new TextEncoder().encode(`IRIS Building ID,Price IDR\n${irisBuildingId},1000000`) },
+    { filename: "package-prices.csv", body: new TextEncoder().encode(`Package Code,Price IDR\n${packageCode},1500000`) },
+    { filename: "package-buildings.csv", body: new TextEncoder().encode(`Package Code,IRIS Building ID\n${packageCode},${irisBuildingId}`) },
   ];
 }
 
@@ -49,15 +61,15 @@ async function applyMigrations(db: PGlite) {
   }
 }
 
-function validationSnapshot(id: string, erpBuildingId: string | null, status: "active" | "inactive"): BuildingValidationSnapshot {
-  return { buildings: [{ id, irisBuildingId: "B003004", erpBuildingId, status }] };
+function validationSnapshot(id: string, erpBuildingId: string | null, status: "active" | "inactive", irisBuildingId = "B003004"): BuildingValidationSnapshot {
+  return { buildings: [{ id, irisBuildingId, erpBuildingId, status }] };
 }
 
-function diffSnapshot(id: string, erpBuildingId: string | null, status: "active" | "inactive"): BuildingDiffSnapshot {
+function diffSnapshot(id: string, erpBuildingId: string | null, status: "active" | "inactive", irisBuildingId = "B003004"): BuildingDiffSnapshot {
   return {
     buildings: [{
       id,
-      irisBuildingId: "B003004",
+      irisBuildingId,
       erpBuildingId,
       buildingName: "Apartment 19th Avenue",
       buildingType: "Apartment",
@@ -95,26 +107,37 @@ describe("IRIS identity lifecycle in executable PostgreSQL-compatible coverage",
     expect(inserted.rows[0].erp_link_status).toBe("manual_only");
 
     const parsedRateCard = await parseImportFiles("rate_card", rateCardFiles("RC-HISTORY"));
-    expect(validateRateCardBuildings(parsedRateCard, validationSnapshot(buildingId, null, "active"))).toEqual([]);
+    const resolvedRateCard = resolveRateCardBuildingReferences(
+      parsedRateCard,
+      validationSnapshot(buildingId, null, "active"),
+    );
+    expect(resolvedRateCard).toMatchObject({
+      buildingPrices: [{ buildingId }],
+      packageBuildings: [{ buildingId }],
+    });
     const rateCardJob = await db.query<{ id: string }>(`insert into import_jobs (data_type, template_version, checksum, state, uploaded_by, published_by, published_at) values ('rate_card', 'v2', '${randomUUID()}', 'published', '${user.rows[0].id}', '${user.rows[0].id}', now()) returning id`);
     const packageRow = await db.query<{ id: string }>(`insert into sales_packages (package_code, name) values ('PKG-IRIS', 'IRIS Package') returning id`);
     const version = await db.query<{ id: string }>(`insert into rate_card_versions (version_code, effective_at, status, import_job_id, uploaded_by, published_by, published_at) values ('RC-HISTORY', '2026-08-01', 'draft', '${rateCardJob.rows[0].id}', '${user.rows[0].id}', '${user.rows[0].id}', now()) returning id`);
     await db.exec(`
-      insert into rate_card_building_prices (rate_card_version_id, building_id, price_idr) values ('${version.rows[0].id}', '${buildingId}', 1000000);
+      insert into rate_card_building_prices (rate_card_version_id, building_id, price_idr) values ('${version.rows[0].id}', '${resolvedRateCard.buildingPrices[0].buildingId}', 1000000);
       insert into rate_card_package_configs (rate_card_version_id, package_id, price_idr) values ('${version.rows[0].id}', '${packageRow.rows[0].id}', 1500000);
-      insert into rate_card_package_buildings (rate_card_version_id, package_id, building_id) values ('${version.rows[0].id}', '${packageRow.rows[0].id}', '${buildingId}');
+      insert into rate_card_package_buildings (rate_card_version_id, package_id, building_id) values ('${version.rows[0].id}', '${packageRow.rows[0].id}', '${resolvedRateCard.packageBuildings[0].buildingId}');
       update rate_card_versions set status = 'published' where id = '${version.rows[0].id}';
     `);
 
-    const linked = await parseImportFiles("building", [buildingFile("ERP-89321")]);
+    const linked = await parseImportFiles("building", [buildingFile("B003004", "ERP-89321")]);
     expect(validateBuildingRows(linked.rows, validationSnapshot(buildingId, null, "active"))).toEqual([]);
     expect(calculateBuildingDiff(linked.rows, diffSnapshot(buildingId, null, "active"))[0]).toMatchObject({ type: "modified", before: { id: buildingId }, after: { erpBuildingId: "ERP-89321" } });
     await db.exec(`update buildings set erp_building_id = 'ERP-89321' where id = '${buildingId}'`);
 
-    const inactive = await parseImportFiles("building", [buildingFile("ERP-89321", "inactive")]);
+    const inactive = await parseImportFiles("building", [buildingFile("B003004", "ERP-89321", "inactive")]);
     expect(calculateBuildingDiff(inactive.rows, diffSnapshot(buildingId, "ERP-89321", "active"))[0]).toMatchObject({ type: "deactivated", before: { id: buildingId } });
     await db.exec(`update buildings set status = 'inactive' where id = '${buildingId}'`);
     const rejected = await parseImportFiles("rate_card", rateCardFiles("RC-REJECTED"));
+    expect(() => resolveRateCardBuildingReferences(
+      rejected,
+      validationSnapshot(buildingId, "ERP-89321", "inactive"),
+    )).toThrow(RateCardBuildingResolutionError);
     expect(validateRateCardBuildings(rejected, validationSnapshot(buildingId, "ERP-89321", "inactive"))).toEqual([
       { sheet: "Building Prices", rowNumber: 2, column: "IRIS Building ID", key: "import.error.building_inactive", params: { irisBuildingId: "B003004" } },
       { sheet: "Package Buildings", rowNumber: 2, column: "IRIS Building ID", key: "import.error.building_inactive", params: { irisBuildingId: "B003004" } },
@@ -133,13 +156,13 @@ describe("IRIS identity lifecycle in executable PostgreSQL-compatible coverage",
   });
 });
 
-async function nativeBuildingSnapshot(): Promise<{ validation: BuildingValidationSnapshot; diff: BuildingDiffSnapshot }> {
-  const result = await pool!.query<{ id: string; erp_building_id: string | null; name: string; building_type: string | null; grade_resource: string | null; area: string | null; city: string | null; cbd_area: string | null; sub_district: string | null; address: string; status: "active" | "inactive"; data_source: "building_team" | "erp" }>(`select id, erp_building_id, name, building_type, grade_resource, area, city, cbd_area, sub_district, address, status, data_source from buildings where iris_building_id = 'B003004'`);
+async function nativeBuildingSnapshot(irisBuildingId: string): Promise<{ validation: BuildingValidationSnapshot; diff: BuildingDiffSnapshot }> {
+  const result = await pool!.query<{ id: string; erp_building_id: string | null; name: string; building_type: string | null; grade_resource: string | null; area: string | null; city: string | null; cbd_area: string | null; sub_district: string | null; address: string; status: "active" | "inactive"; data_source: "building_team" | "erp" }>(`select id, erp_building_id, name, building_type, grade_resource, area, city, cbd_area, sub_district, address, status, data_source from buildings where iris_building_id = $1`, [irisBuildingId]);
   const row = result.rows[0];
   if (!row) return { validation: { buildings: [] }, diff: { buildings: [] } };
   return {
-    validation: validationSnapshot(row.id, row.erp_building_id, row.status),
-    diff: { buildings: [{ id: row.id, irisBuildingId: "B003004", erpBuildingId: row.erp_building_id, buildingName: row.name, buildingType: row.building_type, gradeResource: row.grade_resource, area: row.area, city: row.city, cbdArea: row.cbd_area, subDistrict: row.sub_district, address: row.address, status: row.status, dataSource: row.data_source }] },
+    validation: validationSnapshot(row.id, row.erp_building_id, row.status, irisBuildingId),
+    diff: { buildings: [{ id: row.id, irisBuildingId, erpBuildingId: row.erp_building_id, buildingName: row.name, buildingType: row.building_type, gradeResource: row.grade_resource, area: row.area, city: row.city, cbdArea: row.cbd_area, subDistrict: row.sub_district, address: row.address, status: row.status, dataSource: row.data_source }] },
   };
 }
 
@@ -173,37 +196,55 @@ describe("complete native PostgreSQL IRIS identity lifecycle", () => {
 
   test("publishes the full lifecycle through native transactional publication", async () => {
     const actor = await seedNativeActor();
-    await pool!.query("delete from buildings where iris_building_id = 'B003004'").catch(() => undefined);
+    const suffix = randomUUID();
+    const irisBuildingId = `B-NATIVE-${suffix}`;
+    const erpBuildingId = `ERP-NATIVE-${suffix}`;
+    const packageCode = `PKG-${suffix}`;
 
-    const manual = await parseImportFiles("building", [buildingFile()]);
-    let snapshot = await nativeBuildingSnapshot();
+    const manual = await parseImportFiles("building", [buildingFile(irisBuildingId)]);
+    let snapshot = await nativeBuildingSnapshot(irisBuildingId);
     expect(validateBuildingRows(manual.rows, snapshot.validation)).toEqual([]);
-    await publishNativeBuilding(actor, manual, calculateBuildingDiff(manual.rows, snapshot.diff));
-    snapshot = await nativeBuildingSnapshot();
+    const initialChanges = calculateBuildingDiff(manual.rows, snapshot.diff);
+    expect(initialChanges).toMatchObject([{
+      type: "added",
+      entityKey: irisBuildingId,
+      before: null,
+    }]);
+    await publishNativeBuilding(actor, manual, initialChanges);
+    snapshot = await nativeBuildingSnapshot(irisBuildingId);
     const buildingId = snapshot.validation.buildings[0].id;
     expect(snapshot.validation.buildings[0]).toMatchObject({ erpBuildingId: null, status: "active" });
 
-    const rateCard = await parseImportFiles("rate_card", rateCardFiles(`RC-${randomUUID()}`));
-    expect(validateRateCardBuildings(rateCard, snapshot.validation)).toEqual([]);
+    const rateCard = await parseImportFiles("rate_card", rateCardFiles(`RC-${randomUUID()}`, irisBuildingId, packageCode));
+    const resolvedRateCard = resolveRateCardBuildingReferences(
+      rateCard,
+      snapshot.validation,
+    );
+    expect(resolvedRateCard).toMatchObject({
+      buildingPrices: [{ buildingId }],
+      packageBuildings: [{ buildingId }],
+    });
     const rateCardJob = await pool!.query<{ id: string }>(`insert into import_jobs (data_type, template_version, checksum, state, uploaded_by, published_by, published_at) values ('rate_card', 'v2', $1, 'published', $2, $2, now()) returning id`, [randomUUID(), actor.id]);
-    const packageRow = await pool!.query<{ id: string }>(`insert into sales_packages (package_code, name) values ($1, 'IRIS Package') returning id`, [`PKG-${randomUUID()}`]);
+    const packageRow = await pool!.query<{ id: string }>(`insert into sales_packages (package_code, name) values ($1, 'IRIS Package') returning id`, [packageCode]);
     const version = await pool!.query<{ id: string }>(`insert into rate_card_versions (version_code, effective_at, status, import_job_id, uploaded_by, published_by, published_at) values ($1, '2026-08-01', 'draft', $2, $3, $3, now()) returning id`, [rateCard.versionCode, rateCardJob.rows[0].id, actor.id]);
-    await pool!.query(`insert into rate_card_building_prices (rate_card_version_id, building_id, price_idr) values ($1, $2, 1000000)`, [version.rows[0].id, buildingId]);
+    await pool!.query(`insert into rate_card_building_prices (rate_card_version_id, building_id, price_idr) values ($1, $2, $3)`, [version.rows[0].id, resolvedRateCard.buildingPrices[0].buildingId, resolvedRateCard.buildingPrices[0].priceIdr]);
     await pool!.query(`insert into rate_card_package_configs (rate_card_version_id, package_id, price_idr) values ($1, $2, 1500000)`, [version.rows[0].id, packageRow.rows[0].id]);
-    await pool!.query(`insert into rate_card_package_buildings (rate_card_version_id, package_id, building_id) values ($1, $2, $3)`, [version.rows[0].id, packageRow.rows[0].id, buildingId]);
+    await pool!.query(`insert into rate_card_package_buildings (rate_card_version_id, package_id, building_id) values ($1, $2, $3)`, [version.rows[0].id, packageRow.rows[0].id, resolvedRateCard.packageBuildings[0].buildingId]);
     await pool!.query(`update rate_card_versions set status = 'published' where id = $1`, [version.rows[0].id]);
 
-    const linked = await parseImportFiles("building", [buildingFile("ERP-89321")]);
-    snapshot = await nativeBuildingSnapshot();
+    const linked = await parseImportFiles("building", [buildingFile(irisBuildingId, erpBuildingId)]);
+    snapshot = await nativeBuildingSnapshot(irisBuildingId);
     expect(validateBuildingRows(linked.rows, snapshot.validation)).toEqual([]);
     const linkJobId = await publishNativeBuilding(actor, linked, calculateBuildingDiff(linked.rows, snapshot.diff));
-    snapshot = await nativeBuildingSnapshot();
-    expect(snapshot.validation.buildings[0]).toMatchObject({ id: buildingId, erpBuildingId: "ERP-89321" });
+    snapshot = await nativeBuildingSnapshot(irisBuildingId);
+    expect(snapshot.validation.buildings[0]).toMatchObject({ id: buildingId, erpBuildingId });
 
-    const inactive = await parseImportFiles("building", [buildingFile("ERP-89321", "inactive")]);
+    const inactive = await parseImportFiles("building", [buildingFile(irisBuildingId, erpBuildingId, "inactive")]);
     const deactivateJobId = await publishNativeBuilding(actor, inactive, calculateBuildingDiff(inactive.rows, snapshot.diff));
-    snapshot = await nativeBuildingSnapshot();
-    const rejected = await parseImportFiles("rate_card", rateCardFiles(`RC-${randomUUID()}`));
+    snapshot = await nativeBuildingSnapshot(irisBuildingId);
+    const rejected = await parseImportFiles("rate_card", rateCardFiles(`RC-${randomUUID()}`, irisBuildingId, packageCode));
+    expect(() => resolveRateCardBuildingReferences(rejected, snapshot.validation))
+      .toThrow(RateCardBuildingResolutionError);
     expect(validateRateCardBuildings(rejected, snapshot.validation).map((error) => error.key)).toEqual(["import.error.building_inactive", "import.error.building_inactive"]);
 
     const history = await pool!.query<{ price_building_id: string; package_building_id: string; status: string }>(`select price.building_id as price_building_id, member.building_id as package_building_id, version.status from rate_card_versions version join rate_card_building_prices price on price.rate_card_version_id = version.id join rate_card_package_buildings member on member.rate_card_version_id = version.id where version.id = $1`, [version.rows[0].id]);

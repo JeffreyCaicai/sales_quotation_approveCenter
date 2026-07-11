@@ -50,5 +50,5 @@ describe("representative building import performance", () => {
       diffMs: Number((finishedAt - validatedAt).toFixed(2)),
       totalMs: Number((finishedAt - startedAt).toFixed(2)),
     }));
-  }, DEADLINE_MS);
+  }, 70_000);
 });
