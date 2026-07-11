@@ -206,9 +206,10 @@ test("includes the approved-only printable quotation experience", async () => {
 });
 
 test("approved V2 keeps formal quotation and version-history navigation", async () => {
-  const [quotationApp, quotationScreen, dashboard] = await Promise.all([
+  const [quotationApp, quotationScreen, quoteProgressScreen, dashboard] = await Promise.all([
     readFile(new URL("../components/quotation-app.tsx", import.meta.url), "utf8"),
     readFile(new URL("../components/quotation-screen.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../components/quote-progress-screen.tsx", import.meta.url), "utf8"),
     readFile(new URL("../components/dashboard-screen.tsx", import.meta.url), "utf8"),
   ]);
 
@@ -225,6 +226,13 @@ test("approved V2 keeps formal quotation and version-history navigation", async 
     quotationApp,
     /if \(progressQuote\.status === "approved"\) setQuotationQuoteId\(progressQuote\.id\)/,
   );
+  assert.match(
+    quotationApp,
+    /backLabel=\{progressQuote\.status === "approved" \? "返回正式报价" : "返回工作台"\}/,
+  );
+  assert.match(quoteProgressScreen, /backLabel: string/);
+  assert.match(quoteProgressScreen, /← \{backLabel\}/);
+  assert.doesNotMatch(quoteProgressScreen, /← 返回工作台/);
 });
 
 test("uses only a canonical site origin for public Open Graph and X metadata", async () => {

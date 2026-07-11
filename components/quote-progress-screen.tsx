@@ -5,17 +5,18 @@ import { StatusBadge } from "./ui";
 
 interface QuoteProgressScreenProps {
   quote: Quote;
+  backLabel: string;
   onBack: () => void;
   onEdit: () => void;
 }
 
-export function QuoteProgressScreen({ quote, onBack, onEdit }: QuoteProgressScreenProps) {
+export function QuoteProgressScreen({ quote, backLabel, onBack, onEdit }: QuoteProgressScreenProps) {
   const latestReturn = getLatestReturn(quote.approvalHistory);
   const isReturned = quote.status === "returned";
 
   return (
     <div className="quote-progress-screen">
-      <button className="back-button" type="button" onClick={onBack}>← 返回工作台</button>
+      <button className="back-button" type="button" onClick={onBack}>← {backLabel}</button>
       <header className="approval-heading">
         <div>
           <p className="eyebrow">Quote Progress</p>

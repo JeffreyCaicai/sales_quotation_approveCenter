@@ -117,3 +117,43 @@ git diff --check    # exit 0; no findings
 ### Concerns / Limitations
 
 - No new concerns. The production-render regression verifies the navigation wiring and print exclusion remains covered by the existing stylesheet assertions.
+
+## Approved History Back-label Follow-up
+
+Corrected the final navigation copy mismatch without changing screen state or routing behavior.
+
+### RED / GREEN Evidence
+
+Added the focused source/render assertion first and confirmed the missing prop contract failed:
+
+```text
+node --test --test-name-pattern='approved V2' tests/rendered-html.test.mjs
+tests 1; pass 0; fail 1
+AssertionError: quotation-app.tsx did not match the expected context-aware backLabel prop
+```
+
+After the minimal prop wiring, the same targeted test passed:
+
+```text
+node --test --test-name-pattern='approved V2' tests/rendered-html.test.mjs
+tests 1; pass 1; fail 0
+```
+
+### Implementation
+
+- `QuoteProgressScreen` now renders its visible and accessible button text from a required `backLabel` prop.
+- `QuotationApp` passes `返回正式报价` for approved history and retains `返回工作台` for sales pending/returned progress.
+- The existing back handler remains unchanged: approved history restores the formal Quotation, while other progress views clear to the dashboard.
+
+### Fresh Verification
+
+```text
+npm run test:logic  # exit 0; tests 53, pass 53, fail 0
+npm test            # exit 0; production build complete; tests 5, pass 5, fail 0
+npm run lint        # exit 0; no findings
+npm run build       # exit 0; vinext production build complete
+```
+
+### Concerns / Limitations
+
+- No new concerns. The source/render regression covers both labels and explicitly rejects the former hard-coded progress-screen label.

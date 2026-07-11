@@ -186,6 +186,7 @@ export function QuotationApp() {
       ) : progressQuote && (progressQuote.status === "approved" || user.role === "sales") ? (
         <QuoteProgressScreen
           quote={progressQuote}
+          backLabel={progressQuote.status === "approved" ? "返回正式报价" : "返回工作台"}
           onBack={() => {
             if (progressQuote.status === "approved") setQuotationQuoteId(progressQuote.id);
             setProgressQuoteId(null);
