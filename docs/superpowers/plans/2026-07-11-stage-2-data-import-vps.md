@@ -22,6 +22,7 @@
 - Typical building imports contain about 5,000 rows; other imports remain below 5,000 rows and occur approximately monthly.
 - Rate Card effective dates use `Asia/Jakarta`; activation supersedes the prior active version atomically.
 - Existing quotation prototype behavior and its current logic/localization tests must remain green after every task.
+- The existing Sites deployment at `https://sales-quotation-approval.jeffrey202510.chatgpt.site/` must not be deleted, overwritten, or republished during Stage 2; VPS deployment uses a separate address after user acceptance.
 - The production server exposes only ports 22, 80, and 443. PostgreSQL and MinIO API/console ports remain on the private Docker network.
 - Production secrets exist only in `/opt/sales-quotation/shared/.env.production` with mode `0600`; they are never committed.
 
@@ -45,6 +46,10 @@
 - Produces: `getDb(): NodePgDatabase<typeof schema>` using `DATABASE_URL`.
 - Produces: Next.js standalone output in `.next/standalone`.
 - Preserves: `npm run test:logic`, `npm run test:localization`, `npm run build`.
+
+- [ ] **Step 0: Preserve a recoverable Sites source anchor**
+
+Create annotated tag `sites-demo-v1` at the pre-migration commit and verify the existing Sites URL responds successfully. Do not invoke any Sites publish, redeploy, or delete operation. The tag is the source recovery point; the unchanged hosted deployment remains the business-discussion URL.
 
 - [ ] **Step 1: Write the failing runtime contract test**
 
