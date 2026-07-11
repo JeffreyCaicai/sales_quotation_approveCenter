@@ -1,8 +1,10 @@
 import type { ReactNode } from "react";
 
 import { USERS } from "@/lib/mock-data";
-import type { User } from "@/lib/types";
+import type { Role, User } from "@/lib/types";
 
+import { LanguageSwitcher } from "./language-switcher";
+import { useLocale } from "./locale-provider";
 import { ProductMark } from "./login-screen";
 
 interface AppShellProps {
@@ -14,6 +16,12 @@ interface AppShellProps {
   onPlaceholder: (label: string) => void;
 }
 
+const ROLE_LABEL_KEYS: Record<Role, "roleSales.label" | "roleManager.label" | "roleCeo.label"> = {
+  sales: "roleSales.label",
+  manager: "roleManager.label",
+  ceo: "roleCeo.label",
+};
+
 export function AppShell({
   user,
   children,
@@ -22,26 +30,36 @@ export function AppShell({
   onLogout,
   onPlaceholder,
 }: AppShellProps) {
+  const { t } = useLocale();
+  const requestReset = () => {
+    if (window.confirm(t("shell.resetConfirm"))) onReset();
+  };
+  const requestLogout = () => {
+    if (window.confirm(t("shell.logoutConfirm"))) onLogout();
+  };
+  const roleLabel = (role: Role) => t(ROLE_LABEL_KEYS[role]);
+
   return (
     <div className="app-frame">
       <header className="app-header">
         <ProductMark />
 
-        <nav className="primary-nav" aria-label="主要导航">
+        <nav className="primary-nav" aria-label={t("shell.primaryNavigation")}>
           <button className="primary-nav__item primary-nav__item--active" type="button">
             <DashboardIcon />
-            <span>工作台</span>
+            <span>{t("shell.dashboard")}</span>
           </button>
-          <button className="primary-nav__item" type="button" onClick={() => onPlaceholder("报价记录")}>
+          <button className="primary-nav__item" type="button" onClick={() => onPlaceholder(t("shell.quoteRecords"))}>
             <DocumentIcon />
-            <span>报价记录</span>
+            <span>{t("shell.quoteRecords")}</span>
           </button>
         </nav>
 
         <div className="header-actions">
           <span className="demo-chip demo-chip--compact">DEMO</span>
+          <LanguageSwitcher />
           <label className="role-switcher">
-            <span className="sr-only">切换角色</span>
+            <span className="sr-only">{t("shell.switchRole")}</span>
             <select
               value={user.id}
               onChange={(event) => {
@@ -51,7 +69,7 @@ export function AppShell({
             >
               {USERS.map((item) => (
                 <option value={item.id} key={item.id}>
-                  {roleLabel(item)}
+                  {roleLabel(item.role)}
                 </option>
               ))}
             </select>
@@ -60,13 +78,13 @@ export function AppShell({
             <span className="avatar" aria-hidden="true">{user.name.slice(0, 1)}</span>
             <span className="user-menu__identity">
               <strong>{user.name}</strong>
-              <small>{user.title}</small>
+              <small>{roleLabel(user.role)}</small>
             </span>
             <details>
-              <summary aria-label="打开用户菜单">•••</summary>
+              <summary aria-label={t("shell.openUserMenu")}>•••</summary>
               <div className="user-menu__popover">
-                <button type="button" onClick={onReset}>重置演示数据</button>
-                <button type="button" onClick={onLogout}>退出角色</button>
+                <button type="button" onClick={requestReset}>{t("shell.reset")}</button>
+                <button type="button" onClick={requestLogout}>{t("shell.logout")}</button>
               </div>
             </details>
           </div>
@@ -75,26 +93,27 @@ export function AppShell({
 
       <div className="demo-notice">
         <span aria-hidden="true">ⓘ</span>
-        当前为演示环境：客户、楼宇、流量、曝光及人民币价格均为模拟数据。
-        <button type="button" onClick={onReset}>恢复初始数据</button>
+        {t("shell.demoNotice")}
+        <button type="button" onClick={requestReset}>{t("shell.restore")}</button>
       </div>
 
       <main className="app-main">{children}</main>
 
-      <nav className="mobile-nav" aria-label="移动端导航">
-        <button className="mobile-nav__active" type="button"><DashboardIcon />工作台</button>
-        <button type="button" onClick={() => onPlaceholder("报价记录")}><DocumentIcon />报价</button>
+      <nav className="mobile-nav" aria-label={t("shell.mobileNavigation")}>
+        <button className="mobile-nav__active" type="button"><DashboardIcon />{t("shell.dashboard")}</button>
+        <button type="button" onClick={() => onPlaceholder(t("shell.quoteRecords"))}><DocumentIcon />{t("shell.quoteShort")}</button>
         <details className="mobile-account">
-          <summary aria-label="打开移动端账户菜单"><UserIcon />账户</summary>
+          <summary aria-label={t("shell.openMobileAccount")}><UserIcon />{t("shell.account")}</summary>
           <div className="mobile-account__popover">
             <div className="mobile-account__identity">
               <span className="avatar" aria-hidden="true">{user.name.slice(0, 1)}</span>
-              <span><strong>{user.name}</strong><small>{user.title}</small></span>
+              <span><strong>{user.name}</strong><small>{roleLabel(user.role)}</small></span>
             </div>
+            <LanguageSwitcher />
             <label className="mobile-role-switcher">
-              <span>当前角色</span>
+              <span>{t("shell.currentRole")}</span>
               <select
-                aria-label="移动端切换角色"
+                aria-label={t("shell.mobileRoleSwitcher")}
                 value={user.id}
                 onChange={(event) => {
                   const nextUser = USERS.find((item) => item.id === event.target.value);
@@ -102,25 +121,19 @@ export function AppShell({
                 }}
               >
                 {USERS.map((item) => (
-                  <option value={item.id} key={item.id}>{roleLabel(item)}</option>
+                  <option value={item.id} key={item.id}>{roleLabel(item.role)}</option>
                 ))}
               </select>
             </label>
-            <button type="button" onClick={onReset}>重置演示数据</button>
-            <button className="mobile-account__logout" type="button" onClick={onLogout}>
-              退出当前角色
+            <button type="button" onClick={requestReset}>{t("shell.reset")}</button>
+            <button className="mobile-account__logout" type="button" onClick={requestLogout}>
+              {t("shell.logoutCurrent")}
             </button>
           </div>
         </details>
       </nav>
     </div>
   );
-}
-
-function roleLabel(user: User) {
-  if (user.role === "sales") return "销售";
-  if (user.role === "manager") return "销售主管";
-  return "CEO";
 }
 
 function DashboardIcon() {

@@ -1,8 +1,10 @@
 import { CUSTOMERS, USERS } from "@/lib/mock-data";
+import type { TranslationKey } from "@/lib/i18n";
 import { getDiscountBand } from "@/lib/quotation";
 import { quotesForRole } from "@/lib/store";
 import type { DiscountBand, Quote, Role, User } from "@/lib/types";
 
+import { useLocale } from "./locale-provider";
 import { Money, StatusBadge } from "./ui";
 
 interface DashboardScreenProps {
@@ -10,11 +12,6 @@ interface DashboardScreenProps {
   quotes: Quote[];
   onAction: (label: string, quote?: Quote) => void;
 }
-
-const DATE_FORMATTER = new Intl.DateTimeFormat("zh-CN", {
-  month: "short",
-  day: "numeric",
-});
 
 export function DashboardScreen({ user, quotes, onAction }: DashboardScreenProps) {
   const visibleQuotes = quotesForRole(quotes, user.role, user.id);
@@ -31,6 +28,7 @@ export function DashboardScreen({ user, quotes, onAction }: DashboardScreenProps
 }
 
 function SalesDashboard({ user, quotes, onAction }: DashboardScreenProps) {
+  const { formatNumber, t } = useLocale();
   const counts = {
     draft: quotes.filter((quote) => quote.status === "draft").length,
     returned: quotes.filter((quote) => quote.status === "returned").length,
@@ -42,21 +40,21 @@ function SalesDashboard({ user, quotes, onAction }: DashboardScreenProps) {
   return (
     <div className="dashboard">
       <DashboardHeading
-        eyebrow="销售工作台"
-        title={`早上好，${user.name}`}
-        description="今天的报价进度与待处理事项一目了然。"
-        action={<button className="button button--primary" type="button" onClick={() => onAction("新建报价")}>＋ 新建报价</button>}
+        eyebrow={t("dashboard.salesEyebrow")}
+        title={t("dashboard.salesTitle", { name: user.name })}
+        description={t("dashboard.salesDescription")}
+        action={<button className="button button--primary" type="button" onClick={() => onAction(t("dashboard.newQuote"))}>＋ {t("dashboard.newQuote")}</button>}
       />
-      <section className="metric-grid metric-grid--five" aria-label="报价概览">
-        <MetricCard label="草稿" value={counts.draft} tone="navy" note="继续完善后提交" />
-        <MetricCard label="已退回" value={counts.returned} tone="coral" note="需要优先处理" />
-        <MetricCard label="审批中" value={counts.pending} tone="amber" note="等待管理层审批" />
-        <MetricCard label="已批准" value={counts.approved} tone="teal" note="可生成正式报价" />
-        <MetricCard label="全部报价" value={counts.total} tone="navy" note="本人报价总数" />
+      <section className="metric-grid metric-grid--five" aria-label={t("dashboard.quoteOverview")}>
+        <MetricCard label={t("dashboard.metricDraft")} value={formatNumber(counts.draft)} tone="navy" note={t("dashboard.metricDraftNote")} />
+        <MetricCard label={t("dashboard.metricReturned")} value={formatNumber(counts.returned)} tone="coral" note={t("dashboard.metricReturnedNote")} />
+        <MetricCard label={t("dashboard.metricPending")} value={formatNumber(counts.pending)} tone="amber" note={t("dashboard.metricPendingNote")} />
+        <MetricCard label={t("dashboard.metricApproved")} value={formatNumber(counts.approved)} tone="teal" note={t("dashboard.metricApprovedNote")} />
+        <MetricCard label={t("dashboard.metricAll")} value={formatNumber(counts.total)} tone="navy" note={t("dashboard.metricAllNote")} />
       </section>
       <QuoteTable
-        title="我的报价"
-        description="最近更新的客户报价"
+        title={t("dashboard.myQuotes")}
+        description={t("dashboard.myQuotesDescription")}
         role="sales"
         quotes={quotes}
         onAction={onAction}
@@ -66,24 +64,25 @@ function SalesDashboard({ user, quotes, onAction }: DashboardScreenProps) {
 }
 
 function ManagerDashboard({ user, quotes, onAction }: DashboardScreenProps) {
+  const { formatNumber, t } = useLocale();
   const pending = quotes.filter((quote) => quote.status === "pending_manager");
   const elevated = quotes.filter((quote) => getDiscountBand(quote.discount) !== "standard").length;
 
   return (
     <div className="dashboard">
       <DashboardHeading
-        eyebrow="团队审批"
-        title={`${user.name}，团队队列已更新`}
-        description="优先处理待审批项目，并关注高折扣报价的商业依据。"
+        eyebrow={t("dashboard.managerEyebrow")}
+        title={t("dashboard.managerTitle", { name: user.name })}
+        description={t("dashboard.managerDescription")}
       />
-      <section className="metric-grid metric-grid--three" aria-label="团队概览">
-        <MetricCard label="待我审批" value={pending.length} tone="amber" note="当前主管节点" />
-        <MetricCard label="风险报价" value={elevated} tone="coral" note="折扣超过标准区间" />
-        <MetricCard label="团队报价" value={quotes.length} tone="navy" note="陈晨 · 本月累计" />
+      <section className="metric-grid metric-grid--three" aria-label={t("dashboard.teamOverview")}>
+        <MetricCard label={t("dashboard.metricPendingMine")} value={formatNumber(pending.length)} tone="amber" note={t("dashboard.metricPendingMineNote")} />
+        <MetricCard label={t("dashboard.metricRisk")} value={formatNumber(elevated)} tone="coral" note={t("dashboard.metricRiskNote")} />
+        <MetricCard label={t("dashboard.metricTeam")} value={formatNumber(quotes.length)} tone="navy" note={t("dashboard.metricTeamNote")} />
       </section>
       <QuoteTable
-        title="团队报价队列"
-        description="按风险与更新时间快速定位待办"
+        title={t("dashboard.teamQueue")}
+        description={t("dashboard.teamQueueDescription")}
         role="manager"
         quotes={quotes}
         onAction={onAction}
@@ -99,32 +98,33 @@ function CeoDashboard({
   executiveQueue,
   onAction,
 }: DashboardScreenProps & { executiveQueue: Quote[] }) {
+  const { formatNumber, t } = useLocale();
   const approvedQuotes = quotes.filter((quote) => quote.status === "approved");
   const approvedValue = approvedQuotes.reduce((total, quote) => total + quote.pricing.total, 0);
 
   return (
     <div className="dashboard">
       <DashboardHeading
-        eyebrow="管理层审批"
-        title={`${user.name}，这里是最终审批事项`}
-        description="仅呈现需要 CEO 决策的高折扣报价，减少无关信息干扰。"
+        eyebrow={t("dashboard.ceoEyebrow")}
+        title={t("dashboard.ceoTitle", { name: user.name })}
+        description={t("dashboard.ceoDescription")}
       />
-      <section className="executive-summary" aria-label="执行摘要">
+      <section className="executive-summary" aria-label={t("dashboard.executiveSummary")}>
         <div>
-          <span className="executive-summary__label">待最终审批</span>
-          <strong>{executiveQueue.length}</strong>
-          <small>份高折扣报价</small>
+          <span className="executive-summary__label">{t("dashboard.finalApprovals")}</span>
+          <strong>{formatNumber(executiveQueue.length)}</strong>
+          <small>{t("dashboard.highDiscountQuotes")}</small>
         </div>
         <div>
-          <span className="executive-summary__label">本期已批准价值</span>
+          <span className="executive-summary__label">{t("dashboard.approvedValue")}</span>
           <strong><Money amount={approvedValue} compact /></strong>
-          <small>{approvedQuotes.length} 份已批准报价</small>
+          <small>{formatNumber(approvedQuotes.length)} {t("dashboard.approvedQuotes")}</small>
         </div>
-        <p>审批队列已按折扣风险聚焦，所有金额均含税。</p>
+        <p>{t("dashboard.taxIncludedSummary")}</p>
       </section>
       <QuoteTable
-        title="CEO 审批队列"
-        description="仅显示已通过销售主管审核的执行级报价"
+        title={t("dashboard.ceoQueue")}
+        description={t("dashboard.ceoQueueDescription")}
         role="ceo"
         quotes={executiveQueue}
         onAction={onAction}
@@ -132,8 +132,8 @@ function CeoDashboard({
       />
       {approvedQuotes.length > 0 ? (
         <QuoteTable
-          title="已批准报价"
-          description="已完成审批，可查看并打印正式报价"
+          title={t("dashboard.approvedQuoteTitle")}
+          description={t("dashboard.approvedQuoteDescription")}
           role="ceo"
           quotes={approvedQuotes}
           onAction={onAction}
@@ -166,7 +166,7 @@ function DashboardHeading({
   );
 }
 
-function MetricCard({ label, value, tone, note }: { label: string; value: number; tone: string; note: string }) {
+function MetricCard({ label, value, tone, note }: { label: string; value: string; tone: string; note: string }) {
   return (
     <article className={`metric-card metric-card--${tone}`}>
       <span>{label}</span>
@@ -191,40 +191,43 @@ function QuoteTable({
   onAction: (label: string, quote?: Quote) => void;
   showRisk?: boolean;
 }) {
+  const { formatDate, formatNumber, t } = useLocale();
+
   return (
     <section className="table-card">
       <header className="table-card__header">
         <div><h2>{title}</h2><p>{description}</p></div>
-        <span>{quotes.length} 份</span>
+        <span>{t("dashboard.quoteCount", { count: formatNumber(quotes.length) })}</span>
       </header>
       {quotes.length === 0 ? (
-        <div className="empty-state"><strong>当前没有待处理报价</strong><span>新的报价进入该节点后会显示在这里。</span></div>
+        <div className="empty-state"><strong>{t("dashboard.emptyTitle")}</strong><span>{t("dashboard.emptyDescription")}</span></div>
       ) : (
         <div className="quote-list">
           <div className="quote-row quote-row--header" aria-hidden="true">
-            <span>报价 / 客户</span><span>负责人</span><span>折扣</span><span>含税总额</span><span>状态</span><span>操作</span>
+            <span>{t("dashboard.quoteCustomer")}</span><span>{t("dashboard.owner")}</span><span>{t("dashboard.discount")}</span><span>{t("dashboard.taxIncludedTotal")}</span><span>{t("dashboard.status")}</span><span>{t("dashboard.action")}</span>
           </div>
           {quotes.map((quote) => {
             const customer = CUSTOMERS.find((item) => item.id === quote.customerId);
             const owner = USERS.find((item) => item.id === quote.salesId);
             const action = actionFor(role, quote);
+            const actionLabel = t(action.labelKey);
             const band = getDiscountBand(quote.discount);
             return (
               <article className="quote-row" key={quote.id}>
                 <div className="quote-row__primary">
-                  <strong>{customer?.name ?? "未知客户"}</strong>
-                  <span>{quote.quoteNumber} · 更新于 {DATE_FORMATTER.format(new Date(quote.updatedAt))}</span>
+                  <strong>{customer?.name ?? t("dashboard.unknownCustomer")}</strong>
+                  <span>{t("dashboard.updatedAt", { number: quote.quoteNumber, date: formatDate(quote.updatedAt) })}</span>
                 </div>
-                <span data-label="负责人">{owner?.name ?? "—"}</span>
-                <span data-label="折扣">
-                  <strong>{quote.discount}%</strong>
+                <span data-label={t("dashboard.owner")}>{owner?.name ?? "—"}</span>
+                <span data-label={t("dashboard.discount")}>
+                  <strong>{formatNumber(quote.discount)}%</strong>
                   {showRisk ? <RiskBadge band={band} /> : null}
                 </span>
-                <span data-label="含税总额"><Money amount={quote.pricing.total} /></span>
-                <span data-label="状态"><StatusBadge status={quote.status} /></span>
+                <span data-label={t("dashboard.taxIncludedTotal")}><Money amount={quote.pricing.total} /></span>
+                <span data-label={t("dashboard.status")}><StatusBadge status={quote.status} /></span>
                 <span className="quote-row__action">
-                  <button className={`button ${action.primary ? "button--primary" : "button--secondary"}`} type="button" onClick={() => onAction(action.label, quote)}>
-                    {action.label}
+                  <button className={`button ${action.primary ? "button--primary" : "button--secondary"}`} type="button" onClick={() => onAction(actionLabel, quote)}>
+                    {actionLabel}
                   </button>
                 </span>
               </article>
@@ -236,31 +239,34 @@ function QuoteTable({
   );
 }
 
-function actionFor(role: Role, quote: Quote): { label: string; primary: boolean } {
-  if (quote.status === "approved") return { label: "查看正式报价", primary: false };
+function actionFor(role: Role, quote: Quote): { labelKey: TranslationKey; primary: boolean } {
+  if (quote.status === "approved") return { labelKey: "dashboard.viewQuotation", primary: false };
 
   if (role === "sales") {
-    if (quote.status === "returned") return { label: "修改并重新提交", primary: true };
-    if (quote.status === "draft") return { label: "继续编辑", primary: true };
-    return { label: "查看进度", primary: false };
+    if (quote.status === "returned") return { labelKey: "dashboard.reviseResubmit", primary: true };
+    if (quote.status === "draft") return { labelKey: "dashboard.continueEditing", primary: true };
+    return { labelKey: "dashboard.viewProgress", primary: false };
   }
 
   if (role === "manager" && quote.status === "pending_manager") {
-    return { label: "审核报价", primary: true };
+    return { labelKey: "dashboard.reviewQuote", primary: true };
   }
 
   if (role === "ceo" && quote.status === "pending_ceo") {
-    return { label: "执行审批", primary: true };
+    return { labelKey: "dashboard.executiveApproval", primary: true };
   }
 
-  return { label: "查看详情", primary: false };
+  return { labelKey: "dashboard.viewDetails", primary: false };
 }
 
 function RiskBadge({ band }: { band: DiscountBand }) {
-  const labels: Record<DiscountBand, string> = {
-    standard: "标准",
-    elevated: "关注",
-    executive: "高风险",
+  const { t } = useLocale();
+  const labelKeys: Record<DiscountBand, TranslationKey> = {
+    standard: "risk.standard",
+    elevated: "risk.elevated",
+    executive: "risk.executive",
   };
-  return <span className={`risk-badge risk-badge--${band}`}>{labels[band]}</span>;
+  const label = t(labelKeys[band]);
+
+  return <span className={`risk-badge risk-badge--${band}`} aria-label={label}>{label}</span>;
 }

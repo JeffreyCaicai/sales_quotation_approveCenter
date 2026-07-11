@@ -56,17 +56,17 @@ test("server-renders the quotation workspace role entry", async () => {
   assert.match(response.headers.get("content-type") ?? "", /^text\/html\b/i);
 
   const html = await response.text();
-  assert.match(html, /报价审批中心/);
+  assert.match(html, /Quotation Approval Center/);
+  assert.match(html, /Choose a demo role/);
+  assert.match(html, /Sales Representative/);
+  assert.match(html, /Sales Manager/);
+  assert.match(html, /Chief Executive Officer/);
   assert.match(html, /楼宇报价与折扣审批/);
-  assert.match(html, /模拟数据/);
-  assert.match(html, /销售/);
-  assert.match(html, /销售主管/);
-  assert.match(html, /CEO/);
   assert.doesNotMatch(html, developmentPreviewMeta);
 });
 
 test("replaces the disposable starter with the quotation workspace", async () => {
-  const [page, layout, packageJson, quotationApp, quoteWizard, approvalScreen, quoteProgressScreen, quoteVersionHistory, quotationScreen, appShell, dashboard, ui, css, favicon] = await Promise.all([
+  const [page, layout, packageJson, quotationApp, quoteWizard, approvalScreen, quoteProgressScreen, quoteVersionHistory, quotationScreen, login, appShell, dashboard, ui, i18n, css, favicon] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
     readFile(new URL("../package.json", import.meta.url), "utf8"),
@@ -76,9 +76,11 @@ test("replaces the disposable starter with the quotation workspace", async () =>
     readFile(new URL("../components/quote-progress-screen.tsx", import.meta.url), "utf8").catch(() => ""),
     readFile(new URL("../components/quote-version-history.tsx", import.meta.url), "utf8").catch(() => ""),
     readFile(new URL("../components/quotation-screen.tsx", import.meta.url), "utf8").catch(() => ""),
+    readFile(new URL("../components/login-screen.tsx", import.meta.url), "utf8"),
     readFile(new URL("../components/app-shell.tsx", import.meta.url), "utf8"),
     readFile(new URL("../components/dashboard-screen.tsx", import.meta.url), "utf8"),
     readFile(new URL("../components/ui.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../lib/i18n.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
     readFile(new URL("../public/favicon.svg", import.meta.url), "utf8"),
   ]);
@@ -161,8 +163,17 @@ test("replaces the disposable starter with the quotation workspace", async () =>
   assert.match(quotationScreen, /楼宇明细附录/);
   assert.match(quotationScreen, /审批记录/);
   assert.match(appShell, /DEMO/);
+  assert.match(login, /<LanguageSwitcher \/>/);
+  assert.equal(appShell.match(/<LanguageSwitcher \/>/g)?.length, 2);
+  assert.doesNotMatch(quotationApp, /<LanguageSwitcher \/>/);
+  assert.match(i18n, /label: "销售代表"/);
+  assert.match(i18n, /label: "销售主管"/);
+  assert.match(i18n, /label: "首席执行官"/);
+  for (const source of [login, appShell, dashboard, ui]) {
+    assert.doesNotMatch(source, /[\u3400-\u9fff]/);
+  }
   assert.match(dashboard, /quotesForRole/);
-  assert.match(dashboard, /label="全部报价" value=\{counts\.total\}/);
+  assert.match(dashboard, /label=\{t\("dashboard\.metricAll"\)\} value=\{formatNumber\(counts\.total\)\}/);
   assert.match(ui, /export function StatusBadge/);
   assert.match(ui, /export function Money/);
   assert.match(ui, /export function Modal/);
@@ -171,9 +182,9 @@ test("replaces the disposable starter with the quotation workspace", async () =>
   assert.match(ui, /onCancel=/);
   assert.match(ui, /autoFocus/);
   assert.match(ui, /restoreFocusRef\.current\?\.focus\(\)/);
-  assert.match(appShell, /aria-label="移动端切换角色"/);
-  assert.match(appShell, /aria-label="打开移动端账户菜单"/);
-  assert.match(appShell, /退出当前角色/);
+  assert.match(appShell, /aria-label=\{t\("shell\.mobileRoleSwitcher"\)\}/);
+  assert.match(appShell, /aria-label=\{t\("shell\.openMobileAccount"\)\}/);
+  assert.match(appShell, /t\("shell\.logoutCurrent"\)/);
   assert.doesNotMatch(appShell, /onClick=\{onLogout\}><UserIcon \/>我的/);
   assert.match(css, /@media \(forced-colors: active\)/);
   assert.match(
@@ -213,7 +224,7 @@ test("approved V2 keeps formal quotation and version-history navigation", async 
     readFile(new URL("../components/dashboard-screen.tsx", import.meta.url), "utf8"),
   ]);
 
-  assert.match(dashboard, /quote\.status === "approved"[\s\S]*label: "查看正式报价"/);
+  assert.match(dashboard, /quote\.status === "approved"[\s\S]*labelKey: "dashboard\.viewQuotation"/);
   assert.match(quotationScreen, /报价版本<\/dt><dd>V\{quote\.version\}<\/dd>/);
   assert.match(quotationScreen, /onViewHistory: \(\) => void/);
   assert.match(quotationScreen, /onClick=\{onViewHistory\}>查看版本记录<\/button>/);

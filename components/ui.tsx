@@ -1,36 +1,42 @@
-import { useEffect, useRef, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, type ReactNode } from "react";
 
+import type { TranslationKey } from "@/lib/i18n";
 import type { QuoteStatus } from "@/lib/types";
 
-const STATUS_LABELS: Record<QuoteStatus, string> = {
-  draft: "草稿",
-  pending_manager: "待主管审批",
-  pending_ceo: "待 CEO 审批",
-  returned: "已退回",
-  approved: "已批准",
+import { useLocale } from "./locale-provider";
+
+const STATUS_LABEL_KEYS: Record<QuoteStatus, TranslationKey> = {
+  draft: "status.draft",
+  pending_manager: "status.pendingManager",
+  pending_ceo: "status.pendingCeo",
+  returned: "status.returned",
+  approved: "status.approved",
 };
 
-const moneyFormatter = new Intl.NumberFormat("zh-CN", {
-  style: "currency",
-  currency: "CNY",
-  maximumFractionDigits: 0,
-});
-
 export function StatusBadge({ status }: { status: QuoteStatus }) {
+  const { t } = useLocale();
+  const label = t(STATUS_LABEL_KEYS[status]);
+
   return (
-    <span className={`status-badge status-badge--${status}`}>
+    <span className={`status-badge status-badge--${status}`} aria-label={label}>
       <span className="status-badge__dot" aria-hidden="true" />
-      {STATUS_LABELS[status]}
+      {label}
     </span>
   );
 }
 
 export function Money({ amount, compact = false }: { amount: number; compact?: boolean }) {
-  if (compact && amount >= 10_000) {
-    return <span className="money">¥{(amount / 10_000).toFixed(1)}万</span>;
-  }
+  const { formatMoney, locale } = useLocale();
+  const compactFormatter = useMemo(() => new Intl.NumberFormat(locale, {
+    style: "currency",
+    currency: "CNY",
+    notation: "compact",
+    maximumFractionDigits: 1,
+  }), [locale]);
+  const fullAmount = formatMoney(amount);
+  const visibleAmount = compact && amount >= 10_000 ? compactFormatter.format(amount) : fullAmount;
 
-  return <span className="money">{moneyFormatter.format(amount)}</span>;
+  return <span className="money" aria-label={fullAmount}>{visibleAmount}</span>;
 }
 
 interface ModalProps {
@@ -41,6 +47,7 @@ interface ModalProps {
 }
 
 export function Modal({ open, title, children, onClose }: ModalProps) {
+  const { t } = useLocale();
   const dialogRef = useRef<HTMLDialogElement>(null);
   const restoreFocusRef = useRef<HTMLElement | null>(null);
 
@@ -80,7 +87,7 @@ export function Modal({ open, title, children, onClose }: ModalProps) {
           className="icon-button"
           type="button"
           onClick={onClose}
-          aria-label="关闭弹窗"
+          aria-label={t("modal.close")}
         >
           ×
         </button>
@@ -88,7 +95,7 @@ export function Modal({ open, title, children, onClose }: ModalProps) {
       <div className="modal__body" id="modal-description">{children}</div>
       <div className="modal__footer">
         <button className="button button--primary" type="button" onClick={onClose}>
-          知道了
+          {t("modal.acknowledge")}
         </button>
       </div>
     </dialog>

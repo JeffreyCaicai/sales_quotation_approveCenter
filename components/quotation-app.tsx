@@ -18,8 +18,7 @@ import { AppShell } from "./app-shell";
 import { ApprovalScreen } from "./approval-screen";
 import { DashboardScreen } from "./dashboard-screen";
 import { LoginScreen } from "./login-screen";
-import { LanguageSwitcher } from "./language-switcher";
-import { LocaleProvider } from "./locale-provider";
+import { LocaleProvider, useLocale } from "./locale-provider";
 import { QuoteWizard } from "./quote-wizard";
 import { QuoteProgressScreen } from "./quote-progress-screen";
 import { QuotationScreen } from "./quotation-screen";
@@ -37,13 +36,13 @@ interface WizardSession {
 export function QuotationApp() {
   return (
     <LocaleProvider>
-      <LanguageSwitcher />
       <QuotationWorkspace />
     </LocaleProvider>
   );
 }
 
 function QuotationWorkspace() {
+  const { t } = useLocale();
   const [user, setUser] = useState<User | null>(null);
   const [quotes, setQuotes] = useState<Quote[]>(() => loadQuotes());
   const [placeholder, setPlaceholder] = useState<PlaceholderState | null>(null);
@@ -58,8 +57,8 @@ function QuotationWorkspace() {
     setPlaceholder({
       title: label,
       message: quote
-        ? `${quote.quoteNumber} 的“${label}”流程将在后续原型阶段开放。`
-        : `“${label}”流程将在后续原型阶段开放。`,
+        ? t("placeholder.withQuote", { number: quote.quoteNumber, label })
+        : t("placeholder.generic", { label }),
     });
   };
 
@@ -69,7 +68,7 @@ function QuotationWorkspace() {
     setApprovalQuoteId(null);
     setProgressQuoteId(null);
     setQuotationQuoteId(null);
-    setPlaceholder({ title: "演示数据已重置", message: "所有报价已恢复为初始演示状态。" });
+    setPlaceholder({ title: t("placeholder.resetTitle"), message: t("placeholder.resetMessage") });
   };
 
   const persistQuote = (quote: Quote, previousQuote?: Quote) => {
@@ -81,7 +80,7 @@ function QuotationWorkspace() {
   };
 
   const handleDashboardAction = (label: string, quote?: Quote) => {
-    if (user.role === "sales" && (label === "新建报价" || quote?.status === "draft")) {
+    if (user.role === "sales" && (!quote || quote.status === "draft")) {
       setWizard({ initialQuote: quote });
       return;
     }
