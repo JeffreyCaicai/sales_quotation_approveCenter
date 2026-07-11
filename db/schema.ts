@@ -169,21 +169,47 @@ export const salesAssignments = pgTable("sales_assignments", {
   updatedAt: updatedAt(),
 });
 
-export const buildings = pgTable("buildings", {
-  id: id(),
-  buildingCode: text("building_code").notNull().unique(),
-  name: text("name").notNull(),
-  location: text("location").notNull(),
-  area: text("area"),
-  category: text("category"),
-  traffic: bigint("traffic", { mode: "number" }),
-  impressions: bigint("impressions", { mode: "number" }),
-  status: entityStatusEnum("status").notNull().default("active"),
-  sourceImportJobId: uuid("source_import_job_id").references(() => importJobs.id),
-  sourceAttributes: jsonb("source_attributes"),
-  createdAt: createdAt(),
-  updatedAt: updatedAt(),
-});
+export const buildings = pgTable(
+  "buildings",
+  {
+    id: id(),
+    irisBuildingId: text("iris_building_id").notNull().unique(),
+    erpBuildingId: text("erp_building_id"),
+    name: text("name").notNull(),
+    buildingType: text("building_type"),
+    gradeResource: text("grade_resource"),
+    area: text("area"),
+    city: text("city"),
+    cbdArea: text("cbd_area"),
+    subDistrict: text("sub_district"),
+    address: text("address").notNull(),
+    traffic: bigint("traffic", { mode: "number" }),
+    impressions: bigint("impressions", { mode: "number" }),
+    erpLinkStatus: text("erp_link_status").notNull().default("manual_only"),
+    dataSource: text("data_source").notNull().default("building_team"),
+    status: entityStatusEnum("status").notNull().default("active"),
+    sourceImportJobId: uuid("source_import_job_id").references(() => importJobs.id),
+    sourceAttributes: jsonb("source_attributes"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (table) => [
+    uniqueIndex("buildings_erp_building_id_unique")
+      .on(table.erpBuildingId)
+      .where(sql`${table.erpBuildingId} is not null`),
+    check(
+      "buildings_erp_link_status_check",
+      sql`(
+        (${table.erpBuildingId} is null and ${table.erpLinkStatus} = 'manual_only') or
+        (${table.erpBuildingId} is not null and ${table.erpLinkStatus} = 'erp_linked')
+      )`,
+    ),
+    check(
+      "buildings_data_source_check",
+      sql`${table.dataSource} in ('building_team', 'erp')`,
+    ),
+  ],
+);
 
 export const salesPackages = pgTable("sales_packages", {
   id: id(),

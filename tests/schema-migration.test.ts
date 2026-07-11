@@ -58,13 +58,19 @@ type Journal = {
   entries: Array<{ idx: number; tag: string }>;
 };
 
-async function applyMigrations(db: PGlite) {
+async function applyMigrations(
+  db: PGlite,
+  throughIdx = Number.POSITIVE_INFINITY,
+  fromIdx = 0,
+) {
   const migrationsDir = resolve(process.cwd(), "drizzle");
   const journal = JSON.parse(
     await readFile(resolve(migrationsDir, "meta/_journal.json"), "utf8"),
   ) as Journal;
 
-  for (const entry of [...journal.entries].sort((a, b) => a.idx - b.idx)) {
+  for (const entry of [...journal.entries]
+    .sort((a, b) => a.idx - b.idx)
+    .filter((entry) => entry.idx >= fromIdx && entry.idx <= throughIdx)) {
     const migration = await readFile(
       resolve(migrationsDir, `${entry.tag}.sql`),
       "utf8",
@@ -89,7 +95,7 @@ async function seedDraftRateCard(db: PGlite) {
     returning id
   `);
   const buildings = await db.query<{ id: string }>(`
-    insert into buildings (building_code, name, location)
+    insert into buildings (iris_building_id, name, address)
     values ('BLD-001', 'Building One', 'Jakarta'),
            ('BLD-002', 'Building Two', 'Jakarta')
     returning id
@@ -146,6 +152,95 @@ describe("generated PostgreSQL migration", () => {
       ),
     ) as Journal;
     expect(journal.dialect).toBe("postgresql");
+  });
+
+  test("preserves the building UUID while migrating legacy identity columns", async () => {
+    db = new PGlite();
+    await applyMigrations(db, 5);
+    const seeded = await db.query<{ id: string }>(`
+      insert into buildings (building_code, name, location, category)
+      values ('B003004', 'Apartment 19th Avenue', 'Tangerang', 'Apartment')
+      returning id
+    `);
+
+    await applyMigrations(db, Number.POSITIVE_INFINITY, 6);
+
+    const migrated = await db.query<{
+      id: string;
+      iris_building_id: string;
+      address: string;
+      building_type: string;
+      erp_link_status: string;
+      data_source: string;
+    }>(`
+      select id, iris_building_id, address, building_type,
+             erp_link_status, data_source
+      from buildings
+      where iris_building_id = 'B003004'
+    `);
+    expect(migrated.rows).toEqual([
+      {
+        id: seeded.rows[0].id,
+        iris_building_id: "B003004",
+        address: "Tangerang",
+        building_type: "Apartment",
+        erp_link_status: "manual_only",
+        data_source: "building_team",
+      },
+    ]);
+  });
+
+  test("keeps IRIS identity immutable and allows a blank ERP mapping", async () => {
+    db = new PGlite();
+    await applyMigrations(db);
+    const first = await db.query<{ id: string }>(`
+      insert into buildings (
+        iris_building_id, name, address, erp_link_status, data_source
+      ) values ('B003004', 'Apartment 19th Avenue', 'Tangerang', 'manual_only', 'building_team')
+      returning id
+    `);
+
+    await expect(db.query(`
+      update buildings set iris_building_id = 'B999999'
+      where id = '${first.rows[0].id}'
+    `)).rejects.toThrow(/iris building id is immutable/i);
+
+    await expect(db.query(`
+      insert into buildings (
+        iris_building_id, name, address, erp_link_status, data_source
+      ) values ('B000004', 'Tower Blank A', 'Tangerang', 'manual_only', 'building_team'),
+               ('B000005', 'Tower Blank B', 'Tangerang', 'manual_only', 'building_team')
+    `)).resolves.toBeDefined();
+
+    await expect(db.query(`
+      insert into buildings (
+        iris_building_id, erp_building_id, name, address, erp_link_status, data_source
+      ) values ('B000006', 'ERP-01', 'Tower A', 'Tangerang', 'erp_linked', 'building_team'),
+               ('B000007', 'ERP-01', 'Tower B', 'Tangerang', 'erp_linked', 'building_team')
+    `)).rejects.toThrow(/erp_building_id/i);
+  });
+
+  test("requires unique IRIS IDs and link status consistent with ERP presence", async () => {
+    db = new PGlite();
+    await applyMigrations(db);
+
+    await expect(db.query(`
+      insert into buildings (iris_building_id, name, address)
+      values ('B000008', 'Tower C', 'Jakarta'),
+             ('B000008', 'Tower D', 'Jakarta')
+    `)).rejects.toThrow(/iris_building_id/i);
+    await expect(db.query(`
+      insert into buildings (iris_building_id, erp_building_id, name, address, erp_link_status)
+      values ('B000009', 'ERP-09', 'Tower E', 'Jakarta', 'manual_only')
+    `)).rejects.toThrow(/buildings_erp_link_status_check/i);
+    await expect(db.query(`
+      insert into buildings (iris_building_id, name, address, erp_link_status)
+      values ('B000010', 'Tower F', 'Jakarta', 'erp_linked')
+    `)).rejects.toThrow(/buildings_erp_link_status_check/i);
+    await expect(db.query(`
+      insert into buildings (iris_building_id, name, address, data_source)
+      values ('B000011', 'Tower G', 'Jakarta', 'spreadsheet')
+    `)).rejects.toThrow(/buildings_data_source_check/i);
   });
 
   test("constrains import source_type to manual or crm with manual as default", async () => {
@@ -283,7 +378,7 @@ describe("generated PostgreSQL migration", () => {
         "customers_customer_code_unique",
         "brands_brand_code_unique",
         "sales_assignments_assignment_code_unique",
-        "buildings_building_code_unique",
+        "buildings_iris_building_id_unique",
         "sales_packages_package_code_unique",
         "rate_card_versions_version_code_unique",
         "user_permissions_user_id_permission_key_unique",
