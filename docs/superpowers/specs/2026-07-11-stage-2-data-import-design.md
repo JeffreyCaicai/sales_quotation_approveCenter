@@ -1,12 +1,12 @@
 # Stage 2 Data Import and Central Persistence Design
 
-**Status:** Approved for specification  
+**Status:** Approved
 **Date:** 2026-07-11  
 **Scope:** Central database, fixed-format Excel/CSV imports, Rate Card versioning, import administration, audit, and rollback
 
 ## 1. Purpose
 
-Stage 2 replaces browser-local demo data with centrally managed business data. Sales assistants upload fixed-format Excel or CSV files through an administrative interface. The system validates each file as one atomic batch, shows a change preview, and publishes approved changes to a managed PostgreSQL database. Original files and generated reports remain in object storage for audit.
+Stage 2 replaces browser-local demo data with centrally managed business data. Sales assistants upload fixed-format Excel or CSV files through an administrative interface. The system validates each file as one atomic batch, shows a change preview, and publishes approved changes to PostgreSQL. Original files and generated reports remain in object storage for audit.
 
 The ingestion boundary is intentionally reusable. A future CRM adapter will submit data through the same validation, mapping, publishing, and audit services rather than writing directly to business tables.
 
@@ -14,7 +14,7 @@ The ingestion boundary is intentionally reusable. A future CRM adapter will subm
 
 ### Included
 
-- Managed PostgreSQL as the central structured-data store.
+- PostgreSQL as the central structured-data store, initially self-hosted on the production VPS behind a private container network.
 - S3-compatible object storage for original files and generated reports.
 - Independent imports for customer/brand/Sales PIC relationships, buildings, sales packages, and Rate Card versions.
 - Fixed templates for `.xlsx` and `.csv` inputs.
@@ -76,7 +76,7 @@ flowchart LR
 6. **Transactional Publisher** applies an approved difference set in one PostgreSQL transaction and creates audit events.
 7. **CRM Adapter Boundary** maps future CRM records into the same normalized candidate-row contracts used by manual imports.
 
-The application does not depend on a specific managed PostgreSQL or S3-compatible vendor. Vendor selection is an operational deployment choice and does not change the application contracts or schema.
+The application does not depend on a specific PostgreSQL or S3-compatible vendor. The confirmed initial production topology is one VPS: PostgreSQL and MinIO run on its private rootless-Docker network, the Next.js web process is reachable only through loopback and host-level Caddy, and encrypted backups are copied to separate S3-compatible storage outside the VPS. PostgreSQL and object storage can later move to managed services without changing application contracts or schema.
 
 ## 5. Core Data Model
 
