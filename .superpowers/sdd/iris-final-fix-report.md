@@ -6,9 +6,14 @@
 
 **Implementation commit:** `6973bdb` (`fix: complete production import lifecycle`)
 
+**Scope correction:** The implementation commit's subject and the original
+report wording were broader than the delivered IRIS plan scope. This work
+provides production processors/publishers for Building and Rate Card imports;
+it does not complete the generic Stage 2 lifecycle.
+
 ## Outcome
 
-The final-review wave connects the production import lifecycle, adds explicit authenticated publication, implements a focused transactional Rate Card publisher, enforces required and controlled building fields without inventing business lists, enforces canonical template version `TMN-IMPORT-2`, blocks inactive-building identity takeover, strengthens database identity defenses, normalizes parser errors, and makes exact lint ignore generated `dist/`.
+The final-review wave connects the Building and Rate Card production processing lifecycle, adds explicit authenticated publication, implements a focused transactional Rate Card publisher, enforces required and controlled building fields without inventing business lists, enforces canonical template version `TMN-IMPORT-2`, blocks inactive-building identity takeover, strengthens database identity defenses, normalizes parser errors, and makes exact lint ignore generated `dist/`.
 
 `exports/` remained untracked and was never staged or modified. Hosting configuration, the existing hosted demo, protected template downloads, multipart authentication order, immutable upload creation, S3 pending-object compensation, and published Rate Card immutability were preserved.
 
@@ -16,7 +21,7 @@ The final-review wave connects the production import lifecycle, adds explicit au
 
 ### Production upload, processing, and publication lifecycle
 
-- `app/api/imports/route.ts` now creates the immutable upload and invokes processing; it returns `ready_to_publish`, `draft`, or `validation_failed`, never auto-publishes.
+- `app/api/imports/route.ts` creates the immutable upload and returns `uploaded` immediately. Processing is invoked explicitly through the service/endpoint or a future worker.
 - `app/api/imports/[jobId]/process/route.ts` exposes authenticated retry/state-checked processing.
 - `app/api/imports/[jobId]/publish/route.ts` exposes explicit authenticated confirmation/publication.
 - `lib/imports/process-import.ts` reads originals, parses the canonical contract, validates, calculates differences, and selects the terminal preview state.
@@ -122,6 +127,105 @@ The environment has no `docker` command, so the repository test PostgreSQL servi
 - Confirmed generated `dist/` is ignored by lint and `exports/` is excluded from commits.
 - Confirmed final code paths reject malformed staged Rate Card identifiers with stable errors rather than runtime type failures.
 
-## Remaining concern
+## Remaining Stage 2 scope and verification concern
 
-The only verification gap is native PostgreSQL execution/concurrency evidence because no server is listening at the requested local URL and Docker is unavailable. The native test cases remain executable and should be run in CI or a developer environment with migrations applied. All pure, unit, PGlite, performance, TypeScript, lint, diff, and production-build gates pass.
+Generic customer/brand and package processing/publication, controlled business
+rollback, Rate Card activation/supersession, the administration UI, and VPS
+operations remain in the original
+`docs/superpowers/plans/2026-07-11-stage-2-data-import-vps.md` plan. No generic
+rollback was implemented in this IRIS-focused wave.
+
+Within the delivered Building/Rate Card scope, native PostgreSQL
+execution/concurrency evidence remains required because no server is listening
+at the requested local URL and Docker is unavailable. The native test cases
+remain executable and should run in CI or deployment verification with all
+migrations applied. PGlite coverage is not represented as native row-lock
+evidence.
+
+---
+
+## Second final-review fix wave
+
+**Implementation commit:** `c2ae63d` (`fix: harden IRIS import state transitions`)
+
+### Corrections delivered
+
+- Restored the approved asynchronous upload contract. `POST /api/imports`
+  authenticates, stores immutable originals, creates the job, and returns
+  `uploaded` immediately. It does not invoke parsing or processing inline.
+- Preserved the explicit `processImport` service and process endpoint for a
+  future worker or authenticated explicit invocation. Customer/brand and
+  package uploads are no longer coupled to processors that are not implemented.
+- Unsupported customer/brand and package processing returns
+  `IMPORT_PROCESSOR_NOT_IMPLEMENTED` with status 501 only after an exact live
+  permission check; the job remains `uploaded`.
+- Processing authorization now occurs before terminal state disclosure.
+  Building and Rate Card claims persist a timestamp claim token, reject active
+  concurrent claims, and conditionally reclaim `validating` claims after a
+  bounded 15-minute stale interval.
+- Every completion, validation failure, and retry transition matches both the
+  `validating` state and persisted claim timestamp. An obsolete/crashed worker
+  cannot delete or overwrite a newer worker's staging data.
+- Persisted job template version is rechecked as exactly `TMN-IMPORT-2` before
+  immutable object reads. Parser/business errors become structured
+  `validation_failed`; transient S3/database/infrastructure errors conditionally
+  return the job to retryable `uploaded`.
+- Rate Card processing and publication reject completely empty datasets and
+  enforce package completeness in both directions.
+- Rate Card publication acquires the per-data-type lock, preserves the job's
+  original uploader, and uses Jakarta midnight.
+- The Rate Card version is inserted as `draft`, all children are inserted while
+  the parent is mutable, and only then is it transitioned to `published` in the
+  same transaction. Existing immutability triggers remain enforced.
+- Rate Card audit metadata records the effective business date and exact
+  resolved building/package UUID payloads.
+- Migration `0008_normalize_controlled_values` trims controlled-value codes at
+  the database boundary and rejects normalized blanks.
+- README, implementation plan, and this report now state the delivered IRIS
+  scope accurately. Generic rollback was not added.
+
+### Second-wave TDD evidence
+
+The focused RED run produced 12 expected failures covering asynchronous upload,
+persisted template mismatch, transient retry, unsupported processors, empty
+Rate Cards, package completeness, Jakarta effective time, process route status,
+and controlled-code normalization. A later audit-payload test first failed
+because the focused metadata builder did not exist. Crash/reclaim and terminal
+probe regressions were also added before final verification.
+
+### Second-wave verification
+
+| Command | Result |
+|---|---|
+| `npm run test:unit` | PASS — 19 files, 226 tests |
+| `npx tsc --noEmit` | PASS |
+| `npm run lint` | PASS — exact script, no errors or warnings |
+| `npm run build` | PASS — production Next.js build, with permitted Google Fonts fetch |
+| `git diff --check` | PASS |
+| 5,000-row performance | PASS — parse 18.04 ms, validate 1.72 ms, diff 1.39 ms, total 21.16 ms |
+| PGlite migration/trigger suite | PASS — 14/14 tests |
+
+The PGlite suite reproduces the immutable-child failure when a child is inserted
+beneath a published parent, while the seeded draft path confirms children can
+be inserted before publication. It also verifies controlled-code normalization.
+
+### Native PostgreSQL attempt after the second wave
+
+The required native command was attempted again with
+`DATABASE_URL=postgres://quotation:quotation@localhost:55432/quotation` and
+failed before native cases could execute:
+
+```text
+connect ECONNREFUSED ::1:55432
+connect ECONNREFUSED 127.0.0.1:55432
+```
+
+Native PostgreSQL remains a required CI/deployment gate for row/advisory locks,
+transaction rollback, concurrency, uploader/publisher separation, and Jakarta
+timestamp persistence. PGlite is not claimed as native lock evidence.
+
+### Remaining original Stage 2 work
+
+Customer/brand processors, package processors, controlled business rollback,
+Rate Card activation/supersession, administration UI, and VPS operations remain
+in `docs/superpowers/plans/2026-07-11-stage-2-data-import-vps.md`.
