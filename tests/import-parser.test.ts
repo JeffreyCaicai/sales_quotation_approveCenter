@@ -194,6 +194,27 @@ describe("TMN-IMPORT-2 parser", () => {
       });
   });
 
+  test("uses the starting row for a valid quoted multiline CSV record", async () => {
+    const headers = "IRIS Building ID,ERP Building ID,Building Name,Building Type,Grade Resource,Area,City,CBD Area,Sub-District,Address,Operational Status,Data Source";
+    const multiline = "B003004,,\"First\\nTower\",,,,,,,Address,active,building_team".replace("\\n", "\n");
+    const body = new TextEncoder().encode(`${headers}\n\n${multiline}\n`);
+
+    const result = await parseImportFiles("building", [{ filename: "multiline.csv", body }]);
+    expect(result.rows[0]).toMatchObject({ rowNumber: 3, buildingName: "First\nTower" });
+  });
+
+  test("reports an invalid quoted multiline CSV record at its starting row", async () => {
+    const headers = "IRIS Building ID,ERP Building ID,Building Name,Building Type,Grade Resource,Area,City,CBD Area,Sub-District,Address,Operational Status,Data Source";
+    const multiline = "B003005,,\"Retired\\nTower\",,,,,,,Address,retired,erp".replace("\\n", "\n");
+    const body = new TextEncoder().encode(`\n${headers}\n\n${multiline}\n`);
+
+    await expect(parseImportFiles("building", [{ filename: "multiline-invalid.csv", body }]))
+      .rejects.toMatchObject({
+        key: "import.error.value_invalid",
+        details: { rowNumber: 4, column: "Operational Status" },
+      });
+  });
+
   test("retains physical Rate Card section row numbers", async () => {
     const file = workbookFile("rate-card-blank-rows.xlsx", {
       Metadata: [
