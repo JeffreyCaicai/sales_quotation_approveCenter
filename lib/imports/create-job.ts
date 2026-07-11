@@ -200,10 +200,6 @@ export async function createImportJob(
       attemptId,
       now: deps.now(),
       files,
-    }, async () => {
-      for (const pending of pendingObjects) {
-        await deps.objectStore.commitPending(pending);
-      }
     });
     if (finalizeResult !== "uploaded") {
       throw new ImportError(500, "IMPORT_CREATE_FAILED");
@@ -220,6 +216,28 @@ export async function createImportJob(
     );
     if (error instanceof ImportError) throw error;
     throw new ImportError(500, "IMPORT_CREATE_FAILED");
+  }
+  let storageSyncPending = false;
+  for (const pending of pendingObjects) {
+    try {
+      await deps.objectStore.commitPending(pending);
+    } catch {
+      storageSyncPending = true;
+    }
+  }
+  if (storageSyncPending) {
+    try {
+      await deps.repository.recordStorageSyncWarning(
+        attemptId,
+        "IMPORT_STORAGE_SYNC_PENDING",
+      );
+    } catch {
+      process.stderr.write(`${JSON.stringify({
+        level: "error",
+        event: "import.storage_sync_pending",
+        attemptId,
+      })}\n`);
+    }
   }
   return { jobId, state: "uploaded" };
 }

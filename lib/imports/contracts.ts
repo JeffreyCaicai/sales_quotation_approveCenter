@@ -82,8 +82,8 @@ export interface ImportJobRepository {
   reserveUpload(record: UploadReservationRecord): Promise<"reserved" | "duplicate">;
   finalizeUpload(
     input: FinalizeUploadInput,
-    markCommitted: () => Promise<void>,
   ): Promise<"uploaded" | "stale">;
+  recordStorageSyncWarning(attemptId: string, warning: string): Promise<void>;
   cleanupUploadAttempt(
     attemptId: string,
     failureSummary: string,

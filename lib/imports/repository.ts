@@ -107,7 +107,6 @@ export class PostgresImportJobRepository implements ImportJobRepository {
 
   async finalizeUpload(
     input: FinalizeUploadInput,
-    markCommitted: () => Promise<void>,
   ): Promise<"uploaded" | "stale"> {
     return getDb().transaction(async (tx) => {
       await acquireImportUploadAttemptLock(tx, input.attemptId);
@@ -123,7 +122,6 @@ export class PostgresImportJobRepository implements ImportJobRepository {
       if (!job || job.state !== "uploading" || !job.lease || job.lease < input.now) {
         return "stale" as const;
       }
-      await markCommitted();
       if (input.files.length > 0) {
         await tx.insert(importFiles).values(input.files.map((file) => ({
           importJobId: job.id,
@@ -141,6 +139,16 @@ export class PostgresImportJobRepository implements ImportJobRepository {
       ));
       return "uploaded" as const;
     });
+  }
+
+  async recordStorageSyncWarning(attemptId: string, warning: string): Promise<void> {
+    await getDb().update(importJobs).set({
+      failureSummary: warning,
+      updatedAt: new Date(),
+    }).where(and(
+      eq(importJobs.uploadAttemptId, attemptId),
+      eq(importJobs.state, "uploaded"),
+    ));
   }
 
   async cleanupUploadAttempt(

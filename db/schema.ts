@@ -93,6 +93,17 @@ export const importJobs = pgTable(
       "import_jobs_source_type_check",
       sql`${table.sourceType} in ('manual', 'crm')`,
     ),
+    check(
+      "import_jobs_upload_lease_state_check",
+      sql`(
+        ${table.state} = 'uploading'
+        and ${table.uploadAttemptId} is not null
+        and ${table.uploadLeaseExpiresAt} is not null
+      ) or (
+        ${table.state} <> 'uploading'
+        and ${table.uploadLeaseExpiresAt} is null
+      )`,
+    ),
     index("import_jobs_state_created_at_idx").on(table.state, table.createdAt),
     index("import_jobs_data_type_published_at_idx").on(
       table.dataType,

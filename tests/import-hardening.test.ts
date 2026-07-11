@@ -79,6 +79,17 @@ function excessiveCentralDirectory(): Uint8Array {
 describe("OOXML container inspection", () => {
   const contentTypes = '<Types><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/></Types>';
   const workbookXml = '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"/>';
+  const packageNamespace = "http://schemas.openxmlformats.org/package/2006/relationships";
+  const officeDocumentType = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument";
+  const validTypes = '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/></Types>';
+  const validWorkbook = '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheets><sheet name="Sheet1" sheetId="1"/></sheets></workbook>';
+  const validWorkbookRels = `<Relationships xmlns="${packageNamespace}"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>`;
+  const rootRels = (relationships: string) => `<Relationships xmlns="${packageNamespace}">${relationships}</Relationships>`;
+  const opc = (root: string, types = validTypes) => storedZip([
+    ["[Content_Types].xml", types], ["_rels/.rels", root],
+    ["xl/workbook.xml", validWorkbook], ["xl/_rels/workbook.xml.rels", validWorkbookRels],
+    ["xl/worksheets/sheet1.xml", "<worksheet/>"]
+  ]);
   test("accepts a real normal XLSX", async () => {
     await expect(inspectXlsxContainer(workbookBytes())).resolves.toBeUndefined();
   });
@@ -98,6 +109,12 @@ describe("OOXML container inspection", () => {
       ["xl/workbook.xml", workbookXml],
       ...Array.from({ length: 2049 }, (_, index) => [`xl/dummy-${index}.xml`, "x"] as [string, string]),
     ])],
+    ["missing package root relationships", storedZip([["[Content_Types].xml", validTypes], ["xl/workbook.xml", validWorkbook], ["xl/_rels/workbook.xml.rels", validWorkbookRels]])],
+    ["wrong content-types namespace", opc(rootRels(`<Relationship Type="${officeDocumentType}" Target="xl/workbook.xml"/>`), validTypes.replace("package/2006/content-types", "package/2006/wrong"))],
+    ["wrong workbook namespace", storedZip([["[Content_Types].xml", validTypes], ["_rels/.rels", rootRels(`<Relationship Type="${officeDocumentType}" Target="xl/workbook.xml"/>`)], ["xl/workbook.xml", validWorkbook.replace("spreadsheetml/2006/main", "spreadsheetml/2006/wrong")], ["xl/_rels/workbook.xml.rels", validWorkbookRels]])],
+    ["wrong workbook relationships namespace", storedZip([["[Content_Types].xml", validTypes], ["_rels/.rels", rootRels(`<Relationship Type="${officeDocumentType}" Target="xl/workbook.xml"/>`)], ["xl/workbook.xml", validWorkbook], ["xl/_rels/workbook.xml.rels", validWorkbookRels.replace("package/2006/relationships", "package/2006/wrong")]])],
+    ["duplicate officeDocument root relationship", opc(rootRels(`<Relationship Id="r1" Type="${officeDocumentType}" Target="xl/workbook.xml"/><Relationship Id="r2" Type="${officeDocumentType}" Target="xl/workbook.xml"/>`))],
+    ["external officeDocument root relationship", opc(rootRels(`<Relationship Type="${officeDocumentType}" Target="https://evil.test/book.xlsx" TargetMode="External"/>`))],
   ])("rejects %s", async (_label, bytes) => {
     await expect(inspectXlsxContainer(bytes)).rejects.toMatchObject({ key: "IMPORT_FILE_SIGNATURE_INVALID" });
   });
@@ -144,6 +161,7 @@ class OrderedRepository implements ImportJobRepository {
   async reserveUpload() { return "reserved" as const; }
   async finalizeUpload() { return "uploaded" as const; }
   async cleanupUploadAttempt() { return "failed" as const; }
+  async recordStorageSyncWarning() {}
   async listExpiredUploadAttemptIds() { return []; }
   async reconcileUploadAttempt() { return "skipped" as const; }
 }

@@ -29,13 +29,13 @@ describe("durable upload lease orchestration", () => {
     const repository = {
       hasPublishedChecksum: vi.fn(async () => false),
       reserveUpload: vi.fn(async () => { events.push("reserve"); return "reserved"; }),
-      finalizeUpload: vi.fn(async (_input: unknown, markCommitted: () => Promise<void>) => {
+      finalizeUpload: vi.fn(async () => {
         events.push("finalize-lock");
-        await markCommitted();
         events.push("insert-files-update-job");
         return "uploaded";
       }),
       cleanupUploadAttempt: vi.fn(),
+      recordStorageSyncWarning: vi.fn(),
     };
     let sequence = 0;
     await expect(createImportJob(
@@ -48,7 +48,44 @@ describe("durable upload lease orchestration", () => {
         randomUUID: () => sequence++ === 0 ? "00000000-0000-4000-8000-000000000001" : "00000000-0000-4000-8000-000000000002",
       },
     )).resolves.toEqual({ jobId: "00000000-0000-4000-8000-000000000001", state: "uploaded" });
-    expect(events).toEqual(["reserve", "put", "finalize-lock", "commit", "insert-files-update-job"]);
+    expect(events).toEqual(["reserve", "put", "finalize-lock", "insert-files-update-job", "commit"]);
+  });
+
+  test("returns the committed job after partial tag failure and records a recoverable warning", async () => {
+    const pending = [
+      { key: "imports/one", attemptId: "attempt", versionId: "v1" },
+      { key: "imports/two", attemptId: "attempt", versionId: "v2" },
+    ];
+    let puts = 0;
+    let commits = 0;
+    const store = {
+      putImmutable: vi.fn(async () => pending[puts++ % 2]),
+      commitPending: vi.fn(async () => { commits += 1; if (commits === 2) throw new Error("tag failed"); }),
+      cleanupPending: vi.fn(), listPendingObjects: vi.fn(), getSignedDownloadUrl: vi.fn(),
+    } as unknown as ObjectStore;
+    const repository = {
+      hasPublishedChecksum: vi.fn(async () => false), reserveUpload: vi.fn(async () => "reserved"),
+      finalizeUpload: vi.fn(async () => "uploaded"), cleanupUploadAttempt: vi.fn(),
+      recordStorageSyncWarning: vi.fn(async () => undefined),
+      listExpiredUploadAttemptIds: vi.fn(async () => []),
+      reconcileUploadAttempt: vi.fn(async (_attemptId: string, _now: Date, _objects: PendingObject[], operations: import("@/lib/imports/contracts").UploadReconciliationOperations) => {
+        await operations.commit();
+        return "committed" as const;
+      }),
+    };
+    let sequence = 0;
+    const files = ["metadata.csv", "building-prices.csv", "package-prices.csv", "package-buildings.csv"]
+      .map((filename) => ({ filename, mimeType: "text/csv", body: new TextEncoder().encode("code\n1") }));
+    await expect(createImportJob(
+      { dataType: "rate_card", templateVersion: "v1", files },
+      { ...actor, permissions: ["rate_card.upload"] },
+      { repository: repository as never, objectStore: store, now: () => new Date("2026-07-11T00:00:00Z"), randomUUID: () => `00000000-0000-4000-8000-${String(++sequence).padStart(12, "0")}` },
+    )).resolves.toMatchObject({ state: "uploaded" });
+    expect(repository.cleanupUploadAttempt).not.toHaveBeenCalled();
+    expect(repository.recordStorageSyncWarning).toHaveBeenCalledWith(expect.any(String), "IMPORT_STORAGE_SYNC_PENDING");
+    store.listPendingObjects = vi.fn(async () => [pending[1]]);
+    await expect(reconcilePendingObjects(store, repository as never)).resolves.toEqual({ committed: 1, deleted: 0, failed: 0, skipped: 0 });
+    expect(store.cleanupPending).not.toHaveBeenCalled();
   });
 
   test("reconciliation locks every observed attempt and never deletes an active lease", async () => {

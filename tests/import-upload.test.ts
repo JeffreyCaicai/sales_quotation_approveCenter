@@ -115,12 +115,10 @@ class FakeRepository implements ImportJobRepository {
 
   async finalizeUpload(
     input: import("@/lib/imports/contracts").FinalizeUploadInput,
-    commit: () => Promise<void>,
   ) {
     if (this.failCreate) throw new Error("database failed");
     const reservation = this.reservations.get(input.attemptId);
     if (!reservation) return "stale" as const;
-    await commit();
     this.jobs.push({
       id: reservation.id, dataType: reservation.dataType,
       templateVersion: reservation.templateVersion, checksum: reservation.checksum,
@@ -135,6 +133,7 @@ class FakeRepository implements ImportJobRepository {
     await cleanup();
     return "failed" as const;
   }
+  async recordStorageSyncWarning() {}
 
   async listExpiredUploadAttemptIds() { return [] as string[]; }
   async reconcileUploadAttempt(
@@ -290,6 +289,7 @@ describe("rate-card batches and compensation", () => {
     ).rejects.toMatchObject({ status: 500, key: "IMPORT_CREATE_FAILED" });
     expect(store.objects.size).toBe(0);
     expect(store.cleaned).toHaveLength(failure === "object storage" ? 2 : 4);
+    expect(store.committed).toHaveLength(0);
   });
 
   test("rejects an atomic reservation duplicate before writing pending objects", async () => {

@@ -73,8 +73,8 @@ describe("Postgres atomic duplicate gate", () => {
       attemptId: "00000000-0000-4000-8000-000000000003",
       now: new Date("2026-07-11T00:10:00Z"),
       files: [{ objectStorageKey: "imports/key", originalFilename: "building.csv", mimeType: "text/csv", sizeBytes: 1, checksum: "a".repeat(64), purpose: "original" }],
-    }, async () => { events.push("commit-s3"); })).resolves.toBe("uploaded");
-    expect(events).toEqual(["attempt-lock", "load-reservation", "commit-s3", "insert-files", "update-uploaded"]);
+    })).resolves.toBe("uploaded");
+    expect(events).toEqual(["attempt-lock", "load-reservation", "insert-files", "update-uploaded"]);
   });
 
   test.each([
@@ -118,7 +118,7 @@ describe("Postgres atomic duplicate gate", () => {
     const commit = vi.fn();
     await expect(repository.finalizeUpload({
       attemptId: "00000000-0000-4000-8000-000000000003", now: new Date("2026-07-11T00:00:01Z"), files: [],
-    }, commit)).resolves.toBe("stale");
+    })).resolves.toBe("stale");
     expect(state).toMatchObject({ jobState: "validation_failed", references: false });
     expect(commit).not.toHaveBeenCalled();
   });
@@ -130,7 +130,7 @@ describe("Postgres atomic duplicate gate", () => {
     await expect(repository.finalizeUpload({
       attemptId: "00000000-0000-4000-8000-000000000003", now: new Date("2026-07-11T00:00:00Z"),
       files: [{ objectStorageKey: "imports/key", originalFilename: "building.csv", mimeType: "text/csv", sizeBytes: 1, checksum: "a".repeat(64), purpose: "original" }],
-    }, vi.fn())).resolves.toBe("uploaded");
+    })).resolves.toBe("uploaded");
     const cleanup = vi.fn();
     const commit = vi.fn();
     await expect(repository.reconcileUploadAttempt(

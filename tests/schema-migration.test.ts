@@ -201,6 +201,28 @@ describe("generated PostgreSQL migration", () => {
     expect(indexes.rows[0].indexdef).toMatch(/UNIQUE.*upload_attempt_id.*WHERE.*IS NOT NULL/i);
   });
 
+  test("enforces the upload lease state invariant", async () => {
+    db = new PGlite();
+    await applyMigrations(db);
+    const user = await db.query<{ id: string }>(`
+      insert into users (email, password_hash, display_name)
+      values ('lease-uploader@example.com', 'test-only-hash', 'Lease Uploader') returning id
+    `);
+    const userId = user.rows[0].id;
+    await expect(db.query(`
+      insert into import_jobs (data_type, template_version, checksum, state, uploaded_by)
+      values ('building', 'v1', '${"d".repeat(64)}', 'uploading', '${userId}')
+    `)).rejects.toThrow(/import_jobs_upload_lease_state_check/i);
+    await expect(db.query(`
+      insert into import_jobs (data_type, template_version, checksum, state, upload_lease_expires_at, uploaded_by)
+      values ('building', 'v1', '${"e".repeat(64)}', 'uploaded', now() + interval '15 minutes', '${userId}')
+    `)).rejects.toThrow(/import_jobs_upload_lease_state_check/i);
+    await expect(db.query(`
+      insert into import_jobs (data_type, template_version, checksum, state, upload_attempt_id, upload_lease_expires_at, uploaded_by)
+      values ('building', 'v1', '${"f".repeat(64)}', 'uploading', '00000000-0000-4000-8000-000000000010', now() + interval '15 minutes', '${userId}')
+    `)).resolves.toBeDefined();
+  });
+
   test("locks both old and new parents before allowing child mutations", async () => {
     db = new PGlite();
     await applyMigrations(db);

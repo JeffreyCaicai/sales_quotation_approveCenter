@@ -1,5 +1,6 @@
 import { XMLParser, XMLValidator } from "fast-xml-parser";
 import yauzl, { type Entry, type ZipFile } from "yauzl";
+import * as XLSX from "xlsx";
 
 import { ImportError } from "@/lib/imports/contracts";
 
@@ -10,8 +11,14 @@ const MAX_COMPRESSION_RATIO = 1000;
 const NORMAL_WORKBOOK_TYPE =
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml";
 const CONTENT_TYPES = "[Content_Types].xml";
+const ROOT_RELS = "_rels/.rels";
 const WORKBOOK = "xl/workbook.xml";
 const WORKBOOK_RELS = "xl/_rels/workbook.xml.rels";
+const CONTENT_TYPES_NAMESPACE = "http://schemas.openxmlformats.org/package/2006/content-types";
+const PACKAGE_RELATIONSHIPS_NAMESPACE = "http://schemas.openxmlformats.org/package/2006/relationships";
+const SPREADSHEET_NAMESPACE = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
+const OFFICE_RELATIONSHIP_NAMESPACE = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
+const OFFICE_DOCUMENT_RELATIONSHIP = `${OFFICE_RELATIONSHIP_NAMESPACE}/officeDocument`;
 
 function invalid(): ImportError {
   return new ImportError(400, "IMPORT_FILE_SIGNATURE_INVALID");
@@ -73,7 +80,7 @@ async function readEntry(
 const xmlParser = new XMLParser({
   ignoreAttributes: false,
   attributeNamePrefix: "",
-  removeNSPrefix: true,
+  removeNSPrefix: false,
   processEntities: false,
   parseTagValue: false,
   allowBooleanAttributes: false,
@@ -93,10 +100,23 @@ function array(value: unknown): Array<Record<string, unknown>> {
     Boolean(item) && typeof item === "object" && !Array.isArray(item));
 }
 
-function validateXmlParts(parts: Map<string, Buffer>): void {
+function relationshipRoot(parts: Map<string, Buffer>, name: string): Record<string, unknown> {
+  const relationships = parseXml(parts.get(name)!);
+  const root = relationships.Relationships;
+  if (
+    !root || typeof root !== "object" || Array.isArray(root) ||
+    (root as Record<string, unknown>).xmlns !== PACKAGE_RELATIONSHIPS_NAMESPACE
+  ) throw invalid();
+  return root as Record<string, unknown>;
+}
+
+function validateXmlParts(parts: Map<string, Buffer>, body: Uint8Array): void {
   const types = parseXml(parts.get(CONTENT_TYPES)!);
   const typesRoot = types.Types;
-  if (!typesRoot || typeof typesRoot !== "object" || Array.isArray(typesRoot)) throw invalid();
+  if (
+    !typesRoot || typeof typesRoot !== "object" || Array.isArray(typesRoot) ||
+    (typesRoot as Record<string, unknown>).xmlns !== CONTENT_TYPES_NAMESPACE
+  ) throw invalid();
   const workbookOverrides = array((typesRoot as Record<string, unknown>).Override)
     .filter((override) => override.PartName === "/xl/workbook.xml");
   if (
@@ -108,13 +128,25 @@ function validateXmlParts(parts: Map<string, Buffer>): void {
   if (!workbook.workbook || typeof workbook.workbook !== "object" || Array.isArray(workbook.workbook)) {
     throw invalid();
   }
+  const workbookRoot = workbook.workbook as Record<string, unknown>;
+  if (workbookRoot.xmlns !== SPREADSHEET_NAMESPACE) throw invalid();
+  const sheets = workbookRoot.sheets;
+  if (!sheets || typeof sheets !== "object" || Array.isArray(sheets)) throw invalid();
+  if (array((sheets as Record<string, unknown>).sheet).length < 1) throw invalid();
 
-  const relationshipsBuffer = parts.get(WORKBOOK_RELS);
-  if (!relationshipsBuffer) return;
-  const relationships = parseXml(relationshipsBuffer);
-  const root = relationships.Relationships;
-  if (!root || typeof root !== "object" || Array.isArray(root)) throw invalid();
-  for (const relationship of array((root as Record<string, unknown>).Relationship)) {
+  const rootRelationships = relationshipRoot(parts, ROOT_RELS);
+  const officeDocuments = array(rootRelationships.Relationship)
+    .filter((relationship) => relationship.Type === OFFICE_DOCUMENT_RELATIONSHIP);
+  if (
+    officeDocuments.length !== 1 ||
+    officeDocuments[0].Target !== "xl/workbook.xml" ||
+    String(officeDocuments[0].TargetMode ?? "Internal").toLowerCase() !== "internal"
+  ) throw invalid();
+
+  const workbookRelationships = relationshipRoot(parts, WORKBOOK_RELS);
+  const workbookRelationshipItems = array(workbookRelationships.Relationship);
+  if (workbookRelationshipItems.length < 1) throw invalid();
+  for (const relationship of workbookRelationshipItems) {
     const type = String(relationship.Type ?? "").toLowerCase();
     const target = String(relationship.Target ?? "").toLowerCase();
     if (
@@ -122,6 +154,14 @@ function validateXmlParts(parts: Map<string, Buffer>): void {
       /externallink|oleobject|vba|package|activex|attachedtoolbars/u.test(type) ||
       /externallinks|embeddings|vbaproject|oleobject|activex/u.test(target)
     ) throw invalid();
+  }
+
+  try {
+    const parsedWorkbook = XLSX.read(body, { type: "array", bookSheets: true });
+    if (parsedWorkbook.SheetNames.length < 1) throw invalid();
+  } catch (error) {
+    if (error instanceof ImportError) throw error;
+    throw invalid();
   }
 }
 
@@ -148,7 +188,7 @@ export async function inspectXlsxContainer(body: Uint8Array): Promise<void> {
             prohibitedPart(normalized)
           ) throw invalid();
           seen.add(normalized);
-          const capture = name === CONTENT_TYPES || name === WORKBOOK || name === WORKBOOK_RELS;
+          const capture = name === CONTENT_TYPES || name === ROOT_RELS || name === WORKBOOK || name === WORKBOOK_RELS;
           const captured = await readEntry(zip!, entry, aggregate, capture);
           if (capture && captured) parts.set(name, captured);
           zip!.readEntry();
@@ -156,8 +196,13 @@ export async function inspectXlsxContainer(body: Uint8Array): Promise<void> {
       });
       zip!.readEntry();
     });
-    if (!parts.has(CONTENT_TYPES) || !parts.has(WORKBOOK)) throw invalid();
-    validateXmlParts(parts);
+    if (
+      !parts.has(CONTENT_TYPES) ||
+      !parts.has(ROOT_RELS) ||
+      !parts.has(WORKBOOK) ||
+      !parts.has(WORKBOOK_RELS)
+    ) throw invalid();
+    validateXmlParts(parts, body);
   } catch (error) {
     if (error instanceof ImportError) throw error;
     throw invalid();
