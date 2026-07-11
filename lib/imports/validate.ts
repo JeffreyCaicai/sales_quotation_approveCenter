@@ -5,34 +5,25 @@ import {
 } from "@/lib/imports/errors";
 import type { BuildingRow, RateCardImport } from "@/lib/imports/template-v2";
 
-export interface SnapshotBuilding {
+export interface BuildingValidationSnapshotItem {
   id: string;
   irisBuildingId: string;
   erpBuildingId: string | null;
   status: "active" | "inactive";
-  buildingName?: string;
-  buildingType?: string | null;
-  gradeResource?: string | null;
-  area?: string | null;
-  city?: string | null;
-  cbdArea?: string | null;
-  subDistrict?: string | null;
-  address?: string;
-  dataSource?: "building_team" | "erp";
 }
 
-export interface BuildingSnapshot {
-  buildings: SnapshotBuilding[];
+export interface BuildingValidationSnapshot {
+  buildings: BuildingValidationSnapshotItem[];
 }
 
 export function validateBuildingRows(
   rows: BuildingRow[],
-  snapshot: BuildingSnapshot,
+  snapshot: BuildingValidationSnapshot,
 ): ImportValidationError[] {
   const errors: ImportValidationError[] = [];
   const rowsByIrisId = groupRows(rows, (row) => row.irisBuildingId.trim());
   const rowsByErpId = groupRows(rows, (row) => normalizeExternalId(row.erpBuildingId));
-  const currentByErpId = new Map<string, SnapshotBuilding>();
+  const currentByErpId = new Map<string, BuildingValidationSnapshotItem>();
 
   for (const item of snapshot.buildings) {
     const erpBuildingId = normalizeExternalId(item.erpBuildingId);
@@ -84,7 +75,7 @@ export function validateBuildingRows(
 
 export function validateRateCardBuildings(
   input: RateCardImport,
-  snapshot: BuildingSnapshot,
+  snapshot: BuildingValidationSnapshot,
 ): ImportValidationError[] {
   const errors: ImportValidationError[] = [];
   const currentByIrisId = new Map(

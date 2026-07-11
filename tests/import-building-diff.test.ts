@@ -1,8 +1,12 @@
-import { describe, expect, test } from "vitest";
+import { describe, expect, expectTypeOf, test } from "vitest";
 
 import type { BuildingRow } from "@/lib/imports/template-v2";
-import { buildingIdentityKey, calculateBuildingDiff } from "@/lib/imports/diff";
-import type { BuildingSnapshot } from "@/lib/imports/validate";
+import {
+  buildingIdentityKey,
+  calculateBuildingDiff,
+  type BuildingDiffSnapshot,
+} from "@/lib/imports/diff";
+import type { BuildingValidationSnapshot } from "@/lib/imports/validate";
 
 function building(overrides: Partial<BuildingRow> = {}): BuildingRow {
   return {
@@ -23,7 +27,9 @@ function building(overrides: Partial<BuildingRow> = {}): BuildingRow {
   };
 }
 
-function current(overrides: Partial<BuildingSnapshot["buildings"][number]> = {}): BuildingSnapshot["buildings"][number] {
+function current(
+  overrides: Partial<BuildingDiffSnapshot["buildings"][number]> = {},
+): BuildingDiffSnapshot["buildings"][number] {
   return {
     id: "uuid-a",
     irisBuildingId: "B003004",
@@ -73,7 +79,81 @@ describe("IRIS-keyed building differences", () => {
       building({ rowNumber: 99, erpBuildingId: " " }),
     ], { buildings: [current()] });
 
-    expect(change).toMatchObject({ type: "unchanged", entityKey: "B003004", before: { id: "uuid-a" } });
+    expect(change).toEqual({
+      type: "unchanged",
+      entityKey: "B003004",
+      before: {
+        id: "uuid-a",
+        irisBuildingId: "B003004",
+        erpBuildingId: null,
+        buildingName: "Apartment 19th Avenue",
+        buildingType: "Apartment",
+        gradeResource: "Grade A",
+        area: "West Jakarta",
+        city: "Jakarta",
+        cbdArea: null,
+        subDistrict: "Cengkareng",
+        address: "Jl. Daan Mogot",
+        operationalStatus: "active",
+        dataSource: "building_team",
+      },
+      after: {
+        irisBuildingId: "B003004",
+        erpBuildingId: null,
+        buildingName: "Apartment 19th Avenue",
+        buildingType: "Apartment",
+        gradeResource: "Grade A",
+        area: "West Jakarta",
+        city: "Jakarta",
+        cbdArea: null,
+        subDistrict: "Cengkareng",
+        address: "Jl. Daan Mogot",
+        operationalStatus: "active",
+        dataSource: "building_team",
+      },
+    });
+  });
+
+  test("classifies clearing a nullable current field as modified", () => {
+    const [change] = calculateBuildingDiff([
+      building({ gradeResource: null }),
+    ], { buildings: [current({ gradeResource: "Grade A" })] });
+
+    expect(change).toMatchObject({
+      type: "modified",
+      before: { gradeResource: "Grade A" },
+      after: { gradeResource: null },
+    });
+  });
+
+  test("does not invent defaults while comparing complete nullable values", () => {
+    const [change] = calculateBuildingDiff([
+      building({
+        buildingType: null,
+        gradeResource: null,
+        area: null,
+        city: null,
+        cbdArea: null,
+        subDistrict: null,
+        dataSource: "erp",
+      }),
+    ], {
+      buildings: [current({
+        buildingType: null,
+        gradeResource: null,
+        area: null,
+        city: null,
+        cbdArea: null,
+        subDistrict: null,
+        dataSource: "erp",
+      })],
+    });
+
+    expect(change.type).toBe("unchanged");
+  });
+
+  test("requires a fuller snapshot contract than identity validation", () => {
+    expectTypeOf<BuildingValidationSnapshot>().not.toMatchTypeOf<BuildingDiffSnapshot>();
   });
 
   test("classifies an explicit active-to-inactive transition as deactivated", () => {

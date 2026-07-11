@@ -4,7 +4,7 @@ import type { BuildingRow, RateCardImport } from "@/lib/imports/template-v2";
 import {
   validateBuildingRows,
   validateRateCardBuildings,
-  type BuildingSnapshot,
+  type BuildingValidationSnapshot,
 } from "@/lib/imports/validate";
 
 function building(overrides: Partial<BuildingRow> = {}): BuildingRow {
@@ -26,7 +26,9 @@ function building(overrides: Partial<BuildingRow> = {}): BuildingRow {
   };
 }
 
-function snapshot(buildings: BuildingSnapshot["buildings"] = []): BuildingSnapshot {
+function snapshot(
+  buildings: BuildingValidationSnapshot["buildings"] = [],
+): BuildingValidationSnapshot {
   return { buildings };
 }
 
@@ -44,6 +46,14 @@ function rateCard(overrides: Partial<RateCardImport> = {}): RateCardImport {
 }
 
 describe("building identity validation", () => {
+  test("accepts a minimal identity and status snapshot", () => {
+    expect(validateBuildingRows([
+      building({ irisBuildingId: "B000006", erpBuildingId: "ERP-01" }),
+    ], snapshot([
+      { id: "uuid-a", irisBuildingId: "B000006", erpBuildingId: "ERP-01", status: "active" },
+    ]))).toEqual([]);
+  });
+
   test("accepts a manual-only active building", () => {
     expect(validateBuildingRows([building()], snapshot())).toEqual([]);
   });
