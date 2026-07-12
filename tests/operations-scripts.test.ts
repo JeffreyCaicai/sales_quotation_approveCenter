@@ -86,7 +86,11 @@ describe("operations scripts static safety", () => {
 
   test("provisioning installs rootless Docker from the official apt repository", () => {
     const provision = read("deploy/provision-vps.sh");
+    const dockerInstall = provision
+      .split("\n")
+      .find((line) => line.startsWith("apt-get install -y docker-"));
     expect(provision).toContain("download.docker.com/linux/ubuntu");
+    expect(dockerInstall?.trim().split(/\s+/)).toContain("docker-ce");
     expect(provision).toContain("docker-ce-rootless-extras");
     expect(provision).toContain("dockerd-rootless-setuptool.sh install");
     expect(provision).toContain("loginctl enable-linger deploy");

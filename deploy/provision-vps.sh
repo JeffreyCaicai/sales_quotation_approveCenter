@@ -49,7 +49,7 @@ Architectures: $architecture
 Signed-By: /etc/apt/keyrings/docker.asc
 EOF
 apt-get update
-apt-get install -y docker-ce-cli docker-buildx-plugin docker-compose-plugin docker-ce-rootless-extras
+apt-get install -y docker-ce docker-ce-cli docker-buildx-plugin docker-compose-plugin docker-ce-rootless-extras
 # The Debian packages may start their rootful units. They were proven inactive above,
 # so disable only the newly introduced daemon before configuring the rootless service.
 systemctl disable --now docker.service docker.socket >/dev/null 2>&1 || true
