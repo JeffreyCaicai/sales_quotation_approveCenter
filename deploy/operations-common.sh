@@ -246,24 +246,28 @@ record_release_lineage_and_prune() {
   local root=$1 sha=$2 releases lineage
   releases=$root/releases
   lineage=$root/release-lineage
-  local -a history keep stale
+  local -a history=() keep=() stale=()
+  local keep_count=0
   printf '%s\n' "$sha" >> "$lineage"
   while IFS= read -r candidate; do history+=("$candidate"); done < "$lineage"
   local i candidate seen value name
-  for ((i=${#history[@]}-1; i>=0 && ${#keep[@]}<3; i--)); do
+  for ((i=${#history[@]}-1; i>=0 && keep_count<3; i--)); do
     candidate=${history[i]}
     [[ $candidate =~ ^[0-9a-f]{40}$ ]] || continue
     seen=0
-    for value in "${keep[@]}"; do [[ $value == "$candidate" ]] && seen=1; done
-    ((seen == 1)) || keep+=("$candidate")
+    for value in "${keep[@]-}"; do [[ $value == "$candidate" ]] && seen=1; done
+    if ((seen == 0)); then keep+=("$candidate"); ((keep_count+=1)); fi
   done
-  ((${#keep[@]} >= 3)) || return 0
+  ((keep_count >= 3)) || return 0
   while IFS= read -r -d '' candidate; do
     name=${candidate##*/}
     [[ $name =~ ^[0-9a-f]{40}$ ]] || continue
     seen=0
-    for value in "${keep[@]}"; do [[ $candidate == "$releases/$value" ]] && seen=1; done
+    for value in "${keep[@]-}"; do [[ $candidate == "$releases/$value" ]] && seen=1; done
     ((seen == 1)) || stale+=("$candidate")
   done < <(find "$releases" -mindepth 1 -maxdepth 1 -type d -name '????????????????????????????????????????' -print0)
-  for candidate in "${stale[@]}"; do rm -rf -- "$candidate"; done
+  for candidate in "${stale[@]-}"; do
+    [[ -n $candidate ]] || continue
+    rm -rf -- "$candidate"
+  done
 }

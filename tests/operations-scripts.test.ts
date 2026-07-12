@@ -570,6 +570,17 @@ fcntl.flock(9, fcntl.LOCK_EX)
     } finally { rmSync(root, { recursive: true, force: true }); }
   });
 
+  test("lineage recording supports an empty retention set under nounset", () => {
+    const root = mkdtempSync(join(tmpdir(), "quotation-lineage-nounset-"));
+    const sha = "a".repeat(40);
+    mkdirSync(join(root, "releases"));
+    mkdirSync(join(root, "releases", sha));
+    try {
+      execFileSync("bash", ["-uc", '. deploy/operations-common.sh; record_release_lineage_and_prune "$1" "$2"', "bash", root, sha]);
+      expect(read(join(root, "release-lineage"))).toBe(`${sha}\n`);
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+
   test("rollback lineage prunes only unretained exact application SHA tags and digests", () => {
     const root = mkdtempSync(join(tmpdir(), "quotation-image-retention-")); const bin = join(root, "bin"); const log = join(root, "log");
     const repo = "ghcr.io/jeffreycaicai/sales_quotation_approvecenter";
