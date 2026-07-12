@@ -16,7 +16,7 @@ sha=${1:-}
 root=${SALES_QUOTATION_ROOT:-/opt/sales-quotation}
 repository=ghcr.io/jeffreycaicai/sales_quotation_approvecenter
 release=$root/releases/$sha
-current=$root/current
+current=$root/state/current
 env_file=$root/shared/.env.production
 if [[ ${OPERATIONS_ALLOW_NON_DEPLOY_TEST_USER:-} != 1 ]]; then
   [[ -r $env_file && ! -L $env_file && $(stat -c '%U:%G:%a' -- "$env_file") == root:deploy:640 ]] \

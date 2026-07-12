@@ -148,6 +148,22 @@ describe("operations scripts static safety", () => {
     expect(install.indexOf("archive_bootstrap_recovery")).toBeLessThan(install.lastIndexOf("trap - ERR"));
   });
 
+  test("release activation keeps the public pointer root-owned and switches only inside deploy state", () => {
+    const provision = read("deploy/provision-vps.sh");
+    const install = read("deploy/install-release.sh");
+    const rollback = read("deploy/rollback.sh");
+
+    expect(provision).toContain("/opt/sales-quotation/current");
+    expect(provision).toContain("/opt/sales-quotation/state/current");
+    expect(provision).toContain("chown -h root:root");
+    expect(install).toContain("current=$state/current");
+    expect(install).toContain('next_link=$current.next.$$');
+    expect(install).not.toContain('next_link=$root/.current.next.$$');
+    expect(rollback).toContain("current=$root/state/current");
+    expect(read("deploy/backup.sh")).toContain("current=$root/current");
+    expect(read("deploy/restore.sh")).toContain("current=$root/current");
+  });
+
   test("rollback prunes exact application images only after recording successful lineage", () => {
     const rollback = read("deploy/rollback.sh");
     expect(rollback).toContain("ghcr.io/jeffreycaicai/sales_quotation_approvecenter");

@@ -78,6 +78,16 @@ ensure_deploy_state_directory /opt/sales-quotation deploy deploy root root
 install -d -m 0750 -o root -g deploy /opt/sales-quotation/shared
 install -d -m 0755 -o root -g root /opt/sales-quotation/bin
 install -d -m 0755 -o root -g root /opt/sales-quotation/bootstrap /opt/sales-quotation/bootstrap/deploy
+public_current=/opt/sales-quotation/current
+state_current=/opt/sales-quotation/state/current
+public_target=${state_current#/opt/sales-quotation/}
+if [[ -e $public_current || -L $public_current ]]; then
+  [[ -L $public_current && $(readlink -- "$public_current") == "$public_target" ]] \
+    || { echo "public current pointer is invalid" >&2; exit 1; }
+else
+  ln -s "$public_target" "$public_current"
+fi
+chown -h root:root "$public_current"
 install -m 0555 -o root -g root "$script_dir/install-release-launcher.sh" /opt/sales-quotation/bin/install-release
 for bootstrap_script in install-release.sh operations-common.sh validate-app-image.sh rollback.sh; do
   install -m 0555 -o root -g root "$script_dir/$bootstrap_script" "/opt/sales-quotation/bootstrap/deploy/$bootstrap_script"

@@ -24,8 +24,8 @@ repository=ghcr.io/jeffreycaicai/sales_quotation_approvecenter
 root=${SALES_QUOTATION_ROOT:-/opt/sales-quotation}
 [[ $root = /* && $root != */../* ]] || { echo "invalid sales quotation root" >&2; exit 2; }
 releases=$root/releases
-current=$root/current
 state=$root/state
+current=$state/current
 bootstrap_marker=$state/bootstrap-failed
 env_file=$root/shared/.env.production
 tagged_image=$repository:$sha
@@ -122,7 +122,7 @@ compose up -d --wait postgres minio
 docker run --rm --network sales-quotation_quotation_internal --env-file "$env_file" \
   "$digest" node /app/deploy/migrate-production.mjs
 
-next_link=$root/.current.next.$$
+next_link=$current.next.$$
 ln -s "$release" "$next_link"
 mv -T "$next_link" "$current"
 switched=1
