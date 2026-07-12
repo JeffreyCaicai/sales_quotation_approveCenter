@@ -112,15 +112,55 @@ authorize_bootstrap_recovery() {
     || { echo "bootstrap failure marker is invalid; inspect state before recovery" >&2; return 1; }
 }
 
+runtime_path_uid_mode() {
+  local path=$1 metadata
+  if metadata=$(stat -c '%u:%a' -- "$path" 2>/dev/null); then
+    printf '%s\n' "$metadata"
+  else
+    stat -f '%u:%Lp' "$path"
+  fi
+}
+
+validate_runtime_history_directory() {
+  local marker=$1 history=$2 state real_state real_marker real_history expected uid_mode
+  state=${marker%/*}
+  [[ $state = /* && $history == "$state/history" && -d $state && ! -L $state \
+    && -f $marker && ! -L $marker ]] \
+    || { echo "invalid bootstrap recovery state path" >&2; return 1; }
+  real_state=$(realpath -- "$state") || return 1
+  real_marker=$(realpath -- "$marker") || return 1
+  [[ ${real_marker%/*} == "$real_state" ]] \
+    || { echo "bootstrap recovery marker escapes real state" >&2; return 1; }
+  uid_mode=$(runtime_path_uid_mode "$state") || return 1
+  [[ ${uid_mode%:*} == "$(id -u)" ]] \
+    || { echo "bootstrap recovery state is not owned by the runtime user" >&2; return 1; }
+
+  [[ ! -L $history ]] || { echo "bootstrap recovery history must not be a symlink" >&2; return 1; }
+  if [[ -e $history ]]; then
+    [[ -d $history ]] || { echo "bootstrap recovery history must be a directory" >&2; return 1; }
+  else
+    umask 077
+    mkdir -m 0700 -- "$history"
+  fi
+  [[ -d $history && ! -L $history ]] \
+    || { echo "bootstrap recovery history changed unexpectedly" >&2; return 1; }
+  real_history=$(realpath -- "$history") || return 1
+  expected=$real_state/history
+  [[ $real_history == "$expected" ]] \
+    || { echo "bootstrap recovery history escapes real state" >&2; return 1; }
+  uid_mode=$(runtime_path_uid_mode "$history") || return 1
+  [[ $uid_mode == "$(id -u):700" ]] \
+    || { echo "bootstrap recovery history ownership or mode is invalid" >&2; return 1; }
+}
+
 archive_bootstrap_recovery() {
   local marker=$1 history=$2 sha=$3 archive
   [[ $sha =~ ^[0-9a-f]{40}$ && -f $marker && ! -L $marker ]] \
     || { echo "cannot archive invalid bootstrap recovery state" >&2; return 1; }
-  [[ $history == "${marker%/*}/history" && ! -L $history ]] \
-    || { echo "invalid bootstrap recovery history path" >&2; return 1; }
-  mkdir -p -m 0700 -- "$history"
+  validate_runtime_history_directory "$marker" "$history" || return 1
   archive=$history/bootstrap-failed.$(date -u +%Y%m%dT%H%M%S).$$.$sha
   chmod 0400 "$marker"
+  validate_runtime_history_directory "$marker" "$history" || return 1
   mv -f -- "$marker" "$archive"
 }
 

@@ -74,8 +74,7 @@ chmod 0600 "$authorized_keys"
 
 install -d -m 0750 -o deploy -g deploy /opt/sales-quotation/releases
 install -d -m 0700 -o deploy -g deploy /opt/sales-quotation/backups
-install -d -m 0750 -o deploy -g deploy /opt/sales-quotation/state
-install -d -m 0700 -o deploy -g deploy /opt/sales-quotation/state/history
+ensure_deploy_state_directory /opt/sales-quotation deploy deploy root root
 install -d -m 0750 -o root -g deploy /opt/sales-quotation/shared
 install -d -m 0755 -o root -g root /opt/sales-quotation/bin
 install -d -m 0755 -o root -g root /opt/sales-quotation/bootstrap /opt/sales-quotation/bootstrap/deploy

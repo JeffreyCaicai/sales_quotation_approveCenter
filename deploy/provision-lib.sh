@@ -1,5 +1,44 @@
 #!/usr/bin/env bash
 
+provision_path_metadata() {
+  local path=$1 metadata
+  if metadata=$(stat -c '%U:%G:%a' -- "$path" 2>/dev/null); then
+    printf '%s\n' "$metadata"
+  else
+    stat -f '%Su:%Sg:%Lp' "$path"
+  fi
+}
+
+ensure_deploy_state_directory() {
+  local parent=$1 state_owner=$2 state_group=$3 parent_owner=$4 parent_group=$5
+  local state=$parent/state parent_metadata state_metadata parent_mode
+  [[ $parent = /* && $state_owner =~ ^[A-Za-z_][A-Za-z0-9_-]*$ \
+    && $state_group =~ ^[A-Za-z_][A-Za-z0-9_-]*$ ]] \
+    || { echo "invalid state directory parameters" >&2; return 1; }
+  [[ -d $parent && ! -L $parent ]] || { echo "state parent must be a real directory" >&2; return 1; }
+  parent_metadata=$(provision_path_metadata "$parent") || return 1
+  [[ ${parent_metadata%:*} == "$parent_owner:$parent_group" ]] \
+    || { echo "state parent ownership is invalid" >&2; return 1; }
+  parent_mode=${parent_metadata##*:}
+  [[ $parent_mode =~ ^[0-7]{3,4}$ && $((8#$parent_mode & 0022)) -eq 0 ]] \
+    || { echo "state parent must not be group- or world-writable" >&2; return 1; }
+
+  [[ ! -L $state ]] || { echo "state entry must not be a symlink" >&2; return 1; }
+  if [[ -e $state ]]; then
+    [[ -d $state ]] || { echo "state entry must be a directory" >&2; return 1; }
+  else
+    mkdir -m 0750 -- "$state"
+  fi
+  # The validated parent cannot be replaced by deploy, so these operations touch
+  # only the state directory entry and never anything beneath it.
+  [[ -d $state && ! -L $state ]] || { echo "state entry changed unexpectedly" >&2; return 1; }
+  chown "$state_owner:$state_group" "$state"
+  chmod 0750 "$state"
+  state_metadata=$(provision_path_metadata "$state") || return 1
+  [[ $state_metadata == "$state_owner:$state_group:750" ]] \
+    || { echo "state directory ownership or mode is invalid" >&2; return 1; }
+}
+
 repair_deploy_password() {
   local user=$1 status random_password
   status=$(${PASSWD_BIN:-passwd} -S "$user")

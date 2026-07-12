@@ -107,7 +107,8 @@ describe("operations scripts static safety", () => {
     const provision = read("deploy/provision-vps.sh");
     expect(provision).toMatch(/install -d -m 0700 -o deploy -g deploy \/opt\/sales-quotation\/backups/);
     expect(read("deploy/sales-quotation-backup.service")).toContain("ReadWritePaths=/opt/sales-quotation/backups");
-    expect(provision).toMatch(/install -d -m 0750 -o deploy -g deploy \/opt\/sales-quotation\/state/);
+    expect(provision).toContain("ensure_deploy_state_directory /opt/sales-quotation deploy deploy root root");
+    expect(provision).not.toMatch(/(?:install|mkdir|chown|chmod)[^\n]*\/opt\/sales-quotation\/state\//);
     expect(read("deploy/sales-quotation-backup.service")).toContain("ReadWritePaths=/opt/sales-quotation/state");
     expect(provision).not.toContain("/opt/sales-quotation/.operations.lock");
   });
@@ -419,6 +420,25 @@ exit 0
     } finally { rmSync(root, { recursive: true, force: true }); }
   });
 
+  test("runtime recovery archive rejects state and history symlinks without touching victims", () => {
+    const root = mkdtempSync(join(tmpdir(), "quotation-runtime-state-link-")); const victimState = join(root, "victim-state");
+    const stateLink = join(root, "state"); const marker = join(stateLink, "bootstrap-failed"); const history = join(stateLink, "history");
+    mkdirSync(victimState); writeFileSync(join(victimState, "bootstrap-failed"), `release_sha=${shaA}\nrecovery=operator-review-required\n`); chmodSync(join(victimState, "bootstrap-failed"), 0o600);
+    execFileSync("ln", ["-s", victimState, stateLink]); const markerBefore = lstatSync(join(victimState, "bootstrap-failed"));
+    try {
+      const stateResult = spawnSync("bash", ["-c", '. deploy/operations-common.sh; archive_bootstrap_recovery "$1" "$2" "$3"', "bash", marker, history, shaB], { encoding: "utf8" });
+      expect(stateResult.status).not.toBe(0); expect(() => lstatSync(join(victimState, "history"))).toThrow();
+      expect(lstatSync(join(victimState, "bootstrap-failed")).mode & 0o777).toBe(markerBefore.mode & 0o777);
+
+      rmSync(stateLink); mkdirSync(stateLink); writeFileSync(marker, `release_sha=${shaA}\nrecovery=operator-review-required\n`);
+      const victimHistory = join(root, "victim-history"); mkdirSync(victimHistory); chmodSync(victimHistory, 0o711); execFileSync("ln", ["-s", victimHistory, history]); const historyBefore = lstatSync(victimHistory);
+      const historyResult = spawnSync("bash", ["-c", '. deploy/operations-common.sh; archive_bootstrap_recovery "$1" "$2" "$3"', "bash", marker, history, shaB], { encoding: "utf8" });
+      expect(historyResult.status).not.toBe(0); expect(read(marker)).toContain("operator-review-required");
+      expect(lstatSync(victimHistory).mode & 0o777).toBe(historyBefore.mode & 0o777);
+      expect(execFileSync("find", [victimHistory, "-mindepth", "1"], { encoding: "utf8" })).toBe("");
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+
   test("marker write errors never short-circuit failed web and current cleanup", () => {
     const root = mkdtempSync(join(tmpdir(), "quotation-bootstrap-marker-error-")); const release = join(root, "releases", shaA);
     const blocked = join(root, "blocked"); const log = join(root, "log");
@@ -483,6 +503,33 @@ fcntl.flock(9, fcntl.LOCK_EX)
       expect(read(log)).toContain("allow 2222/tcp");
       const deploy = read(subid).trim().split("\n").find((line) => line.startsWith("deploy:"));
       expect(deploy).toBe("deploy:165536:65536");
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+
+  test("state provisioning is idempotent and never follows deploy-controlled history", () => {
+    const root = mkdtempSync(join(tmpdir(), "quotation-provision-state-")); const state = join(root, "state");
+    const victim = join(root, "victim"); const history = join(state, "history");
+    const owner = execFileSync("id", ["-un"], { encoding: "utf8" }).trim(); const group = execFileSync("id", ["-gn"], { encoding: "utf8" }).trim();
+    mkdirSync(victim); chmodSync(victim, 0o711); writeFileSync(join(victim, "sentinel"), "untouched"); const before = lstatSync(victim);
+    try {
+      execFileSync("bash", ["-c", '. deploy/provision-lib.sh; ensure_deploy_state_directory "$1" "$2" "$3" "$2" "$3"', "bash", root, owner, group]);
+      execFileSync("ln", ["-s", victim, history]);
+      execFileSync("bash", ["-c", '. deploy/provision-lib.sh; ensure_deploy_state_directory "$1" "$2" "$3" "$2" "$3"', "bash", root, owner, group]);
+      const after = lstatSync(victim);
+      expect(after.mode & 0o777).toBe(before.mode & 0o777); expect(after.uid).toBe(before.uid); expect(after.gid).toBe(before.gid);
+      expect(read(join(victim, "sentinel"))).toBe("untouched"); expect(lstatSync(history).isSymbolicLink()).toBe(true);
+      expect(lstatSync(state).mode & 0o777).toBe(0o750);
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+
+  test("state provisioning fails closed when the protected state entry is a symlink", () => {
+    const root = mkdtempSync(join(tmpdir(), "quotation-provision-state-link-")); const victim = join(root, "victim");
+    const owner = execFileSync("id", ["-un"], { encoding: "utf8" }).trim(); const group = execFileSync("id", ["-gn"], { encoding: "utf8" }).trim();
+    mkdirSync(victim); chmodSync(victim, 0o711); execFileSync("ln", ["-s", victim, join(root, "state")]); const before = lstatSync(victim);
+    try {
+      const result = spawnSync("bash", ["-c", '. deploy/provision-lib.sh; ensure_deploy_state_directory "$1" "$2" "$3" "$2" "$3"', "bash", root, owner, group], { encoding: "utf8" });
+      expect(result.status).not.toBe(0); expect(result.stderr).toContain("state");
+      const after = lstatSync(victim); expect(after.mode & 0o777).toBe(before.mode & 0o777); expect(after.uid).toBe(before.uid); expect(after.gid).toBe(before.gid);
     } finally { rmSync(root, { recursive: true, force: true }); }
   });
 
