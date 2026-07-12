@@ -36,9 +36,9 @@ read_backup_policy() {
   local file=$1
   validate_env_file "$file" BACKUP_POLICY || return 1
   dotenv_get BACKUP_POLICY "$file" || return 1
+  # Output consumed by callers that source this operations library.
+  # shellcheck disable=SC2034
   case $DOTENV_VALUE in
-    # Output consumed by callers that source this operations library.
-    # shellcheck disable=SC2034
     optional|required) BACKUP_POLICY_VALUE=$DOTENV_VALUE ;;
     *) echo "BACKUP_POLICY must be optional or required" >&2; return 1 ;;
   esac
