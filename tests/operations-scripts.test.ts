@@ -48,6 +48,27 @@ describe("operations scripts static safety", () => {
     }
   });
 
+  test("runtime rotation stays server-side, updates storage policy, and restarts only after atomic credential changes", () => {
+    const rotation = read("deploy/rotate-runtime-secrets.sh");
+    expect(rotation).toMatch(/^#!\/usr\/bin\/env bash\nset -Eeuo pipefail/m);
+    expect(rotation).toContain("must run as root");
+    expect(rotation).toContain("openssl rand -hex");
+    expect(rotation).toContain("install -o root -g deploy -m 0640");
+    expect(rotation).toContain('mv -T -- "$rotated_env" "$env_file"');
+    expect(rotation).toContain("ALTER ROLE");
+    expect(rotation).toContain("mc admin user add");
+    expect(rotation).toContain("mc admin policy create");
+    expect(rotation).toContain("mc admin policy attach");
+    expect(rotation).toContain("mc version enable");
+    expect(rotation).toContain('payload=$(mc cat "$probe")');
+    expect(rotation).not.toMatch(/mc cat[^\n]*\|[^\n]*grep/);
+    expect(rotation.slice(rotation.indexOf("cleanup()"), rotation.indexOf("trap cleanup EXIT"))).toContain("set +e");
+    expect(rotation.slice(rotation.indexOf("run_as_deploy()"), rotation.indexOf("docker_as_deploy()"))).toContain("cd /home/deploy");
+    expect(rotation).toContain("127.0.0.1:3000/api/health");
+    expect(rotation).not.toContain("set -x");
+    expect(rotation).not.toMatch(/(?:^|\n)\s*(?:source|\.)\s+.*env_file/m);
+  });
+
   test("production-up and every operation validate the shared dotenv contract before mutation", () => {
     for (const path of ["deploy/production-up.sh", "deploy/install-release.sh", "deploy/backup.sh", "deploy/restore.sh", "deploy/rollback.sh"]) {
       expect(read(path)).toContain("validate_env_file");
