@@ -118,10 +118,14 @@ enforce explicit server-side membership or allowlist checks.
 - `npm run build`: type-check and create the production Next.js build.
 
 Pull requests and `main` pushes run these gates in GitHub Actions, plus ESLint,
-ShellCheck, and a production Docker build. A successful trusted `main` push is
-the only automatic production trigger. The delivery workflow publishes the
-full Git SHA tag, records the canonical GHCR digest, and deploys that exact
-`repo@sha256` reference through the protected GitHub `production` environment.
+ShellCheck, a production Docker build, and a real MinIO S3 put/get/delete smoke.
+The image is built exactly once. A trusted `main` run saves that image as an
+immutable same-run artifact; only after every quality, database, browser, and
+container gate passes does CI load that exact artifact and push its full Git SHA
+tag. A successful trusted `main` CI run is the only automatic production
+trigger. The delivery workflow pulls the already-published SHA tag, records its
+canonical GHCR digest, and deploys that exact `repo@sha256` reference through
+the protected GitHub `production` environment.
 See `docs/operations/release-checklist.md` and
 `docs/operations/vps-runbook.md` before releasing or rolling back.
 

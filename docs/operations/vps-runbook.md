@@ -89,6 +89,11 @@ The GitHub `Production Delivery` workflow exposes the same operation through
 script then requires that SHA to name a complete retained release. Arbitrary
 commands, branches, tags, prefixes, and unretained SHAs are rejected.
 
+SSH host verification uses only `VPS_HOST_KEY` from the protected environment.
+The workflow writes `host key` for port 22 and `[host]:port key` for a
+nondefault port into a dedicated temporary `known_hosts` file, then requires
+`StrictHostKeyChecking=yes`; it never discovers a key during deployment.
+
 Schema work must follow expand/migrate/contract across separate releases. A release may add compatible structures and migrate data; only a later release may remove the old contract after every retained rollback target no longer needs it. The scripts cannot make an irreversible contract migration safe and therefore do not claim database rollback.
 
 ## Backups and recovery drills

@@ -12,8 +12,15 @@ while IFS= read -r -d '' path; do
   esac
 done < <(git ls-files -z)
 
-if git grep -nE -- '-----BEGIN ([A-Z0-9 ]+ )?PRIVATE KEY-----|gh[pousr]_[A-Za-z0-9_]{36,}|AKIA[0-9A-Z]{16}' -- . \
-  ':(exclude)scripts/check-committed-secrets.sh' ':(exclude)tests/release-workflows.test.ts'; then
+private_key_pattern='-----BEGIN ([A-Z0-9 ]+ )?PRIVATE'
+private_key_pattern+=' KEY-----'
+github_token_pattern='g'
+github_token_pattern+='h[pousr]_[A-Za-z0-9_]{36,}'
+aws_access_key_pattern='A'
+aws_access_key_pattern+='KIA[0-9A-Z]{16}'
+pattern="$private_key_pattern|$github_token_pattern|$aws_access_key_pattern"
+
+if git grep -nE -- "$pattern" -- .; then
   echo "high-confidence secret material is committed" >&2
   exit 1
 fi

@@ -24,7 +24,8 @@ through `127.0.0.1:3000` for the host Nginx reverse proxy.
 
 The release installer also requires this canonical digest as its second
 argument. It pulls the full-Git-SHA tag and rejects it unless the pulled digest
-matches the value recorded by the GitHub publication job:
+matches the value resolved by the delivery workflow from the exact image
+artifact published by the successful CI run:
 
 ```sh
 /opt/sales-quotation/current/deploy/install-release.sh "$GIT_SHA" "$APP_IMAGE"

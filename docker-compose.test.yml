@@ -22,3 +22,8 @@ services:
     ports:
       - "59000:9000"
       - "59001:9001"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:9000/minio/health/live"]
+      interval: 2s
+      timeout: 2s
+      retries: 15

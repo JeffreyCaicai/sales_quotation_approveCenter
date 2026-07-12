@@ -31,9 +31,16 @@ operations log; never copy secret values into that record.
 - [ ] Confirm `docker-compose.test.yml` started healthy PostgreSQL and MinIO,
       every migration in `drizzle/` applied, and all native PostgreSQL
       integration/concurrency/publication/import/lifecycle tests succeeded.
+- [ ] Confirm the CI-only AWS SDK smoke created a unique MinIO bucket, wrote and
+      read the expected object bytes through `127.0.0.1:59000`, then deleted the
+      object and bucket. That mapped port must exist only in test Compose.
 - [ ] Confirm the production Dockerfile built and the focused production
       Playwright smoke passed `/api/health`, the login page, and one dashboard
       transition.
+- [ ] Confirm the container job built once and uploaded an immutable artifact
+      only for the trusted `main` push. Confirm the gated CI publication job
+      downloaded that same-run artifact, loaded it without rebuilding, and
+      pushed the full Git SHA tag only after every required job passed.
 
 Local Docker CLI absence is not a release waiver. The mandatory GitHub CI
 Docker, PostgreSQL, MinIO, image-build, and browser jobs remain the release
@@ -59,8 +66,10 @@ gate.
 
 ## Release and rollback evidence
 
-- [ ] Confirm the publication job pushed only the full Git SHA tag and recorded
-      `ghcr.io/jeffreycaicai/sales_quotation_approvecenter@sha256:<64 hex>`.
+- [ ] Confirm the CI publication job pushed only the exact artifact under the
+      full Git SHA tag. Confirm the pull-only delivery job recorded
+      `ghcr.io/jeffreycaicai/sales_quotation_approvecenter@sha256:<64 hex>` and
+      did not rebuild or repush the image.
 - [ ] Confirm the production job passed both the full SHA and that exact digest
       to `install-release.sh`; the host's `image.digest` and effective
       `APP_IMAGE` must match the recorded value.

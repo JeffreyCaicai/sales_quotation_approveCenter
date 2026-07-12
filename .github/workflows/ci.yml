@@ -33,6 +33,9 @@ jobs:
     runs-on: ubuntu-24.04
     env:
       DATABASE_URL: postgresql://quotation_test:quotation_test_only@127.0.0.1:55432/quotation_test
+      MINIO_SMOKE_ENDPOINT: http://127.0.0.1:59000
+      MINIO_SMOKE_ACCESS_KEY_ID: quotation_test
+      MINIO_SMOKE_SECRET_ACCESS_KEY: quotation_test_only_secret
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
@@ -44,6 +47,7 @@ jobs:
       - run: npm ci
       - run: docker compose -f docker-compose.test.yml up -d --wait postgres minio
       - run: npm run db:migrate
+      - run: npm run test:minio
       - run: npm run test:integration
       - if: always()
         run: docker compose -f docker-compose.test.yml down -v
@@ -55,7 +59,18 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           persist-credentials: false
-      - run: docker build --file Dockerfile --tag "quotation-ci:${GITHUB_SHA}" .
+      - name: Build the production image exactly once
+        run: |
+          docker build --file Dockerfile --tag "quotation-ci:${GITHUB_SHA}" .
+          docker save --output "$RUNNER_TEMP/production-image.tar" "quotation-ci:${GITHUB_SHA}"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        with:
+          name: production-image-${{ github.sha }}
+          path: ${{ runner.temp }}/production-image.tar
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
 
   browser_smoke:
     needs: [quality]
@@ -79,3 +94,33 @@ jobs:
       - run: npm run test:e2e
       - if: always()
         run: docker compose -f docker-compose.test.yml down -v
+
+  publish_image:
+    needs: [quality, integration, container, browser_smoke]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    permissions:
+      actions: read
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: production-image-${{ github.sha }}
+          path: ${{ runner.temp }}/image
+      - name: Publish the exact tested image
+        shell: bash
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_SHA: ${{ github.sha }}
+          IMAGE_REPOSITORY: ghcr.io/jeffreycaicai/sales_quotation_approvecenter
+        run: |
+          set -Eeuo pipefail
+          [[ $RELEASE_SHA =~ ^[0-9a-f]{40}$ ]]
+          docker load --input "$RUNNER_TEMP/image/production-image.tar"
+          source_image="quotation-ci:$RELEASE_SHA"
+          docker image inspect "$source_image" >/dev/null
+          tagged_image="$IMAGE_REPOSITORY:$RELEASE_SHA"
+          docker tag "$source_image" "$tagged_image"
+          printf '%s' "$GHCR_TOKEN" | docker login ghcr.io --username "${{ github.actor }}" --password-stdin
+          docker push "$tagged_image"

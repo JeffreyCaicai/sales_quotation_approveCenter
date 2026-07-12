@@ -12,8 +12,7 @@ on:
         required: true
         type: string
 
-permissions:
-  contents: read
+permissions: {}
 
 concurrency:
   group: production
@@ -23,7 +22,7 @@ env:
   IMAGE_REPOSITORY: ghcr.io/jeffreycaicai/sales_quotation_approvecenter
 
 jobs:
-  publish:
+  resolve_image:
     if: >-
       github.event_name == 'workflow_run' &&
       github.event.workflow_run.conclusion == 'success' &&
@@ -32,17 +31,12 @@ jobs:
       github.event.workflow_run.head_repository.full_name == github.repository
     runs-on: ubuntu-24.04
     permissions:
-      contents: read
-      packages: write
+      packages: read
     outputs:
       release_sha: ${{ steps.image.outputs.release_sha }}
       app_image: ${{ steps.image.outputs.app_image }}
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-        with:
-          ref: ${{ github.event.workflow_run.head_sha }}
-          persist-credentials: false
-      - name: Build and publish the immutable release image
+      - name: Resolve the already-published CI image
         id: image
         shell: bash
         env:
@@ -53,11 +47,6 @@ jobs:
           [[ $RELEASE_SHA =~ ^[0-9a-f]{40}$ ]]
           printf '%s' "$GHCR_TOKEN" | docker login ghcr.io --username "${{ github.actor }}" --password-stdin
           tagged_image="$IMAGE_REPOSITORY:$RELEASE_SHA"
-          docker build --file Dockerfile \
-            --label "org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}" \
-            --label "org.opencontainers.image.revision=$RELEASE_SHA" \
-            --tag "$tagged_image" .
-          docker push "$tagged_image"
           docker pull "$tagged_image" >/dev/null
           APP_IMAGE=""
           while IFS= read -r candidate; do
@@ -70,7 +59,7 @@ jobs:
           printf 'release_sha=%s\napp_image=%s\n' "$RELEASE_SHA" "$APP_IMAGE" >> "$GITHUB_OUTPUT"
 
   deploy:
-    needs: [publish]
+    needs: [resolve_image]
     runs-on: ubuntu-24.04
     permissions: {}
     environment: production
@@ -80,8 +69,8 @@ jobs:
       VPS_USER: ${{ secrets.VPS_USER }}
       VPS_SSH_PRIVATE_KEY: ${{ secrets.VPS_SSH_PRIVATE_KEY }}
       VPS_HOST_KEY: ${{ secrets.VPS_HOST_KEY }}
-      RELEASE_SHA: ${{ needs.publish.outputs.release_sha }}
-      APP_IMAGE: ${{ needs.publish.outputs.app_image }}
+      RELEASE_SHA: ${{ needs.resolve_image.outputs.release_sha }}
+      APP_IMAGE: ${{ needs.resolve_image.outputs.app_image }}
     steps:
       - name: Install the CI-approved release by canonical digest
         shell: bash
@@ -98,7 +87,11 @@ jobs:
           known_hosts="$RUNNER_TEMP/quotation-ssh/known_hosts"
           trap 'rm -f -- "$key_file" "$known_hosts"' EXIT
           printf '%s\n' "$VPS_SSH_PRIVATE_KEY" > "$key_file"
-          printf '[%s]:%s %s\n' "$VPS_HOST" "$VPS_PORT" "$VPS_HOST_KEY" > "$known_hosts"
+          if ((VPS_PORT == 22)); then
+            printf '%s %s\n' "$VPS_HOST" "$VPS_HOST_KEY" > "$known_hosts"
+          else
+            printf '[%s]:%s %s\n' "$VPS_HOST" "$VPS_PORT" "$VPS_HOST_KEY" > "$known_hosts"
+          fi
           chmod 0600 "$key_file" "$known_hosts"
           ssh -F /dev/null -i "$key_file" -p "$VPS_PORT" \
             -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes \
@@ -132,7 +125,11 @@ jobs:
           known_hosts="$RUNNER_TEMP/quotation-ssh/known_hosts"
           trap 'rm -f -- "$key_file" "$known_hosts"' EXIT
           printf '%s\n' "$VPS_SSH_PRIVATE_KEY" > "$key_file"
-          printf '[%s]:%s %s\n' "$VPS_HOST" "$VPS_PORT" "$VPS_HOST_KEY" > "$known_hosts"
+          if ((VPS_PORT == 22)); then
+            printf '%s %s\n' "$VPS_HOST" "$VPS_HOST_KEY" > "$known_hosts"
+          else
+            printf '[%s]:%s %s\n' "$VPS_HOST" "$VPS_PORT" "$VPS_HOST_KEY" > "$known_hosts"
+          fi
           chmod 0600 "$key_file" "$known_hosts"
           ssh -F /dev/null -i "$key_file" -p "$VPS_PORT" \
             -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes \
