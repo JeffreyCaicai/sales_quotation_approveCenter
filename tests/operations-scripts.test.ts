@@ -23,6 +23,8 @@ const runInstallWithPolicy = (policyAssignments: string) => {
   const previousRelease = join(root, "releases", shaA);
   const envFile = join(root, "shared", ".env.production");
   const eventsFile = join(root, "events");
+  const auditFile = join(state, "unprotected-deployments.log");
+  const auditObservationFile = join(root, "audit-at-pull");
   mkdirSync(bin);
   mkdirSync(state);
   mkdirSync(join(previousRelease, "deploy"), { recursive: true });
@@ -45,7 +47,16 @@ const runInstallWithPolicy = (policyAssignments: string) => {
     policyAssignments,
   ].join("\n"));
   writeFileSync(join(bin, "flock"), '#!/bin/sh\nprintf "lock\\n" >> "$EVENT_LOG"\n');
-  writeFileSync(join(bin, "docker"), '#!/bin/sh\nprintf "pull\\n" >> "$EVENT_LOG"\nexit 42\n');
+  writeFileSync(join(bin, "docker"), `#!/bin/sh
+if [ -f "$AUDIT_FILE" ]; then
+  printf "audit-present\\n" >> "$EVENT_LOG"
+  cp "$AUDIT_FILE" "$AUDIT_OBSERVATION_FILE"
+else
+  printf "audit-absent\\n" >> "$EVENT_LOG"
+fi
+printf "pull\\n" >> "$EVENT_LOG"
+exit 42
+`);
   writeFileSync(join(previousRelease, "deploy", "backup.sh"), '#!/bin/sh\nprintf "backup\\n" >> "$EVENT_LOG"\n');
   chmodSync(join(bin, "flock"), 0o755);
   chmodSync(join(bin, "docker"), 0o755);
@@ -56,6 +67,8 @@ const runInstallWithPolicy = (policyAssignments: string) => {
     encoding: "utf8",
     env: {
       ...process.env,
+      AUDIT_FILE: auditFile,
+      AUDIT_OBSERVATION_FILE: auditObservationFile,
       EVENT_LOG: eventsFile,
       OPERATIONS_ALLOW_NON_DEPLOY_TEST_USER: "1",
       SALES_QUOTATION_ROOT: root,
@@ -63,7 +76,8 @@ const runInstallWithPolicy = (policyAssignments: string) => {
     },
   });
   return {
-    audit: join(state, "unprotected-deployments.log"),
+    audit: auditFile,
+    auditAtPull: existsSync(auditObservationFile) ? read(auditObservationFile) : null,
     events: existsSync(eventsFile) ? read(eventsFile).trim().split("\n") : [],
     result,
     root,
@@ -286,7 +300,8 @@ describe("operations scripts static safety", () => {
     const harness = runInstallWithPolicy("BACKUP_POLICY=required");
     try {
       expect(harness.result.status).toBe(42);
-      expect(harness.events).toEqual(["lock", "backup", "pull"]);
+      expect(harness.events).toEqual(["lock", "backup", "audit-absent", "pull"]);
+      expect(harness.auditAtPull).toBeNull();
       expect(existsSync(harness.audit)).toBe(false);
     } finally { rmSync(harness.root, { recursive: true, force: true }); }
   });
@@ -295,9 +310,9 @@ describe("operations scripts static safety", () => {
     const harness = runInstallWithPolicy("BACKUP_POLICY=optional");
     try {
       expect(harness.result.status).toBe(42);
-      expect(harness.events).toEqual(["lock", "pull"]);
+      expect(harness.events).toEqual(["lock", "audit-present", "pull"]);
       expect(harness.result.stderr).toContain("WARNING: off-VPS backup is disabled");
-      expect(read(harness.audit)).toMatch(
+      expect(harness.auditAtPull).toMatch(
         new RegExp(`^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z\\t${shaB}\\tBACKUP_POLICY=optional\\n$`),
       );
     } finally { rmSync(harness.root, { recursive: true, force: true }); }
