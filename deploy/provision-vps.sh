@@ -24,12 +24,14 @@ grep -Eq '^ssh-(ed25519|rsa|ecdsa-sha2-nistp(256|384|521))[[:space:]]+[A-Za-z0-9
 
 export DEBIAN_FRONTEND=noninteractive
 script_dir=$(cd -- "$(dirname -- "$0")" && pwd)
+# shellcheck source=deploy/provision-lib.sh
+. "$script_dir/provision-lib.sh"
 if systemctl is-active --quiet docker.service || systemctl is-active --quiet docker.socket; then
   echo "A rootful Docker daemon is active; refusing to disrupt unknown workloads." >&2
   exit 1
 fi
 apt-get update
-apt-get install -y ca-certificates curl age openssl postgresql-client rclone uidmap dbus-user-session slirp4netns
+apt-get install -y ca-certificates curl age openssl postgresql-client rclone uidmap dbus-user-session slirp4netns ufw util-linux
 
 # Follow Docker's supported Ubuntu apt-repository path; never execute a downloaded script.
 install -m 0755 -d /etc/apt/keyrings
@@ -54,11 +56,11 @@ systemctl disable --now docker.service docker.socket >/dev/null 2>&1 || true
 
 if ! id deploy >/dev/null 2>&1; then
   useradd --create-home --shell /bin/bash deploy
-  # Do not shadow-lock deploy: OpenSSH rejects public keys for a locked account on some hosts.
-  random_password=$(openssl rand -base64 48)
-  printf 'deploy:%s\n' "$random_password" | chpasswd
-  unset random_password
 fi
+# Do not leave an existing or new deploy account shadow-locked.
+repair_deploy_password deploy
+ensure_subid_file /etc/subuid deploy
+ensure_subid_file /etc/subgid deploy
 getent group deploy >/dev/null
 deploy_home=$(getent passwd deploy | cut -d: -f6)
 install -d -m 0700 -o deploy -g deploy "$deploy_home/.ssh"
@@ -73,6 +75,12 @@ chmod 0600 "$authorized_keys"
 install -d -m 0750 -o deploy -g deploy /opt/sales-quotation/releases
 install -d -m 0700 -o deploy -g deploy /opt/sales-quotation/backups
 install -d -m 0750 -o root -g deploy /opt/sales-quotation/shared
+if [[ ! -e /opt/sales-quotation/.operations.lock ]]; then
+  install -m 0600 -o deploy -g deploy /dev/null /opt/sales-quotation/.operations.lock
+fi
+if [[ ! -e /opt/sales-quotation/release-lineage ]]; then
+  install -m 0600 -o deploy -g deploy /dev/null /opt/sales-quotation/release-lineage
+fi
 if [[ -e /opt/sales-quotation/shared/.env.production ]]; then
   chown root:deploy /opt/sales-quotation/shared/.env.production
   chmod 0640 /opt/sales-quotation/shared/.env.production
@@ -100,6 +108,9 @@ Match User deploy
 EOF
 chmod 0644 "$ssh_drop_in"
 sshd -t
+
+detect_sshd_ports
+configure_ufw "${SSHD_PORTS[@]}" 80 443
 
 loginctl enable-linger deploy
 deploy_uid=$(id -u deploy)

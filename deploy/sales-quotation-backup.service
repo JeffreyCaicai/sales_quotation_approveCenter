@@ -13,3 +13,5 @@ NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
 ReadWritePaths=/opt/sales-quotation/backups
+ReadWritePaths=/opt/sales-quotation/.operations.lock
+ReadWritePaths=/opt/sales-quotation/release-lineage

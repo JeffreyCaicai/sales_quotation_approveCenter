@@ -10,7 +10,7 @@ Never send a root password in chat, a ticket, or a command line. Transfer a temp
 sudo ./deploy/provision-vps.sh --authorized-key-file /root/deploy-bootstrap.pub
 ```
 
-The script creates `deploy` only when absent. It gives a new account an unknown random system password rather than shadow-locking it; `passwd -l deploy` is prohibited because this host has demonstrated that a locked shadow account can cause OpenSSH to reject valid public keys. Password and keyboard-interactive authentication are disabled in SSH itself. The staged drop-in enforces `PermitRootLogin no`, `PasswordAuthentication no`, `KbdInteractiveAuthentication no`, `AllowUsers jeffrey-admin deploy`, and `AuthenticationMethods publickey` for `deploy`.
+The script creates `deploy` only when absent. For a new or existing shadow-locked account it assigns an unknown random system password without logging it; `passwd -l deploy` is prohibited because this host has demonstrated that a locked shadow account can cause OpenSSH to reject valid public keys. It also validates or repairs non-overlapping 65,536-ID `/etc/subuid` and `/etc/subgid` allocations before rootless setup. Password and keyboard-interactive authentication are disabled in SSH itself. The staged drop-in enforces `PermitRootLogin no`, `PasswordAuthentication no`, `KbdInteractiveAuthentication no`, `AllowUsers jeffrey-admin deploy`, and `AuthenticationMethods publickey` for `deploy`.
 
 Keep the original privileged SSH session open throughout this sequence:
 
@@ -21,6 +21,8 @@ Keep the original privileged SSH session open throughout this sequence:
 5. Open one more fresh key-authenticated session before closing the original session.
 
 The Docker packages come from Docker's official Ubuntu apt repository and use `docker-ce-rootless-extras`; no downloaded script is piped to a shell. Provisioning refuses to disrupt an active rootful Docker daemon. Rootless Docker uses the deploy user's systemd service and lingering. Routine deployment, rollback, backup, and restore run as `deploy` with no sudo.
+
+Provisioning reads the active `sshd` listening sockets and fails closed if it cannot identify at least one port. UFW then applies default-deny incoming/default-allow outgoing and idempotent allows for every detected SSH TCP port plus 80 and 443; it does not assume SSH is on port 22.
 
 ## Host files and secrets
 
@@ -35,6 +37,8 @@ The directory layout is:
 ```
 
 `/opt/sales-quotation/shared` is `root:deploy` mode `0750`; `.env.production` is `root:deploy` mode `0640`. Do not place secret values in the repository, logs, shell history, command arguments, or release directories. The file must define the application variables plus these backup-only variables:
+
+The dotenv contract is machine-safe `KEY=value`: one exact key per line, no `export` prefix, and values are literal single-line data. Operations scripts use an exact-key reader and never source or evaluate this file; shell metacharacters therefore cannot execute commands.
 
 ```text
 BACKUP_AGE_RECIPIENT=
@@ -63,6 +67,8 @@ For the first release only, invoke the checked-out `deploy/install-release.sh` d
 
 The installer performs an encrypted off-VPS backup before pulling. It resolves the tag to a repository digest, extracts that image's release bundle, starts only private PostgreSQL and MinIO, and runs `/app/deploy/migrate-production.mjs` from the same immutable image before changing web traffic. It atomically switches `current`, invokes the mandatory `production-up.sh` wrapper, checks health on loopback and `SITE_ORIGIN`, and automatically returns to the prior release on failure. Current plus two prior releases are retained.
 
+Install, rollback, backup, and restore share one host-wide operations lock. Nested backup/rollback calls inherit the held lock descriptor, so manual and systemd operations serialize without deadlock. Release retention follows the recorded switch lineage, not directory timestamps.
+
 Manual rollback is explicit:
 
 ```sh
@@ -73,7 +79,7 @@ Schema work must follow expand/migrate/contract across separate releases. A rele
 
 ## Backups and recovery drills
 
-The systemd timer runs `backup.sh` daily as `deploy`. Each backup contains a PostgreSQL custom dump, exact table counts, a MinIO mirror, and SHA-256 manifests. It is encrypted with age before it becomes a retained file, uploaded with separately credentialed S3 access to off-VPS storage, and marked verified only after checksum metadata and byte size agree. Only verified local backup sets older than 30 days are removed.
+The systemd timer runs `backup.sh` daily as `deploy`. Backup is a maintenance window: the script acquires the operations lock and stops web to quiesce the only application writer before capturing PostgreSQL and MinIO. Its exit trap always invokes the production startup wrapper again. This brief downtime is required so the dump, row-count manifest, and object mirror describe one consistent quiescent state. Each backup contains a PostgreSQL custom dump, exact table counts, a MinIO mirror, and SHA-256 manifests. It is encrypted with age before it becomes a retained file, uploaded with separately credentialed S3 access to off-VPS storage, and marked verified only after checksum metadata and byte size agree. Only verified local backup sets older than 30 days are removed; failed current-invocation local and off-VPS artifacts are cleaned without touching prior verified sets.
 
 At least monthly, download a verified backup and its `.sha256` sidecar and restore into a new database and new bucket namespace:
 

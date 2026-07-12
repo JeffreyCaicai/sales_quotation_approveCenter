@@ -5,6 +5,9 @@ set -Eeuo pipefail
 if [[ ${USER:-$(id -un)} != deploy && ${OPERATIONS_ALLOW_NON_DEPLOY_TEST_USER:-} != 1 ]]; then
   echo "restore.sh must run as deploy" >&2; exit 1
 fi
+script_dir=$(cd -- "$(dirname -- "$0")" && pwd)
+# shellcheck source=deploy/operations-common.sh
+. "$script_dir/operations-common.sh"
 deploy_uid=$(id -u)
 export XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR:-/run/user/$deploy_uid}
 export DOCKER_HOST=${DOCKER_HOST:-unix://$XDG_RUNTIME_DIR/docker.sock}
@@ -28,17 +31,17 @@ done
 [[ $target_bucket =~ ^restore-[a-z0-9-]{1,48}$ ]] || { echo "target bucket must begin restore-" >&2; exit 2; }
 
 root=${SALES_QUOTATION_ROOT:-/opt/sales-quotation}
+acquire_operations_lock
 env_file=$root/shared/.env.production
 current=$root/current
 if [[ ${OPERATIONS_ALLOW_NON_DEPLOY_TEST_USER:-} != 1 ]]; then
   [[ -r $env_file && ! -L $env_file && $(stat -c '%U:%G:%a' -- "$env_file") == root:deploy:640 ]] \
     || { echo "production environment must be root:deploy:640 and not a symlink" >&2; exit 1; }
 fi
-set -a
-# shellcheck disable=SC1090
-. "$env_file"
-set +a
-: "${BACKUP_AGE_IDENTITY_FILE:?BACKUP_AGE_IDENTITY_FILE is required}"
+for key in BACKUP_AGE_IDENTITY_FILE MINIO_ROOT_USER MINIO_ROOT_PASSWORD POSTGRES_USER; do
+  dotenv_get "$key" "$env_file"
+  printf -v "$key" '%s' "$DOTENV_VALUE"
+done
 [[ ${MINIO_ROOT_USER:-} =~ ^[A-Za-z0-9._~-]+$ && ${MINIO_ROOT_PASSWORD:-} =~ ^[A-Za-z0-9._~-]+$ ]] \
   || { echo "MinIO restore credentials must be URL-safe for the non-argument MC_HOST transport" >&2; exit 1; }
 (cd "$(dirname "$backup")" && sha256sum --check "$(basename "$backup").sha256")
@@ -54,15 +57,17 @@ compose() {
     --file "$current/docker-compose.yml" "$@"
 }
 db_created=0
-bucket_started=0
+bucket_owned=0
+invocation_id=$(openssl rand -hex 16)
 restore_complete=0
 cleanup() {
   status=$?
   if ((restore_complete == 0)); then
-    if ((bucket_started == 1)); then
-      compose exec -T -e CLEANUP_BUCKET="$target_bucket" minio sh -eu -c '
+    if ((bucket_owned == 1)); then
+      compose exec -T -e CLEANUP_BUCKET="$target_bucket" -e OWNER_ID="$invocation_id" minio sh -eu -c '
         export MC_HOST_target="http://${MINIO_ROOT_USER}:${MINIO_ROOT_PASSWORD}@127.0.0.1:9000"
-        mc rb --force "target/${CLEANUP_BUCKET}" >/dev/null 2>&1 || true
+        marker="target/${CLEANUP_BUCKET}/restore-owner-${OWNER_ID}"
+        [[ $(mc cat "$marker") == "$OWNER_ID" ]] && mc rb --force "target/${CLEANUP_BUCKET}" >/dev/null 2>&1
       ' || true
     fi
     if ((db_created == 1)); then
@@ -102,19 +107,30 @@ SQL
 cmp -s "$work/database-counts.tsv" "$work/restored-database-counts.tsv" \
   || { echo "restored database row counts differ" >&2; exit 1; }
 
-bucket_started=1
+compose exec -T -e TARGET_BUCKET="$target_bucket" -e OWNER_ID="$invocation_id" minio sh -eu -c '
+  export MC_HOST_target="http://${MINIO_ROOT_USER}:${MINIO_ROOT_PASSWORD}@127.0.0.1:9000"
+  mc mb "target/${TARGET_BUCKET}" >/dev/null
+  if ! printf "%s" "$OWNER_ID" | mc pipe "target/${TARGET_BUCKET}/restore-owner-${OWNER_ID}" >/dev/null; then
+    mc rb --force "target/${TARGET_BUCKET}" >/dev/null 2>&1 || true
+    exit 1
+  fi
+'
+bucket_owned=1
 tar -cf - -C "$work" minio minio-checksums.sha256 | compose exec -T -e TARGET_BUCKET="$target_bucket" minio sh -eu -c '
   command -v mc >/dev/null
   temporary=$(mktemp -d)
   trap "rm -rf -- $temporary" EXIT
   tar -xf - -C "$temporary"
   export MC_HOST_target="http://${MINIO_ROOT_USER}:${MINIO_ROOT_PASSWORD}@127.0.0.1:9000"
-  mc mb "target/${TARGET_BUCKET}" >/dev/null
   mc mirror --overwrite "$temporary/minio/files" "target/${TARGET_BUCKET}" >/dev/null
   mkdir -p "$temporary/verify/files"
   mc mirror --overwrite "target/${TARGET_BUCKET}" "$temporary/verify/files" >/dev/null
   cd "$temporary/verify"
   sha256sum --check "$temporary/minio-checksums.sha256"
+'
+compose exec -T -e TARGET_BUCKET="$target_bucket" -e OWNER_ID="$invocation_id" minio sh -eu -c '
+  export MC_HOST_target="http://${MINIO_ROOT_USER}:${MINIO_ROOT_PASSWORD}@127.0.0.1:9000"
+  mc rm "target/${TARGET_BUCKET}/restore-owner-${OWNER_ID}" >/dev/null
 '
 restore_complete=1
 
