@@ -97,7 +97,7 @@ describe("continuous integration workflow", () => {
     expect(ci.jobs.publish_image.needs).toEqual(["quality", "integration", "container", "browser_smoke"]);
     expect(ci.jobs.publish_image.if).toContain("github.event_name == 'push'");
     expect(ci.jobs.publish_image.if).toContain("github.ref == 'refs/heads/main'");
-    expect(ci.jobs.publish_image.permissions).toEqual({ actions: "read", contents: "read", packages: "write" });
+    expect(ci.jobs.publish_image.permissions).toEqual({ packages: "write" });
     const upload = ci.jobs.container.steps.find((step) => step.uses?.startsWith("actions/upload-artifact@"));
     expect(upload?.if).toContain("github.event_name == 'push'");
     expect(upload?.if).toContain("github.ref == 'refs/heads/main'");
@@ -105,6 +105,8 @@ describe("continuous integration workflow", () => {
     expect(promotion).toContain("docker load");
     expect(promotion).toContain("docker push");
     expect(promotion).not.toContain("docker build");
+    expect(promotion).toContain("RELEASE_SHA %s\\nAPP_IMAGE %s\\nGITHUB_RUN_ID %s\\n");
+    expect(source).toContain("release-manifest-${{ github.sha }}-${{ github.run_id }}");
   });
 
   test("pins every referenced action to an immutable full commit SHA", () => {
@@ -136,20 +138,28 @@ describe("production delivery workflow", () => {
   test("grants package write only to publication and no GitHub token access to SSH jobs", () => {
     const delivery = workflow(".github/workflows/deploy-production.yml");
     expect(delivery.permissions).toEqual({});
-    expect(delivery.jobs.resolve_image.permissions).toEqual({ packages: "read" });
+    expect(delivery.jobs.resolve_image.permissions).toEqual({ actions: "read", packages: "read" });
     expect(delivery.jobs.deploy.permissions).toEqual({});
     expect(delivery.jobs.rollback.permissions).toEqual({});
     expect([...new Set(secretReferences(read(".github/workflows/ci.yml")))]).toEqual(["GITHUB_TOKEN"]);
   });
 
-  test("pulls the already-published full-SHA image without rebuilding and passes its digest to install", () => {
+  test("downloads the triggering run manifest and pulls its exact digest without consulting the SHA tag", () => {
     const delivery = read(".github/workflows/deploy-production.yml");
-    expect(delivery).toContain("ghcr.io/jeffreycaicai/sales_quotation_approvecenter");
+    expect(delivery).toContain("sales_quotation_approvecenter@sha256");
     expect(delivery).toContain("workflow_run.head_sha");
     expect(delivery).toContain("docker pull");
     expect(delivery).not.toContain("docker build");
     expect(delivery).not.toContain("docker push");
-    expect(delivery).toContain("RepoDigests");
+    expect(delivery).toContain("actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093");
+    expect(delivery).toContain("release-manifest-${{ github.event.workflow_run.head_sha }}-${{ github.event.workflow_run.id }}");
+    expect(delivery).toContain("run-id: ${{ github.event.workflow_run.id }}");
+    expect(delivery).toContain("github-token: ${{ secrets.GITHUB_TOKEN }}");
+    expect(delivery).toContain('docker pull "$APP_IMAGE"');
+    expect(delivery).not.toContain('IMAGE_REPOSITORY:$RELEASE_SHA');
+    expect(delivery).not.toContain("tagged_image");
+    expect(delivery).toContain("mapfile -t manifest_lines");
+    expect(delivery).not.toMatch(/(?:source|eval)\s+[^\n]*manifest/);
     expect(delivery).toContain("APP_IMAGE");
     expect(delivery).toMatch(/install-release\.sh[^\n]*"\$RELEASE_SHA"[^\n]*"\$APP_IMAGE"/);
   });

@@ -122,10 +122,13 @@ ShellCheck, a production Docker build, and a real MinIO S3 put/get/delete smoke.
 The image is built exactly once. A trusted `main` run saves that image as an
 immutable same-run artifact; only after every quality, database, browser, and
 container gate passes does CI load that exact artifact and push its full Git SHA
-tag. A successful trusted `main` CI run is the only automatic production
-trigger. The delivery workflow pulls the already-published SHA tag, records its
-canonical GHCR digest, and deploys that exact `repo@sha256` reference through
-the protected GitHub `production` environment.
+tag. CI resolves the canonical digest it just pushed and uploads an immutable
+three-field release manifest bound to both the Git SHA and CI run ID. A
+successful trusted `main` CI run is the only automatic production trigger. The
+delivery workflow downloads that triggering run's exact manifest, validates its
+SHA/run/digest fields, and pulls the recorded `repo@sha256` directly without
+consulting the mutable tag. It deploys that digest through the protected GitHub
+`production` environment.
 See `docs/operations/release-checklist.md` and
 `docs/operations/vps-runbook.md` before releasing or rolling back.
 

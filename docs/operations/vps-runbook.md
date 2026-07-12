@@ -57,7 +57,10 @@ Provisioning copies any existing `worldcup-lottery` site files into `/var/backup
 ## Install and rollback
 
 The deploy workflow passes a 40-character lowercase Git SHA and the canonical
-digest recorded after GHCR accepted that SHA-tagged image:
+digest from the immutable release manifest created after GHCR accepted that
+SHA-tagged image. The manifest name and contents are bound to the successful
+triggering CI run ID; delivery pulls its `repo@sha256` directly and does not
+resolve the mutable tag:
 
 ```sh
 /opt/sales-quotation/current/deploy/install-release.sh "$GIT_SHA" \

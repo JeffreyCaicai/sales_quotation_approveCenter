@@ -61,7 +61,9 @@ jobs:
           persist-credentials: false
       - name: Build the production image exactly once
         run: |
-          docker build --file Dockerfile --tag "quotation-ci:${GITHUB_SHA}" .
+          docker build --file Dockerfile \
+            --label "org.opencontainers.image.revision=${GITHUB_SHA}" \
+            --tag "quotation-ci:${GITHUB_SHA}" .
           docker save --output "$RUNNER_TEMP/production-image.tar" "quotation-ci:${GITHUB_SHA}"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -100,8 +102,6 @@ jobs:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     permissions:
-      actions: read
-      contents: read
       packages: write
     steps:
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
@@ -124,3 +124,20 @@ jobs:
           docker tag "$source_image" "$tagged_image"
           printf '%s' "$GHCR_TOKEN" | docker login ghcr.io --username "${{ github.actor }}" --password-stdin
           docker push "$tagged_image"
+          docker pull "$tagged_image" >/dev/null
+          APP_IMAGE=""
+          while IFS= read -r candidate; do
+            if [[ $candidate =~ ^ghcr\.io/jeffreycaicai/sales_quotation_approvecenter@sha256:[0-9a-f]{64}$ ]]; then
+              APP_IMAGE=$candidate
+              break
+            fi
+          done < <(docker image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' "$tagged_image")
+          [[ -n $APP_IMAGE && $GITHUB_RUN_ID =~ ^[1-9][0-9]*$ ]]
+          printf 'RELEASE_SHA %s\nAPP_IMAGE %s\nGITHUB_RUN_ID %s\n' \
+            "$RELEASE_SHA" "$APP_IMAGE" "$GITHUB_RUN_ID" > "$RUNNER_TEMP/release.manifest"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: release-manifest-${{ github.sha }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/release.manifest
+          if-no-files-found: error
+          retention-days: 2
