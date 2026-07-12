@@ -16,7 +16,7 @@ const shaA = "a".repeat(40);
 const shaB = "b".repeat(40);
 const imageDigest = `ghcr.io/jeffreycaicai/sales_quotation_approvecenter@sha256:${"c".repeat(64)}`;
 
-const runInstallWithPolicy = (policyAssignments: string) => {
+const runInstallWithPolicy = (policyAssignments: string, backupExitStatus = 0) => {
   const root = mkdtempSync(join(tmpdir(), "quotation-install-policy-"));
   const bin = join(root, "bin");
   const state = join(root, "state");
@@ -57,7 +57,7 @@ fi
 printf "pull\\n" >> "$EVENT_LOG"
 exit 42
 `);
-  writeFileSync(join(previousRelease, "deploy", "backup.sh"), '#!/bin/sh\nprintf "backup\\n" >> "$EVENT_LOG"\n');
+  writeFileSync(join(previousRelease, "deploy", "backup.sh"), '#!/bin/sh\nprintf "backup\\n" >> "$EVENT_LOG"\nexit "$BACKUP_EXIT_STATUS"\n');
   chmodSync(join(bin, "flock"), 0o755);
   chmodSync(join(bin, "docker"), 0o755);
   chmodSync(join(previousRelease, "deploy", "backup.sh"), 0o755);
@@ -69,6 +69,7 @@ exit 42
       ...process.env,
       AUDIT_FILE: auditFile,
       AUDIT_OBSERVATION_FILE: auditObservationFile,
+      BACKUP_EXIT_STATUS: String(backupExitStatus),
       EVENT_LOG: eventsFile,
       OPERATIONS_ALLOW_NON_DEPLOY_TEST_USER: "1",
       SALES_QUOTATION_ROOT: root,
@@ -301,6 +302,16 @@ describe("operations scripts static safety", () => {
     try {
       expect(harness.result.status).toBe(42);
       expect(harness.events).toEqual(["lock", "backup", "audit-absent", "pull"]);
+      expect(harness.auditAtPull).toBeNull();
+      expect(existsSync(harness.audit)).toBe(false);
+    } finally { rmSync(harness.root, { recursive: true, force: true }); }
+  });
+
+  test("required backup policy aborts before image pull when backup fails", () => {
+    const harness = runInstallWithPolicy("BACKUP_POLICY=required", 23);
+    try {
+      expect(harness.result.status).not.toBe(0);
+      expect(harness.events).toEqual(["lock", "backup"]);
       expect(harness.auditAtPull).toBeNull();
       expect(existsSync(harness.audit)).toBe(false);
     } finally { rmSync(harness.root, { recursive: true, force: true }); }
