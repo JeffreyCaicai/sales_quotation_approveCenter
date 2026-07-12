@@ -130,7 +130,14 @@ describe("production container packaging", () => {
     const envFile = join(temporaryDirectory, "production env");
     const startup = resolve("deploy/production-up.sh");
     mkdirSync(fakeBin);
-    writeFileSync(envFile, "APP_IMAGE=provided-by-fake-compose\n");
+    writeFileSync(envFile, [
+      "APP_IMAGE=provided-by-fake-compose", "SITE_ORIGIN=https://quote.example.com",
+      "POSTGRES_DB=quotation", "POSTGRES_USER=postgres", "POSTGRES_PASSWORD=PostgresSecret",
+      "DATABASE_URL=postgresql://postgres:PostgresSecret@postgres:5432/quotation",
+      "MINIO_ROOT_USER=minio", "MINIO_ROOT_PASSWORD=MinioSecret", "S3_ENDPOINT=http://minio:9000",
+      "S3_REGION=us-east-1", "S3_ACCESS_KEY_ID=AppKey", "S3_SECRET_ACCESS_KEY=AppSecret",
+      "S3_BUCKET=imports", "AUTH_SECRET=AuthSecret",
+    ].join("\n") + "\n");
     writeFileSync(join(fakeBin, "docker"), `#!/bin/sh
 for argument do printf '<%s>' "$argument"; done >> "$DOCKER_LOG"
 printf '\n' >> "$DOCKER_LOG"

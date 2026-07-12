@@ -12,7 +12,6 @@ deploy_uid=$(id -u)
 export XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR:-/run/user/$deploy_uid}
 export DOCKER_HOST=${DOCKER_HOST:-unix://$XDG_RUNTIME_DIR/docker.sock}
 root=${SALES_QUOTATION_ROOT:-/opt/sales-quotation}
-acquire_operations_lock
 env_file=$root/shared/.env.production
 current=$root/current
 backup_root=$root/backups
@@ -21,6 +20,11 @@ if [[ ${OPERATIONS_ALLOW_NON_DEPLOY_TEST_USER:-} != 1 ]]; then
   [[ ! -L $env_file && $(stat -c '%U:%G:%a' -- "$env_file") == root:deploy:640 ]] \
     || { echo "production environment must be root:deploy:640 and not a symlink" >&2; exit 1; }
 fi
+
+validate_env_file "$env_file" BACKUP_AGE_RECIPIENT BACKUP_S3_ENDPOINT BACKUP_S3_BUCKET BACKUP_S3_ACCESS_KEY_ID \
+  BACKUP_S3_SECRET_ACCESS_KEY APP_IMAGE SITE_ORIGIN POSTGRES_DB POSTGRES_USER POSTGRES_PASSWORD DATABASE_URL \
+  MINIO_ROOT_USER MINIO_ROOT_PASSWORD S3_ENDPOINT S3_REGION S3_ACCESS_KEY_ID S3_SECRET_ACCESS_KEY S3_BUCKET AUTH_SECRET
+acquire_operations_lock
 
 for key in BACKUP_AGE_RECIPIENT BACKUP_S3_ENDPOINT BACKUP_S3_BUCKET BACKUP_S3_ACCESS_KEY_ID \
   BACKUP_S3_SECRET_ACCESS_KEY S3_BUCKET MINIO_ROOT_USER MINIO_ROOT_PASSWORD POSTGRES_USER POSTGRES_DB; do
@@ -47,14 +51,21 @@ compose() {
 }
 cleanup_backup() {
   status=$?
+  set +e
+  restart_status=0
+  restart_web_once || restart_status=$?
   delete_remote_backup_object() { rclone deletefile "$1" >/dev/null 2>&1; }
   cleanup_unverified_backup_artifacts "$archive" "$backup_verified" "$remote_started" "$remote" delete_remote_backup_object
   rm -rf -- "$work"
-  if ((web_restart_needed == 1)); then
-    digest=$(<"$current/image.digest")
-    APP_IMAGE=$digest "$current/deploy/production-up.sh" "$env_file" || status=1
-  fi
+  ((status != 0 || restart_status == 0)) || status=$restart_status
+  trap - EXIT
   exit "$status"
+}
+restart_web_once() {
+  ((web_restart_needed == 1)) || return 0
+  web_restart_needed=0
+  digest=$(<"$current/image.digest")
+  APP_IMAGE=$digest "$current/deploy/production-up.sh" "$env_file"
 }
 trap cleanup_backup EXIT
 
@@ -85,6 +96,7 @@ compose exec -T -e BACKUP_SOURCE_BUCKET="$S3_BUCKET" minio sh -eu -c '
 ' | tar -xf - -C "$work/minio"
 (cd "$work/minio" && find files -type f -print0 | sort -z | xargs -0 -r sha256sum) > "$work/minio-checksums.sha256"
 (cd "$work" && sha256sum postgresql.dump database-counts.tsv minio-checksums.sha256) > "$work/archive-manifest.sha256"
+restart_web_once
 tar -cf - -C "$work" postgresql.dump database-counts.tsv minio minio-checksums.sha256 archive-manifest.sha256 \
   | age --encrypt --recipient "$BACKUP_AGE_RECIPIENT" --output "$archive"
 (cd "$backup_root" && sha256sum "$base.tar.age") > "$archive.sha256"

@@ -15,19 +15,21 @@ sha=${1:-}
 [[ $sha =~ ^[0-9a-f]{40}$ ]] || { echo "release SHA must be 40 lowercase hexadecimal characters" >&2; exit 2; }
 
 root=${SALES_QUOTATION_ROOT:-/opt/sales-quotation}
-acquire_operations_lock
 [[ $root = /* && $root != */../* ]] || { echo "invalid sales quotation root" >&2; exit 2; }
 releases=$root/releases
 current=$root/current
 env_file=$root/shared/.env.production
 repository=ghcr.io/jeffreycaicai/sales_quotation_approvecenter
 tagged_image=$repository:$sha
-mkdir -p "$releases"
 [[ -r $env_file ]] || { echo "production environment file is not readable" >&2; exit 1; }
 if [[ ${OPERATIONS_ALLOW_NON_DEPLOY_TEST_USER:-} != 1 ]]; then
   [[ ! -L $env_file && $(stat -c '%U:%G:%a' -- "$env_file") == root:deploy:640 ]] \
     || { echo "production environment must be root:deploy:640 and not a symlink" >&2; exit 1; }
 fi
+validate_env_file "$env_file" APP_IMAGE SITE_ORIGIN POSTGRES_DB POSTGRES_USER POSTGRES_PASSWORD DATABASE_URL \
+  MINIO_ROOT_USER MINIO_ROOT_PASSWORD S3_ENDPOINT S3_REGION S3_ACCESS_KEY_ID S3_SECRET_ACCESS_KEY S3_BUCKET AUTH_SECRET
+acquire_operations_lock
+mkdir -p "$releases"
 
 previous_release=""
 previous_sha=""

@@ -38,7 +38,7 @@ The directory layout is:
 
 `/opt/sales-quotation/shared` is `root:deploy` mode `0750`; `.env.production` is `root:deploy` mode `0640`. Do not place secret values in the repository, logs, shell history, command arguments, or release directories. The file must define the application variables plus these backup-only variables:
 
-The dotenv contract is machine-safe `KEY=value`: one exact key per line, no `export` prefix, and values are literal single-line data. Operations scripts use an exact-key reader and never source or evaluate this file; shell metacharacters therefore cannot execute commands.
+The dotenv contract is machine-safe `KEY=value`: one exact key per line, no `export` prefix, no empty values, and only `A-Z a-z 0-9 . _ ~ : / @ ? & = % + , -` in values. Whitespace, dollar signs, backticks, quotes, backslashes, and `#` are rejected before Docker or backup tools run. Operations scripts and the production startup wrapper use the same validator and never source or evaluate this file. Use hex or unpadded base64url secrets, for example `openssl rand -hex 32` or `openssl rand -base64 48 | tr '+/' '-_' | tr -d '='`.
 
 ```text
 BACKUP_AGE_RECIPIENT=
@@ -79,7 +79,7 @@ Schema work must follow expand/migrate/contract across separate releases. A rele
 
 ## Backups and recovery drills
 
-The systemd timer runs `backup.sh` daily as `deploy`. Backup is a maintenance window: the script acquires the operations lock and stops web to quiesce the only application writer before capturing PostgreSQL and MinIO. Its exit trap always invokes the production startup wrapper again. This brief downtime is required so the dump, row-count manifest, and object mirror describe one consistent quiescent state. Each backup contains a PostgreSQL custom dump, exact table counts, a MinIO mirror, and SHA-256 manifests. It is encrypted with age before it becomes a retained file, uploaded with separately credentialed S3 access to off-VPS storage, and marked verified only after checksum metadata and byte size agree. Only verified local backup sets older than 30 days are removed; failed current-invocation local and off-VPS artifacts are cleaned without touching prior verified sets.
+The systemd timer runs `backup.sh` daily as `deploy`. Backup is a maintenance window: the script acquires the operations lock and stops web to quiesce the only application writer only while capturing PostgreSQL and MinIO and writing fixed local checksum manifests. It restarts web immediately after that immutable local capture, before compression, age encryption, off-VPS upload, or remote verification. Its EXIT trap attempts the production startup wrapper exactly once before any potentially failing cleanup when capture exits early. This brief capture-only downtime is required so the dump, row-count manifest, and object mirror describe one consistent quiescent state. Each backup contains a PostgreSQL custom dump, exact table counts, a MinIO mirror, and SHA-256 manifests. It is encrypted with age before it becomes a retained file, uploaded with separately credentialed S3 access to off-VPS storage, and marked verified only after checksum metadata and byte size agree. Only verified local backup sets older than 30 days are removed; failed current-invocation local and off-VPS artifacts are cleaned without touching prior verified sets.
 
 At least monthly, download a verified backup and its `.sha256` sidecar and restore into a new database and new bucket namespace:
 

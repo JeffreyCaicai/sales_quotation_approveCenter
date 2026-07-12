@@ -31,13 +31,14 @@ done
 [[ $target_bucket =~ ^restore-[a-z0-9-]{1,48}$ ]] || { echo "target bucket must begin restore-" >&2; exit 2; }
 
 root=${SALES_QUOTATION_ROOT:-/opt/sales-quotation}
-acquire_operations_lock
 env_file=$root/shared/.env.production
 current=$root/current
 if [[ ${OPERATIONS_ALLOW_NON_DEPLOY_TEST_USER:-} != 1 ]]; then
   [[ -r $env_file && ! -L $env_file && $(stat -c '%U:%G:%a' -- "$env_file") == root:deploy:640 ]] \
     || { echo "production environment must be root:deploy:640 and not a symlink" >&2; exit 1; }
 fi
+validate_env_file "$env_file" BACKUP_AGE_IDENTITY_FILE MINIO_ROOT_USER MINIO_ROOT_PASSWORD POSTGRES_USER
+acquire_operations_lock
 for key in BACKUP_AGE_IDENTITY_FILE MINIO_ROOT_USER MINIO_ROOT_PASSWORD POSTGRES_USER; do
   dotenv_get "$key" "$env_file"
   printf -v "$key" '%s' "$DOTENV_VALUE"

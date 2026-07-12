@@ -14,6 +14,24 @@ dotenv_get() {
   ((found == 1)) || { echo "missing dotenv key: $key" >&2; return 1; }
 }
 
+validate_env_file() {
+  local file=$1 key line value
+  shift
+  [[ -r $file ]] || { echo "environment file is not readable" >&2; return 1; }
+  while IFS= read -r line || [[ -n $line ]]; do
+    line=${line%$'\r'}
+    [[ -z $line || $line == \#* ]] && continue
+    [[ $line =~ ^[A-Z][A-Z0-9_]*= ]] || { echo "invalid dotenv assignment" >&2; return 1; }
+    value=${line#*=}
+    [[ -n $value && $value =~ ^[A-Za-z0-9._~:/@?\&=%+,\-]+$ ]] \
+      || { echo "dotenv value violates the safe alphabet" >&2; return 1; }
+  done < "$file"
+  for key in "$@"; do
+    dotenv_get "$key" "$file" || return 1
+    [[ -n $DOTENV_VALUE ]] || { echo "required dotenv key is empty: $key" >&2; return 1; }
+  done
+}
+
 acquire_operations_lock() {
   local root=${SALES_QUOTATION_ROOT:-/opt/sales-quotation}
   OPERATIONS_LOCK_FILE=${OPERATIONS_LOCK_FILE:-$root/.operations.lock}

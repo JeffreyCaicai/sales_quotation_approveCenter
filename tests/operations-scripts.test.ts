@@ -48,6 +48,17 @@ describe("operations scripts static safety", () => {
     }
   });
 
+  test("production-up and every operation validate the shared dotenv contract before mutation", () => {
+    for (const path of ["deploy/production-up.sh", "deploy/install-release.sh", "deploy/backup.sh", "deploy/restore.sh", "deploy/rollback.sh"]) {
+      expect(read(path)).toContain("validate_env_file");
+    }
+    const backup = read("deploy/backup.sh");
+    expect(backup.indexOf("validate_env_file")).toBeLessThan(backup.indexOf("compose stop web"));
+    for (const key of ["APP_IMAGE", "SITE_ORIGIN", "DATABASE_URL", "AUTH_SECRET"]) {
+      expect(backup.slice(0, backup.indexOf("compose stop web"))).toContain(key);
+    }
+  });
+
   test.each(["deploy/install-release.sh", "deploy/backup.sh", "deploy/restore.sh", "deploy/rollback.sh"])(
     "%s enforces the root-owned shared environment contract",
     (path) => {
@@ -132,6 +143,9 @@ describe("operations scripts static safety", () => {
     expect(backup).toContain("compose stop web");
     expect(backup.indexOf("web_restart_needed=1")).toBeLessThan(backup.indexOf("compose stop web"));
     expect(backup).toContain("production-up.sh");
+    expect(backup.lastIndexOf("restart_web_once")).toBeLessThan(backup.indexOf("age --encrypt"));
+    expect(backup.lastIndexOf("restart_web_once")).toBeLessThan(backup.indexOf("rclone copyto"));
+    expect(backup).toContain("set +e");
     expect(backup).toMatch(/date[^\n]*%N/);
     expect(backup).toContain("rclone deletefile");
   });
@@ -209,6 +223,68 @@ describe("operations scripts behavior", () => {
       const output = execFileSync("bash", ["-c", '. deploy/operations-common.sh; dotenv_get SITE_ORIGIN "$1"; printf "%s" "$DOTENV_VALUE"', "bash", env], { encoding: "utf8" });
       expect(output).toContain("$(touch");
       expect(() => readFileSync(marker)).toThrow();
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+
+  test("dotenv contract accepts representative safe values and rejects parser-sensitive values", () => {
+    const root = mkdtempSync(join(tmpdir(), "quotation-env-contract-")); const env = join(root, "env");
+    try {
+      writeFileSync(env, [
+        "DATABASE_URL=postgresql://user:hex_secret@postgres:5432/app?sslmode=require&x=1",
+        `APP_IMAGE=ghcr.io/org/app@sha256:${"a".repeat(64)}`,
+        "SITE_ORIGIN=https://quote.example.com",
+        "AUTH_SECRET=Abc_123-xyz",
+      ].join("\n") + "\n");
+      expect(spawnSync("bash", ["-c", '. deploy/operations-common.sh; validate_env_file "$1" DATABASE_URL APP_IMAGE SITE_ORIGIN AUTH_SECRET', "bash", env]).status).toBe(0);
+      const badValues = ["abc$def", "abc`id`", "two words", '"quoted"', "back\\slash", "hash#value", ""];
+      const badResult = spawnSync("bash", ["-c", `. deploy/operations-common.sh; file=$1; shift
+        for bad in "$@"; do printf 'AUTH_SECRET=%s\\n' "$bad" > "$file"; validate_env_file "$file" AUTH_SECRET >/dev/null 2>&1 && exit 9; done; true
+      `, "bash", env, ...badValues], { encoding: "utf8" });
+      expect(badResult.status).toBe(0);
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+
+  test("invalid production dotenv fails before Docker is invoked", () => {
+    const root = mkdtempSync(join(tmpdir(), "quotation-env-before-docker-")); const bin = join(root, "bin"); const env = join(root, "env"); const log = join(root, "docker-log");
+    mkdirSync(bin); writeFileSync(join(bin, "docker"), "#!/bin/sh\nprintf called >> \"$DOCKER_LOG\"\n"); chmodSync(join(bin, "docker"), 0o755);
+    writeFileSync(env, [
+      "APP_IMAGE=ghcr.io/org/app@sha256:" + "a".repeat(64), "SITE_ORIGIN=https://quote.example.com", "POSTGRES_DB=quotation",
+      "POSTGRES_USER=postgres", "POSTGRES_PASSWORD=SafeSecret", "DATABASE_URL=postgresql://postgres:SafeSecret@postgres:5432/quotation",
+      "MINIO_ROOT_USER=minio", "MINIO_ROOT_PASSWORD=MinioSecret", "S3_ENDPOINT=http://minio:9000", "S3_REGION=us-east-1",
+      "S3_ACCESS_KEY_ID=AppKey", "S3_SECRET_ACCESS_KEY=AppSecret", "S3_BUCKET=imports", "AUTH_SECRET=abc$def",
+    ].join("\n") + "\n");
+    try {
+      const result = spawnSync(resolve("deploy/production-up.sh"), [env], { encoding: "utf8", env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, DOCKER_LOG: log } });
+      expect(result.status).not.toBe(0); expect(() => readFileSync(log)).toThrow();
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+
+  test("backup capture failure restarts exactly once before failing cleanup continues", () => {
+    const root = mkdtempSync(join(tmpdir(), "quotation-backup-lifecycle-")); const bin = join(root, "bin"); const release = join(root, "releases", shaA); const log = join(root, "log");
+    mkdirSync(bin); mkdirSync(join(release, "deploy"), { recursive: true }); mkdirSync(join(root, "shared")); mkdirSync(join(root, "backups"));
+    const envLines = {
+      APP_IMAGE: `ghcr.io/org/app@sha256:${"a".repeat(64)}`, SITE_ORIGIN: "https://quote.example.com", POSTGRES_PASSWORD: "PgSecret",
+      DATABASE_URL: "postgresql://postgres:PgSecret@postgres:5432/quotation", S3_ENDPOINT: "http://minio:9000", S3_REGION: "us-east-1",
+      S3_ACCESS_KEY_ID: "AppKey", S3_SECRET_ACCESS_KEY: "AppSecret", AUTH_SECRET: "AuthSecret",
+      BACKUP_AGE_RECIPIENT: "age1safe", BACKUP_S3_ENDPOINT: "https://backup.example.com", BACKUP_S3_BUCKET: "backups",
+      BACKUP_S3_ACCESS_KEY_ID: "BackupKey", BACKUP_S3_SECRET_ACCESS_KEY: "BackupSecret", S3_BUCKET: "imports",
+      MINIO_ROOT_USER: "minio", MINIO_ROOT_PASSWORD: "MinioSecret", POSTGRES_USER: "postgres", POSTGRES_DB: "quotation",
+    };
+    writeFileSync(join(root, "shared", ".env.production"), Object.entries(envLines).map(([k,v]) => `${k}=${v}`).join("\n") + "\n");
+    writeFileSync(join(release, "image.digest"), `ghcr.io/org/app@sha256:${"a".repeat(64)}\n`);
+    writeFileSync(join(release, "deploy", "production-up.sh"), "#!/bin/sh\nprintf 'restart\\n' >> \"$OPS_LOG\"\n"); chmodSync(join(release, "deploy", "production-up.sh"), 0o755);
+    writeFileSync(join(bin, "docker"), `#!/bin/sh
+case " $* " in *" stop web "*) printf 'stop\\n' >> "$OPS_LOG"; exit 0;; *" pg_dump "*) printf 'capture-fail\\n' >> "$OPS_LOG"; exit 9;; esac
+exit 0
+`);
+    writeFileSync(join(bin, "flock"), "#!/bin/sh\nexit 0\n");
+    writeFileSync(join(bin, "rm"), "#!/bin/sh\nprintf 'cleanup-fail\\n' >> \"$OPS_LOG\"\nexit 7\n");
+    for (const name of ["docker", "flock", "rm"]) chmodSync(join(bin, name), 0o755);
+    execFileSync("ln", ["-s", release, join(root, "current")]);
+    try {
+      const result = spawnSync(resolve("deploy/backup.sh"), [], { encoding: "utf8", env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, OPERATIONS_ALLOW_NON_DEPLOY_TEST_USER: "1", SALES_QUOTATION_ROOT: root, FLOCK_BIN: join(bin, "flock"), OPS_LOG: log } });
+      expect(result.status).not.toBe(0);
+      expect(read(log).trim().split("\n")).toEqual(["stop", "capture-fail", "restart", "cleanup-fail", "cleanup-fail"]);
     } finally { rmSync(root, { recursive: true, force: true }); }
   });
 
