@@ -9,7 +9,6 @@ if [[ ${1:-} == --recover-bootstrap ]]; then recover=1; shift; fi
 }
 sha=$1
 digest=$2
-repository=ghcr.io/jeffreycaicai/sales_quotation_approvecenter
 [[ $sha =~ ^[0-9a-f]{40}$ \
   && $digest =~ ^ghcr\.io/jeffreycaicai/sales_quotation_approvecenter@sha256:[0-9a-f]{64}$ ]] \
   || { echo "invalid release SHA or canonical image digest" >&2; exit 2; }
