@@ -108,7 +108,22 @@ enforce explicit server-side membership or allowlist checks.
 - `npm run test:logic`: run the quotation domain suite with Node's test runner.
 - `npm run test:localization`: run localization and copy audits with Node's test
   runner.
+- `npm run test:integration`: run every native PostgreSQL integration,
+  concurrency, publication, import, and lifecycle suite after applying all
+  migrations to `docker-compose.test.yml`.
+- `npm run test:e2e`: run the focused production health, login, and dashboard
+  browser smoke with pinned Playwright.
+- `npm run check:committed-secrets`: reject tracked secret files, private keys,
+  and high-confidence credential formats.
 - `npm run build`: type-check and create the production Next.js build.
+
+Pull requests and `main` pushes run these gates in GitHub Actions, plus ESLint,
+ShellCheck, and a production Docker build. A successful trusted `main` push is
+the only automatic production trigger. The delivery workflow publishes the
+full Git SHA tag, records the canonical GHCR digest, and deploys that exact
+`repo@sha256` reference through the protected GitHub `production` environment.
+See `docs/operations/release-checklist.md` and
+`docs/operations/vps-runbook.md` before releasing or rolling back.
 
 ## Building Identity Operations
 

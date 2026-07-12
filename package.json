@@ -12,6 +12,9 @@
     "test:unit": "vitest run",
     "test:logic": "node --experimental-strip-types --test tests/quotation.test.ts",
     "test:localization": "node --experimental-strip-types --test tests/localization.test.ts",
+    "test:integration": "vitest run --config vitest.integration.config.ts tests/*.integration.test.ts",
+    "test:e2e": "playwright test tests/smoke.spec.ts",
+    "check:committed-secrets": "bash scripts/check-committed-secrets.sh",
     "lint": "eslint . --ignore-pattern .next",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx scripts/migrate.ts",
@@ -37,6 +40,7 @@
   },
   "devDependencies": {
     "@electric-sql/pglite": "^0.5.4",
+    "@playwright/test": "1.55.1",
     "@tailwindcss/postcss": "4.2.1",
     "@types/bcryptjs": "^2.4.6",
     "@types/busboy": "^1.5.4",

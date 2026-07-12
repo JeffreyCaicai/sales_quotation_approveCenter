@@ -56,15 +56,25 @@ Provisioning copies any existing `worldcup-lottery` site files into `/var/backup
 
 ## Install and rollback
 
-The deploy workflow passes one 40-character lowercase Git SHA:
+The deploy workflow passes a 40-character lowercase Git SHA and the canonical
+digest recorded after GHCR accepted that SHA-tagged image:
 
 ```sh
-/opt/sales-quotation/current/deploy/install-release.sh "$GIT_SHA"
+/opt/sales-quotation/current/deploy/install-release.sh "$GIT_SHA" \
+  "ghcr.io/jeffreycaicai/sales_quotation_approvecenter@sha256:$DIGEST"
 ```
 
 For the first release only, invoke the checked-out `deploy/install-release.sh` directly. It permits bootstrap only when both `current` and the two named stateful volumes are absent. If volumes exist without `current`, it fails closed because it cannot prove a complete pre-deploy backup; recover or explicitly disposition that state before continuing.
 
-The installer performs an encrypted off-VPS backup before pulling. It resolves the tag to a repository digest, extracts that image's release bundle, starts only private PostgreSQL and MinIO, and runs `/app/deploy/migrate-production.mjs` from the same immutable image before changing web traffic. It atomically switches `current`, invokes the mandatory `production-up.sh` wrapper, checks health on loopback and `SITE_ORIGIN`, and automatically returns to the prior release on failure. Current plus two prior releases are retained.
+The installer performs an encrypted off-VPS backup before pulling. It resolves
+the tag to a repository digest and refuses to continue unless that digest
+exactly matches the workflow-recorded value. It extracts that image's release
+bundle, starts only private PostgreSQL and MinIO, and runs
+`/app/deploy/migrate-production.mjs` from the same immutable image before
+changing web traffic. It atomically switches `current`, invokes the mandatory
+`production-up.sh` wrapper, checks health on loopback and `SITE_ORIGIN`, and
+automatically returns to the prior release on failure. Current plus two prior
+releases are retained.
 
 Install, rollback, backup, and restore share one host-wide operations lock. Nested backup/rollback calls inherit the held lock descriptor, so manual and systemd operations serialize without deadlock. Release retention follows the recorded switch lineage, not directory timestamps.
 
@@ -73,6 +83,11 @@ Manual rollback is explicit:
 ```sh
 /opt/sales-quotation/current/deploy/rollback.sh <retained-git-sha>
 ```
+
+The GitHub `Production Delivery` workflow exposes the same operation through
+`workflow_dispatch`. Its input accepts only a full lowercase SHA; the host
+script then requires that SHA to name a complete retained release. Arbitrary
+commands, branches, tags, prefixes, and unretained SHAs are rejected.
 
 Schema work must follow expand/migrate/contract across separate releases. A release may add compatible structures and migrate data; only a later release may remove the old contract after every retained rollback target no longer needs it. The scripts cannot make an irreversible contract migration safe and therefore do not claim database rollback.
 

@@ -22,6 +22,14 @@ directory. Do not bypass it for production startup. PostgreSQL and MinIO are
 reachable only on the internal Compose network. The web service is reachable only
 through `127.0.0.1:3000` for the host Nginx reverse proxy.
 
+The release installer also requires this canonical digest as its second
+argument. It pulls the full-Git-SHA tag and rejects it unless the pulled digest
+matches the value recorded by the GitHub publication job:
+
+```sh
+/opt/sales-quotation/current/deploy/install-release.sh "$GIT_SHA" "$APP_IMAGE"
+```
+
 Before accepting uploads, create `S3_BUCKET` and a bucket-scoped application user
 in MinIO. Put that user's credentials in `S3_ACCESS_KEY_ID` and
 `S3_SECRET_ACCESS_KEY`; do not expose MinIO root credentials to the web service.

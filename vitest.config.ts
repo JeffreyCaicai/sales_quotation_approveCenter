@@ -15,6 +15,7 @@ export default defineConfig({
       "tests/quotation.test.ts",
       "tests/localization.test.ts",
       "tests/rendered-html.test.mjs",
+      "tests/smoke.spec.ts",
     ],
   },
 });

@@ -13,13 +13,16 @@ export XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR:-/run/user/$deploy_uid}
 export DOCKER_HOST=${DOCKER_HOST:-unix://$XDG_RUNTIME_DIR/docker.sock}
 sha=${1:-}
 [[ $sha =~ ^[0-9a-f]{40}$ ]] || { echo "release SHA must be 40 lowercase hexadecimal characters" >&2; exit 2; }
+expected_digest=${2:-}
+repository=ghcr.io/jeffreycaicai/sales_quotation_approvecenter
+[[ $expected_digest =~ ^ghcr\.io/jeffreycaicai/sales_quotation_approvecenter@sha256:[0-9a-f]{64}$ ]] \
+  || { echo "canonical production image digest must be ${repository}@sha256:<64 lowercase hexadecimal characters>" >&2; exit 2; }
 
 root=${SALES_QUOTATION_ROOT:-/opt/sales-quotation}
 [[ $root = /* && $root != */../* ]] || { echo "invalid sales quotation root" >&2; exit 2; }
 releases=$root/releases
 current=$root/current
 env_file=$root/shared/.env.production
-repository=ghcr.io/jeffreycaicai/sales_quotation_approvecenter
 tagged_image=$repository:$sha
 [[ -r $env_file ]] || { echo "production environment file is not readable" >&2; exit 1; }
 if [[ ${OPERATIONS_ALLOW_NON_DEPLOY_TEST_USER:-} != 1 ]]; then
@@ -56,6 +59,7 @@ docker pull "$tagged_image" >/dev/null
 digest=$(docker image inspect --format '{{join .RepoDigests "\n"}}' "$tagged_image" \
   | grep -E "^${repository//./\\.}@sha256:[0-9a-f]{64}$" | head -n 1)
 [[ -n $digest ]] || { echo "pulled image has no matching immutable digest" >&2; exit 1; }
+[[ $digest == "$expected_digest" ]] || { echo "pulled image digest does not match the canonical workflow digest" >&2; exit 1; }
 "$script_dir/validate-app-image.sh" "$digest"
 
 release=$releases/$sha
