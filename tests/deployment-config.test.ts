@@ -142,7 +142,7 @@ describe("production container packaging", () => {
 for argument do printf '<%s>' "$argument"; done >> "$DOCKER_LOG"
 printf '\n' >> "$DOCKER_LOG"
 case " $* " in
-  *" config --images web "*) printf '%s\n' "$FAKE_IMAGE" ;;
+  *" config --images "*) printf '%s\n' postgres:17-bookworm minio/minio:RELEASE.2025-04-22T22-12-26Z "$FAKE_IMAGE" ;;
 esac
 `);
     chmodSync(join(fakeBin, "docker"), 0o755);
@@ -158,18 +158,18 @@ esac
     });
 
     try {
-      const mutable = run("ghcr.io/example/sales-quotation:latest");
+      const mutable = run("ghcr.io/jeffreycaicai/sales_quotation_approvecenter:latest");
       expect(mutable.status).not.toBe(0);
-      expect(readFileSync(dockerLog, "utf8")).toContain("<config><--images><web>");
+      expect(readFileSync(dockerLog, "utf8")).toContain("<config><--images>");
       expect(readFileSync(dockerLog, "utf8")).not.toContain("<up><-d>");
 
       writeFileSync(dockerLog, "");
-      const digest = `ghcr.io/example/sales-quotation@sha256:${"a".repeat(64)}`;
+      const digest = `ghcr.io/jeffreycaicai/sales_quotation_approvecenter@sha256:${"a".repeat(64)}`;
       const immutable = run(digest);
       const calls = readFileSync(dockerLog, "utf8").trim().split("\n");
       expect(immutable.status).toBe(0);
       expect(calls).toHaveLength(3);
-      expect(calls[0]).toContain("<config><--images><web>");
+      expect(calls[0]).toContain("<config><--images>");
       expect(calls[1]).toContain("<config><--quiet>");
       expect(calls[2]).toContain("<up><-d>");
       for (const call of calls) {

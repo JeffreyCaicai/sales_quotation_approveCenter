@@ -23,7 +23,15 @@ compose() {
     "$@"
 }
 
-image=$(compose config --images web)
-"$script_dir/validate-app-image.sh" "$image"
+app_repository=ghcr.io/jeffreycaicai/sales_quotation_approvecenter
+app_images=()
+while IFS= read -r image; do app_images+=("$image"); done < <(
+  compose config --images \
+    | grep -E "^${app_repository//./\\.}@sha256:[0-9a-f]{64}$" \
+    || true
+)
+((${#app_images[@]} == 1)) \
+  || { echo "Compose must resolve exactly one immutable application image" >&2; exit 1; }
+"$script_dir/validate-app-image.sh" "${app_images[0]}"
 compose config --quiet
 compose up -d
