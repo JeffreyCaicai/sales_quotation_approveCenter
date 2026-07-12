@@ -28,7 +28,7 @@ export function LoginScreen({ onLogin }: { onLogin: (user: User) => void }) {
           <p>{t("login.description")}</p>
         </div>
 
-        <div className="role-grid" aria-label={t("login.rolePicker")}>
+        <div className="role-grid" role="group" aria-label={t("login.rolePicker")}>
           {USERS.map((user) => {
             const section = ROLE_SECTIONS[user.role];
             return (
