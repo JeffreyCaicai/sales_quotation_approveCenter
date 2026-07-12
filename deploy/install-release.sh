@@ -36,6 +36,7 @@ if [[ ${OPERATIONS_ALLOW_NON_DEPLOY_TEST_USER:-} != 1 ]]; then
 fi
 validate_env_file "$env_file" APP_IMAGE SITE_ORIGIN POSTGRES_DB POSTGRES_USER POSTGRES_PASSWORD DATABASE_URL \
   MINIO_ROOT_USER MINIO_ROOT_PASSWORD S3_ENDPOINT S3_REGION S3_ACCESS_KEY_ID S3_SECRET_ACCESS_KEY S3_BUCKET AUTH_SECRET
+read_backup_policy "$env_file"
 acquire_operations_lock
 mkdir -p "$releases"
 authorize_bootstrap_recovery "$bootstrap_marker" "$recover_bootstrap"
@@ -56,7 +57,8 @@ if ((recover_bootstrap == 1)) && [[ -n $previous_release ]]; then
   exit 1
 fi
 if [[ -n $previous_release ]]; then
-  "$previous_release/deploy/backup.sh"
+  prepare_predeployment_recovery_point "$BACKUP_POLICY_VALUE" "$root" "$sha" \
+    "$previous_release/deploy/backup.sh"
 elif docker volume inspect sales-quotation_postgres_data >/dev/null 2>&1 \
   || docker volume inspect sales-quotation_minio_data >/dev/null 2>&1; then
   if ((recover_bootstrap == 1)); then

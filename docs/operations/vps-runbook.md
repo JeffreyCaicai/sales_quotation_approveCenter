@@ -53,6 +53,8 @@ BACKUP_S3_ACCESS_KEY_ID=
 BACKUP_S3_SECRET_ACCESS_KEY=
 ```
 
+`BACKUP_POLICY` is mandatory, and a missing or invalid value blocks deployment. Internal demo only: `BACKUP_POLICY=optional` permits audited deployments without an off-VPS backup. Every bypass is recorded in `state/unprotected-deployments.log`. Before importing real business data, configure and verify off-VPS backup, perform a restore drill, set `BACKUP_POLICY=required`, and re-enable the backup timer.
+
 The backup S3 credentials must be separate from the live MinIO credentials and limited to the off-VPS backup prefix. Store the age identity outside the VPS as part of the recovery kit; normal production configuration contains no `BACKUP_AGE_IDENTITY_FILE` assignment. For an approved restore only, copy the identity to a mode-`0600` safe path and add a nonempty line such as `BACKUP_AGE_IDENTITY_FILE=/safe/restore/identity.txt`. Remove that line and the identity file immediately after the restore. Restore fails closed while the key is absent.
 
 ## Nginx and TLS

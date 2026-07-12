@@ -48,7 +48,9 @@ describe("operations scripts static safety", () => {
         "bash", root, shaB, backup], { encoding: "utf8", env: { ...process.env, CALLS: calls } });
       expect(optional.status).toBe(0);
       expect(optional.stderr).toContain("WARNING");
-      expect(read(join(root, "state", "unprotected-deployments.log"))).toContain(shaB);
+      expect(read(join(root, "state", "unprotected-deployments.log"))).toMatch(
+        new RegExp(`^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z\\t${shaB}\\tBACKUP_POLICY=optional\\n$`),
+      );
       expect(() => readFileSync(calls)).toThrow();
 
       const required = spawnSync("bash", ["-c",
@@ -210,6 +212,26 @@ describe("operations scripts static safety", () => {
     expect(install).toContain("archive_bootstrap_recovery");
     expect(install.indexOf("archive_bootstrap_recovery")).toBeGreaterThan(install.lastIndexOf("/api/health"));
     expect(install.indexOf("archive_bootstrap_recovery")).toBeLessThan(install.lastIndexOf("trap - ERR"));
+  });
+
+  test("release installation validates and applies backup policy before image pull", () => {
+    const install = read("deploy/install-release.sh");
+    expect(install).toContain('read_backup_policy "$env_file"');
+    expect(install).toContain('prepare_predeployment_recovery_point "$BACKUP_POLICY_VALUE"');
+    expect(install.indexOf('read_backup_policy "$env_file"')).toBeLessThan(install.indexOf("acquire_operations_lock"));
+    expect(install.indexOf("acquire_operations_lock")).toBeLessThan(install.indexOf("prepare_predeployment_recovery_point"));
+    expect(install.indexOf("prepare_predeployment_recovery_point")).toBeLessThan(install.indexOf('docker pull "$tagged_image"'));
+  });
+
+  test("environment and runbooks make demo bypass explicit and production transition mandatory", () => {
+    expect(read("deploy/env.production.example")).toMatch(/^BACKUP_POLICY=required$/m);
+    const runbook = read("docs/operations/vps-runbook.md");
+    const checklist = read("docs/operations/release-checklist.md");
+    for (const text of [runbook, checklist]) {
+      expect(text).toContain("BACKUP_POLICY=optional");
+      expect(text).toContain("BACKUP_POLICY=required");
+      expect(text).toContain("unprotected-deployments.log");
+    }
   });
 
   test("release activation keeps the public pointer root-owned and switches only inside deploy state", () => {

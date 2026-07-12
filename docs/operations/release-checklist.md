@@ -51,6 +51,8 @@ gate.
 
 ## VPS, backup, restore, Nginx, and domain gate
 
+`BACKUP_POLICY` is mandatory, and a missing or invalid value blocks deployment. Internal demo only: `BACKUP_POLICY=optional` permits audited deployments without an off-VPS backup. Every bypass is recorded in `state/unprotected-deployments.log`. Before importing real business data, configure and verify off-VPS backup, perform a restore drill, set `BACKUP_POLICY=required`, and re-enable the backup timer.
+
 - [ ] Confirm the deploy user's daemon is rootless, PostgreSQL and MinIO expose
       no public ports, and only Nginx reaches `127.0.0.1:3000`.
 - [ ] Confirm the existing `worldcup-lottery` default Nginx workload remains
