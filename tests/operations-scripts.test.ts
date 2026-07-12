@@ -16,6 +16,49 @@ const shaA = "a".repeat(40);
 const shaB = "b".repeat(40);
 
 describe("operations scripts static safety", () => {
+  test("backup policy accepts only an explicit optional or required value", () => {
+    const root = mkdtempSync(join(tmpdir(), "quotation-backup-policy-"));
+    const env = join(root, "env");
+    try {
+      for (const policy of ["optional", "required"]) {
+        writeFileSync(env, `BACKUP_POLICY=${policy}\n`);
+        const result = spawnSync("bash", ["-c",
+          '. deploy/operations-common.sh; read_backup_policy "$1"; printf "%s" "$BACKUP_POLICY_VALUE"',
+          "bash", env], { encoding: "utf8" });
+        expect(result.status).toBe(0);
+        expect(result.stdout).toBe(policy);
+      }
+      for (const contents of ["", "BACKUP_POLICY=\n", "BACKUP_POLICY=demo\n", "BACKUP_POLICY=optional\nBACKUP_POLICY=required\n"]) {
+        writeFileSync(env, contents);
+        expect(spawnSync("bash", ["-c", '. deploy/operations-common.sh; read_backup_policy "$1"', "bash", env]).status).not.toBe(0);
+      }
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+
+  test("optional policy records the target without calling backup while required runs backup", () => {
+    const root = mkdtempSync(join(tmpdir(), "quotation-policy-action-"));
+    const backup = join(root, "backup.sh");
+    const calls = join(root, "calls");
+    mkdirSync(join(root, "state"));
+    writeFileSync(backup, '#!/bin/sh\nprintf backup >> "$CALLS"\n');
+    chmodSync(backup, 0o755);
+    try {
+      const optional = spawnSync("bash", ["-c",
+        '. deploy/operations-common.sh; prepare_predeployment_recovery_point optional "$1" "$2" "$3"',
+        "bash", root, shaB, backup], { encoding: "utf8", env: { ...process.env, CALLS: calls } });
+      expect(optional.status).toBe(0);
+      expect(optional.stderr).toContain("WARNING");
+      expect(read(join(root, "state", "unprotected-deployments.log"))).toContain(shaB);
+      expect(() => readFileSync(calls)).toThrow();
+
+      const required = spawnSync("bash", ["-c",
+        '. deploy/operations-common.sh; prepare_predeployment_recovery_point required "$1" "$2" "$3"',
+        "bash", root, shaB, backup], { encoding: "utf8", env: { ...process.env, CALLS: calls } });
+      expect(required.status).toBe(0);
+      expect(read(calls)).toBe("backup");
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+
   test.each(scripts)("%s enables strict error handling", (path) => {
     expect(read(path)).toMatch(/^#!\/usr\/bin\/env bash\nset -Eeuo pipefail/m);
   });

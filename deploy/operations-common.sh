@@ -32,6 +32,37 @@ validate_env_file() {
   done
 }
 
+read_backup_policy() {
+  local file=$1
+  validate_env_file "$file" BACKUP_POLICY || return 1
+  dotenv_get BACKUP_POLICY "$file" || return 1
+  case $DOTENV_VALUE in
+    optional|required) BACKUP_POLICY_VALUE=$DOTENV_VALUE ;;
+    *) echo "BACKUP_POLICY must be optional or required" >&2; return 1 ;;
+  esac
+}
+
+prepare_predeployment_recovery_point() {
+  local policy=$1 root=$2 sha=$3 backup_script=$4 audit timestamp
+  [[ $root = /* && $sha =~ ^[0-9a-f]{40}$ && -x $backup_script ]] \
+    || { echo "invalid pre-deployment recovery-point request" >&2; return 1; }
+  case $policy in
+    required) "$backup_script" ;;
+    optional)
+      audit=$root/state/unprotected-deployments.log
+      [[ -d $root/state && ! -L $audit ]] \
+        || { echo "unprotected deployment audit path is unsafe" >&2; return 1; }
+      if [[ ! -e $audit ]]; then (umask 077; : > "$audit") || return 1; fi
+      [[ -f $audit && ! -L $audit ]] \
+        || { echo "unprotected deployment audit file is unsafe" >&2; return 1; }
+      timestamp=$(date -u +%Y-%m-%dT%H:%M:%SZ) || return 1
+      printf 'WARNING: off-VPS backup is disabled for this internal demo deployment. Set BACKUP_POLICY=required before importing real business data.\n' >&2
+      printf '%s\t%s\tBACKUP_POLICY=optional\n' "$timestamp" "$sha" >> "$audit"
+      ;;
+    *) echo "invalid backup policy" >&2; return 1 ;;
+  esac
+}
+
 acquire_operations_lock() {
   local root=${SALES_QUOTATION_ROOT:-/opt/sales-quotation}
   OPERATIONS_LOCK_FILE=${OPERATIONS_LOCK_FILE:-$root/state/operations.lock}
