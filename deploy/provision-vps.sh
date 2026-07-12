@@ -75,6 +75,12 @@ chmod 0600 "$authorized_keys"
 install -d -m 0750 -o deploy -g deploy /opt/sales-quotation/releases
 install -d -m 0700 -o deploy -g deploy /opt/sales-quotation/backups
 install -d -m 0750 -o root -g deploy /opt/sales-quotation/shared
+install -d -m 0755 -o root -g root /opt/sales-quotation/bin
+install -d -m 0755 -o root -g root /opt/sales-quotation/bootstrap /opt/sales-quotation/bootstrap/deploy
+install -m 0555 -o root -g root "$script_dir/install-release-launcher.sh" /opt/sales-quotation/bin/install-release
+for bootstrap_script in install-release.sh operations-common.sh validate-app-image.sh rollback.sh; do
+  install -m 0555 -o root -g root "$script_dir/$bootstrap_script" "/opt/sales-quotation/bootstrap/deploy/$bootstrap_script"
+done
 if [[ ! -e /opt/sales-quotation/.operations.lock ]]; then
   install -m 0600 -o deploy -g deploy /dev/null /opt/sales-quotation/.operations.lock
 fi

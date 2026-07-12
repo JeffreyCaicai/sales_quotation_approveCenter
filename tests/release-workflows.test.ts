@@ -170,7 +170,8 @@ describe("production delivery workflow", () => {
     expect(delivery).not.toContain("invalid_manifest()");
     expect(delivery).not.toMatch(/(?:source|eval)\s+[^\n]*manifest/);
     expect(delivery).toContain("APP_IMAGE");
-    expect(delivery).toMatch(/install-release\.sh[^\n]*"\$RELEASE_SHA"[^\n]*"\$APP_IMAGE"/);
+    expect(delivery).toMatch(/\/opt\/sales-quotation\/bin\/install-release[^\n]*"\$RELEASE_SHA"[^\n]*"\$APP_IMAGE"/);
+    expect(delivery).not.toMatch(/current\/deploy\/install-release\.sh/);
   });
 
   test("exposes only the five VPS environment secrets and uses a dedicated strict known-hosts file", () => {

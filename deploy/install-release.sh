@@ -33,6 +33,7 @@ validate_env_file "$env_file" APP_IMAGE SITE_ORIGIN POSTGRES_DB POSTGRES_USER PO
   MINIO_ROOT_USER MINIO_ROOT_PASSWORD S3_ENDPOINT S3_REGION S3_ACCESS_KEY_ID S3_SECRET_ACCESS_KEY S3_BUCKET AUTH_SECRET
 acquire_operations_lock
 mkdir -p "$releases"
+require_bootstrap_recovery_clear "$root/bootstrap-failed"
 
 previous_release=""
 previous_sha=""
@@ -86,26 +87,35 @@ compose() {
   APP_IMAGE=$digest docker compose --project-directory "$release" --env-file "$env_file" \
     --file "$release/docker-compose.yml" "$@"
 }
-compose config --quiet
-compose up -d --wait postgres minio
-docker run --rm --network sales-quotation_quotation_internal --env-file "$env_file" \
-  "$digest" node /app/deploy/migrate-production.mjs
-
 switched=0
+bootstrap_state_touched=0
+bootstrap_failure_phase=startup
 rollback_on_error() {
   status=$?
+  trap - ERR
+  set +e
   if ((switched == 1)) && [[ -n $previous_sha ]]; then
     "$script_dir/rollback.sh" "$previous_sha" || true
+  elif [[ -z $previous_sha ]] && ((bootstrap_state_touched == 1)); then
+    record_failed_bootstrap_activation "$current" "$release" "$root/bootstrap-failed" \
+      "$sha" "$digest" "$bootstrap_failure_phase" compose
   fi
   exit "$status"
 }
 trap rollback_on_error ERR
+compose config --quiet
+bootstrap_state_touched=1
+compose up -d --wait postgres minio
+docker run --rm --network sales-quotation_quotation_internal --env-file "$env_file" \
+  "$digest" node /app/deploy/migrate-production.mjs
+
 next_link=$root/.current.next.$$
 ln -s "$release" "$next_link"
 mv -T "$next_link" "$current"
 switched=1
 APP_IMAGE=$digest "$release/deploy/production-up.sh" "$env_file"
 
+bootstrap_failure_phase=health
 dotenv_get SITE_ORIGIN "$env_file"
 site_origin=$DOTENV_VALUE
 health_attempt_count
@@ -120,4 +130,5 @@ done
 switched=0
 trap - ERR
 record_release_lineage_and_prune "$root" "$sha"
+prune_application_images "$root" "$repository"
 trap - EXIT

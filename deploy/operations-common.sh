@@ -87,6 +87,90 @@ cleanup_unverified_backup_artifacts() {
   fi
 }
 
+require_bootstrap_recovery_clear() {
+  local marker=$1
+  [[ ! -e $marker && ! -L $marker ]] || {
+    echo "bootstrap failure requires operator recovery review; clear $marker only after stateful volumes are dispositioned" >&2
+    return 1
+  }
+}
+
+record_failed_bootstrap_activation() {
+  local current=$1 release=$2 marker=$3 sha=$4 digest=$5 phase=$6 cleanup=$7
+  shift 7
+  local marker_tmp=$marker.tmp.$$ resolved="" canonical_release=""
+  umask 077
+  {
+    printf 'release_sha=%s\n' "$sha"
+    printf 'image_digest=%s\n' "$digest"
+    printf 'phase=%s\n' "$phase"
+    printf 'failed_at=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    printf 'recovery=operator-review-required\n'
+  } > "$marker_tmp"
+  if ! mv -f -- "$marker_tmp" "$marker"; then
+    rm -f -- "$marker_tmp"
+    echo "critical: could not record bootstrap recovery state; leaving current untouched" >&2
+    return 1
+  fi
+
+  "$cleanup" stop web "$@" || echo "warning: failed to stop failed bootstrap web service" >&2
+  "$cleanup" rm -f web "$@" || echo "warning: failed to remove failed bootstrap web service" >&2
+  if [[ -L $current ]]; then
+    resolved=$(realpath -- "$current" 2>/dev/null || true)
+    canonical_release=$(realpath -- "$release" 2>/dev/null || true)
+    if [[ -n $canonical_release && $resolved == "$canonical_release" ]]; then
+      rm -f -- "$current"
+    else
+      echo "warning: current changed during bootstrap cleanup; leaving it untouched" >&2
+    fi
+  fi
+}
+
+prune_application_images() {
+  local root=$1 repository=$2 docker_bin=${DOCKER_BIN:-docker}
+  [[ $repository =~ ^[a-z0-9.-]+(:[0-9]+)?/[a-z0-9._/-]+$ ]] \
+    || { echo "invalid application image repository" >&2; return 1; }
+  local releases=$root/releases file value listed_repository tag listed_digest digest ref
+  local -a retained=() candidates=() candidate_digests=()
+  while IFS= read -r -d '' file; do
+    IFS= read -r value < "$file" || true
+    [[ $value =~ ^${repository//./\\.}@sha256:[0-9a-f]{64}$ ]] && retained+=("${value#*@}")
+  done < <(find "$releases" -mindepth 2 -maxdepth 2 -type f -name image.digest -print0)
+
+  while IFS=$'\t' read -r listed_repository tag listed_digest; do
+    [[ $listed_repository == "$repository" && $tag =~ ^[0-9a-f]{40}$ ]] || continue
+    digest=$listed_digest
+    if [[ ! $digest =~ ^sha256:[0-9a-f]{64}$ ]]; then
+      digest=""
+      while IFS= read -r ref; do
+        if [[ $ref =~ ^${repository//./\\.}@sha256:[0-9a-f]{64}$ ]]; then digest=${ref#*@}; break; fi
+      done < <("$docker_bin" image inspect --format '{{join .RepoDigests "\n"}}' "$repository:$tag" 2>/dev/null)
+    fi
+    [[ $digest =~ ^sha256:[0-9a-f]{64}$ ]] || {
+      echo "warning: cannot resolve digest for application image $repository:$tag; leaving it untouched" >&2
+      continue
+    }
+    local keep=0 retained_digest
+    for retained_digest in "${retained[@]}"; do [[ $digest == "$retained_digest" ]] && keep=1; done
+    if ((keep == 0)); then candidates+=("$repository:$tag"); candidate_digests+=("$digest"); fi
+  done < <("$docker_bin" image ls --format '{{.Repository}}\t{{.Tag}}\t{{.Digest}}')
+
+  local i seen prior
+  for ((i=0; i<${#candidates[@]}; i++)); do
+    ref=${candidates[i]}
+    "$docker_bin" image rm "$ref" >/dev/null 2>&1 \
+      || echo "warning: could not remove unretained application image $ref (it may be in use)" >&2
+    digest=${candidate_digests[i]}
+    seen=0
+    for prior in "${candidate_digests[@]:0:i}"; do [[ $prior == "$digest" ]] && seen=1; done
+    if ((seen == 0)); then
+      ref=$repository@$digest
+      "$docker_bin" image rm "$ref" >/dev/null 2>&1 \
+        || echo "warning: could not remove unretained application digest $ref (it may be in use)" >&2
+    fi
+  done
+}
+
 record_release_lineage_and_prune() {
   local root=$1 sha=$2 releases lineage
   releases=$root/releases

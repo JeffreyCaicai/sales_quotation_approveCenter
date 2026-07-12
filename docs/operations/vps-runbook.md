@@ -30,6 +30,8 @@ The directory layout is:
 
 ```text
 /opt/sales-quotation/
+  bin/install-release
+  bootstrap/deploy/
   current -> releases/<40-character-git-sha>
   releases/
   shared/.env.production
@@ -65,11 +67,13 @@ resolve the mutable tag. Delivery checks out that exact trusted commit and uses
 its tested manifest validator rather than maintaining a second parser:
 
 ```sh
-/opt/sales-quotation/current/deploy/install-release.sh "$GIT_SHA" \
+/opt/sales-quotation/bin/install-release "$GIT_SHA" \
   "ghcr.io/jeffreycaicai/sales_quotation_approvecenter@sha256:$DIGEST"
 ```
 
-For the first release only, invoke the checked-out `deploy/install-release.sh` directly. It permits bootstrap only when both `current` and the two named stateful volumes are absent. If volumes exist without `current`, it fails closed because it cannot prove a complete pre-deploy backup; recover or explicitly disposition that state before continuing.
+Provisioning installs the stable launcher and a reviewed bootstrap deploy-script set as root-owned, non-writable files. The launcher uses `current` only when it resolves to an exact 40-character release directory with a regular installer; otherwise it uses the fixed bootstrap installer. Release paths that escape `releases/` are never executed. The same stable command handles the first release and permits bootstrap only when both `current` and the two named stateful volumes are absent.
+
+If first activation fails during startup or health checks, the installer stops and removes only the failed web container, removes `current` only while it still points to that failed release, leaves PostgreSQL and MinIO volumes untouched, and atomically records `/opt/sales-quotation/bootstrap-failed`. Later attempts fail closed with an operator recovery message. Review the failure and the potentially migrated stateful volumes, then either recover/disposition that state or deliberately remove the marker before retrying; never clear it as an automated retry step.
 
 The installer performs an encrypted off-VPS backup before pulling. It resolves
 the tag to a repository digest and refuses to continue unless that digest
@@ -79,7 +83,10 @@ bundle, starts only private PostgreSQL and MinIO, and runs
 changing web traffic. It atomically switches `current`, invokes the mandatory
 `production-up.sh` wrapper, checks health on loopback and `SITE_ORIGIN`, and
 automatically returns to the prior release on failure. Current plus two prior
-releases are retained.
+releases and their exact application image digests are retained. Only unretained
+40-character SHA tags in the application repository are eligible for image
+removal; state images, unrelated repositories, and retained rollback images are
+left untouched. An in-use image produces an actionable warning and is retained.
 
 Install, rollback, backup, and restore share one host-wide operations lock. Nested backup/rollback calls inherit the held lock descriptor, so manual and systemd operations serialize without deadlock. Release retention follows the recorded switch lineage, not directory timestamps.
 

@@ -106,7 +106,7 @@ jobs:
           ssh -F /dev/null -i "$key_file" -p "$VPS_PORT" \
             -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes \
             -o "UserKnownHostsFile=$known_hosts" -- "$VPS_USER@$VPS_HOST" \
-            /opt/sales-quotation/current/deploy/install-release.sh "$RELEASE_SHA" "$APP_IMAGE"
+            /opt/sales-quotation/bin/install-release "$RELEASE_SHA" "$APP_IMAGE"
 
   rollback:
     if: github.event_name == 'workflow_dispatch'
