@@ -23,6 +23,7 @@ interface ComposeService {
   restart?: string;
   healthcheck?: unknown;
   depends_on?: Record<string, { condition?: string }>;
+  networks?: string[];
 }
 
 interface ComposeConfig {
@@ -59,7 +60,11 @@ describe("production container packaging", () => {
 
     expect(compose.services.web.ports).toEqual(["127.0.0.1:3000:3000"]);
     expect(Object.entries(compose.services).filter(([, service]) => service.ports)).toHaveLength(1);
+    expect(compose.networks.quotation_ingress.internal).not.toBe(true);
     expect(compose.networks.quotation_internal.internal).toBe(true);
+    expect(compose.services.web.networks).toEqual(["quotation_ingress", "quotation_internal"]);
+    expect(compose.services.postgres.networks).toEqual(["quotation_internal"]);
+    expect(compose.services.minio.networks).toEqual(["quotation_internal"]);
     expect(Object.keys(compose.volumes)).toEqual(["postgres_data", "minio_data"]);
     expect(compose.services.postgres.volumes).toContain("postgres_data:/var/lib/postgresql/data");
     expect(compose.services.minio.volumes).toContain("minio_data:/data");
