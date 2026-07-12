@@ -97,7 +97,7 @@ describe("continuous integration workflow", () => {
     expect(ci.jobs.publish_image.needs).toEqual(["quality", "integration", "container", "browser_smoke"]);
     expect(ci.jobs.publish_image.if).toContain("github.event_name == 'push'");
     expect(ci.jobs.publish_image.if).toContain("github.ref == 'refs/heads/main'");
-    expect(ci.jobs.publish_image.permissions).toEqual({ packages: "write" });
+    expect(ci.jobs.publish_image.permissions).toEqual({ contents: "read", packages: "write" });
     const upload = ci.jobs.container.steps.find((step) => step.uses?.startsWith("actions/upload-artifact@"));
     expect(upload?.if).toContain("github.event_name == 'push'");
     expect(upload?.if).toContain("github.ref == 'refs/heads/main'");
@@ -105,6 +105,11 @@ describe("continuous integration workflow", () => {
     expect(promotion).toContain("docker load");
     expect(promotion).toContain("docker push");
     expect(promotion).not.toContain("docker build");
+    expect(promotion).toContain('docker push "$tagged_image" 2>&1 | tee "$push_log"');
+    expect(promotion).toContain("extract-pushed-image-digest.sh");
+    const afterPush = promotion.slice(promotion.indexOf('docker push "$tagged_image"'));
+    expect(afterPush).not.toContain("docker pull");
+    expect(afterPush).not.toContain("docker image inspect");
     expect(promotion).toContain("RELEASE_SHA %s\\nAPP_IMAGE %s\\nGITHUB_RUN_ID %s\\n");
     expect(source).toContain("release-manifest-${{ github.sha }}-${{ github.run_id }}");
   });
@@ -138,7 +143,7 @@ describe("production delivery workflow", () => {
   test("grants package write only to publication and no GitHub token access to SSH jobs", () => {
     const delivery = workflow(".github/workflows/deploy-production.yml");
     expect(delivery.permissions).toEqual({});
-    expect(delivery.jobs.resolve_image.permissions).toEqual({ actions: "read", packages: "read" });
+    expect(delivery.jobs.resolve_image.permissions).toEqual({ actions: "read", contents: "read", packages: "read" });
     expect(delivery.jobs.deploy.permissions).toEqual({});
     expect(delivery.jobs.rollback.permissions).toEqual({});
     expect([...new Set(secretReferences(read(".github/workflows/ci.yml")))]).toEqual(["GITHUB_TOKEN"]);
@@ -158,7 +163,11 @@ describe("production delivery workflow", () => {
     expect(delivery).toContain('docker pull "$APP_IMAGE"');
     expect(delivery).not.toContain('IMAGE_REPOSITORY:$RELEASE_SHA');
     expect(delivery).not.toContain("tagged_image");
-    expect(delivery).toContain("mapfile -t manifest_lines");
+    expect(delivery).toContain("scripts/validate-release-manifest.sh");
+    expect(delivery).toContain("ref: ${{ github.event.workflow_run.head_sha }}");
+    expect(delivery).toContain("persist-credentials: false");
+    expect(delivery).not.toContain("mapfile -t manifest_lines");
+    expect(delivery).not.toContain("invalid_manifest()");
     expect(delivery).not.toMatch(/(?:source|eval)\s+[^\n]*manifest/);
     expect(delivery).toContain("APP_IMAGE");
     expect(delivery).toMatch(/install-release\.sh[^\n]*"\$RELEASE_SHA"[^\n]*"\$APP_IMAGE"/);

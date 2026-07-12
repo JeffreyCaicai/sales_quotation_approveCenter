@@ -28,4 +28,4 @@ read -r run_key manifest_run_id run_extra <<< "${manifest_lines[2]}"
 [[ $manifest_image =~ ^ghcr\.io/jeffreycaicai/sales_quotation_approvecenter@sha256:[0-9a-f]{64}$ ]] || invalid
 [[ $manifest_run_id =~ ^[1-9][0-9]*$ && $manifest_run_id == "$expected_run_id" ]] || invalid
 
-printf '%s\n%s\n' "$manifest_sha" "$manifest_image"
+printf 'release_sha=%s\napp_image=%s\n' "$manifest_sha" "$manifest_image"

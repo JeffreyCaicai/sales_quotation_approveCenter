@@ -58,9 +58,11 @@ Provisioning copies any existing `worldcup-lottery` site files into `/var/backup
 
 The deploy workflow passes a 40-character lowercase Git SHA and the canonical
 digest from the immutable release manifest created after GHCR accepted that
-SHA-tagged image. The manifest name and contents are bound to the successful
+SHA-tagged image. CI obtains that digest only from the successful push output,
+not a later tag query. The manifest name and contents are bound to the successful
 triggering CI run ID; delivery pulls its `repo@sha256` directly and does not
-resolve the mutable tag:
+resolve the mutable tag. Delivery checks out that exact trusted commit and uses
+its tested manifest validator rather than maintaining a second parser:
 
 ```sh
 /opt/sales-quotation/current/deploy/install-release.sh "$GIT_SHA" \

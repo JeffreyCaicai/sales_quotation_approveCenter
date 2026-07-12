@@ -25,7 +25,7 @@ describe("release manifest validation", () => {
   test("accepts the exact fixed-format SHA, digest, and triggering run ID", () => {
     const result = validate(valid);
     expect(result.status).toBe(0);
-    expect(result.stdout).toBe(`${sha}\n${digest}\n`);
+    expect(result.stdout).toBe(`release_sha=${sha}\napp_image=${digest}\n`);
   });
 
   test.each([

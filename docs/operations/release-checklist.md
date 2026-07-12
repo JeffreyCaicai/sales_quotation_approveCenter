@@ -41,8 +41,9 @@ operations log; never copy secret values into that record.
       only for the trusted `main` push. Confirm the gated CI publication job
       downloaded that same-run artifact, loaded it without rebuilding, and
       pushed the full Git SHA tag only after every required job passed. Confirm
-      it then recorded the canonical digest in an immutable release manifest
-      named with both that SHA and CI run ID.
+      it extracted exactly one canonical digest from the complete push output,
+      performed no subsequent tag lookup, and recorded that digest in an
+      immutable release manifest named with both that SHA and CI run ID.
 
 Local Docker CLI absence is not a release waiver. The mandatory GitHub CI
 Docker, PostgreSQL, MinIO, image-build, and browser jobs remain the release
@@ -71,7 +72,7 @@ gate.
 - [ ] Confirm the CI publication job pushed only the exact artifact under the
       full Git SHA tag. Confirm the pull-only delivery job downloaded the
       triggering run's exact manifest, rejected duplicate/mismatched fields,
-      and pulled its recorded
+      using the shared validator from the exact trusted commit, and pulled its recorded
       `ghcr.io/jeffreycaicai/sales_quotation_approvecenter@sha256:<64 hex>`
       directly. It must not derive a digest from the SHA tag, rebuild, or push.
 - [ ] Confirm the production job passed both the full SHA and that exact digest
