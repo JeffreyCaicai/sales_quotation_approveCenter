@@ -1,0 +1,15 @@
+[Unit]
+Description=Encrypted sales quotation backup
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=deploy
+Group=deploy
+ExecStart=/opt/sales-quotation/current/deploy/backup.sh
+PrivateTmp=true
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/sales-quotation/backups

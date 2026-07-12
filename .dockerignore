@@ -11,5 +11,6 @@ coverage
 exports
 *.log
 docker-compose*.yml
+!docker-compose.yml
 docs
 tests

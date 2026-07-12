@@ -1,0 +1,10 @@
+[Unit]
+Description=Daily sales quotation backup timer
+
+[Timer]
+OnCalendar=*-*-* 02:15:00 Asia/Jakarta
+RandomizedDelaySec=30m
+Persistent=true
+
+[Install]
+WantedBy=timers.target
