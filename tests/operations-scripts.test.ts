@@ -1,5 +1,5 @@
 import { execFileSync, spawnSync } from "node:child_process";
-import { chmodSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { describe, expect, test } from "vitest";
@@ -14,6 +14,61 @@ const scripts = [
 ];
 const shaA = "a".repeat(40);
 const shaB = "b".repeat(40);
+const imageDigest = `ghcr.io/jeffreycaicai/sales_quotation_approvecenter@sha256:${"c".repeat(64)}`;
+
+const runInstallWithPolicy = (policyAssignments: string) => {
+  const root = mkdtempSync(join(tmpdir(), "quotation-install-policy-"));
+  const bin = join(root, "bin");
+  const state = join(root, "state");
+  const previousRelease = join(root, "releases", shaA);
+  const envFile = join(root, "shared", ".env.production");
+  const eventsFile = join(root, "events");
+  mkdirSync(bin);
+  mkdirSync(state);
+  mkdirSync(join(previousRelease, "deploy"), { recursive: true });
+  mkdirSync(join(root, "shared"));
+  writeFileSync(envFile, [
+    "APP_IMAGE=placeholder",
+    "SITE_ORIGIN=https://example.test",
+    "POSTGRES_DB=quotation",
+    "POSTGRES_USER=quotation",
+    "POSTGRES_PASSWORD=secret",
+    "DATABASE_URL=postgres://quotation:secret@postgres:5432/quotation",
+    "MINIO_ROOT_USER=minio",
+    "MINIO_ROOT_PASSWORD=secret",
+    "S3_ENDPOINT=http://minio:9000",
+    "S3_REGION=us-east-1",
+    "S3_ACCESS_KEY_ID=access",
+    "S3_SECRET_ACCESS_KEY=secret",
+    "S3_BUCKET=quotation",
+    "AUTH_SECRET=secret",
+    policyAssignments,
+  ].join("\n"));
+  writeFileSync(join(bin, "flock"), '#!/bin/sh\nprintf "lock\\n" >> "$EVENT_LOG"\n');
+  writeFileSync(join(bin, "docker"), '#!/bin/sh\nprintf "pull\\n" >> "$EVENT_LOG"\nexit 42\n');
+  writeFileSync(join(previousRelease, "deploy", "backup.sh"), '#!/bin/sh\nprintf "backup\\n" >> "$EVENT_LOG"\n');
+  chmodSync(join(bin, "flock"), 0o755);
+  chmodSync(join(bin, "docker"), 0o755);
+  chmodSync(join(previousRelease, "deploy", "backup.sh"), 0o755);
+  symlinkSync(previousRelease, join(state, "current"));
+
+  const result = spawnSync("bash", ["deploy/install-release.sh", shaB, imageDigest], {
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      EVENT_LOG: eventsFile,
+      OPERATIONS_ALLOW_NON_DEPLOY_TEST_USER: "1",
+      SALES_QUOTATION_ROOT: root,
+      PATH: `${bin}:${process.env.PATH}`,
+    },
+  });
+  return {
+    audit: join(state, "unprotected-deployments.log"),
+    events: existsSync(eventsFile) ? read(eventsFile).trim().split("\n") : [],
+    result,
+    root,
+  };
+};
 
 describe("operations scripts static safety", () => {
   test("backup policy accepts only an explicit optional or required value", () => {
@@ -214,13 +269,38 @@ describe("operations scripts static safety", () => {
     expect(install.indexOf("archive_bootstrap_recovery")).toBeLessThan(install.lastIndexOf("trap - ERR"));
   });
 
-  test("release installation validates and applies backup policy before image pull", () => {
-    const install = read("deploy/install-release.sh");
-    expect(install).toContain('read_backup_policy "$env_file"');
-    expect(install).toContain('prepare_predeployment_recovery_point "$BACKUP_POLICY_VALUE"');
-    expect(install.indexOf('read_backup_policy "$env_file"')).toBeLessThan(install.indexOf("acquire_operations_lock"));
-    expect(install.indexOf("acquire_operations_lock")).toBeLessThan(install.indexOf("prepare_predeployment_recovery_point"));
-    expect(install.indexOf("prepare_predeployment_recovery_point")).toBeLessThan(install.indexOf('docker pull "$tagged_image"'));
+  test.each([
+    ["missing", ""],
+    ["empty", "BACKUP_POLICY="],
+    ["duplicate", "BACKUP_POLICY=optional\nBACKUP_POLICY=required"],
+    ["invalid", "BACKUP_POLICY=demo"],
+  ])("release installation rejects %s backup policy before lock or pull", (_case, policyAssignments) => {
+    const harness = runInstallWithPolicy(policyAssignments);
+    try {
+      expect(harness.result.status).not.toBe(0);
+      expect(harness.events).toEqual([]);
+    } finally { rmSync(harness.root, { recursive: true, force: true }); }
+  });
+
+  test("required backup policy executes backup after lock and before image pull", () => {
+    const harness = runInstallWithPolicy("BACKUP_POLICY=required");
+    try {
+      expect(harness.result.status).toBe(42);
+      expect(harness.events).toEqual(["lock", "backup", "pull"]);
+      expect(existsSync(harness.audit)).toBe(false);
+    } finally { rmSync(harness.root, { recursive: true, force: true }); }
+  });
+
+  test("optional backup policy records an exact warning and audit before image pull", () => {
+    const harness = runInstallWithPolicy("BACKUP_POLICY=optional");
+    try {
+      expect(harness.result.status).toBe(42);
+      expect(harness.events).toEqual(["lock", "pull"]);
+      expect(harness.result.stderr).toContain("WARNING: off-VPS backup is disabled");
+      expect(read(harness.audit)).toMatch(
+        new RegExp(`^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z\\t${shaB}\\tBACKUP_POLICY=optional\\n$`),
+      );
+    } finally { rmSync(harness.root, { recursive: true, force: true }); }
   });
 
   test("environment and runbooks make demo bypass explicit and production transition mandatory", () => {
