@@ -1,12 +1,34 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
+recover=0
+if [[ ${1:-} == --recover-bootstrap ]]; then recover=1; shift; fi
+[[ ${1:-} != --* && $# -eq 2 ]] || {
+  echo "usage: $0 [--recover-bootstrap] <40-character-sha> <canonical-image-digest>" >&2
+  exit 2
+}
+sha=$1
+digest=$2
+repository=ghcr.io/jeffreycaicai/sales_quotation_approvecenter
+[[ $sha =~ ^[0-9a-f]{40}$ \
+  && $digest =~ ^ghcr\.io/jeffreycaicai/sales_quotation_approvecenter@sha256:[0-9a-f]{64}$ ]] \
+  || { echo "invalid release SHA or canonical image digest" >&2; exit 2; }
+if ((recover == 1)); then set -- --recover-bootstrap "$sha" "$digest"; else set -- "$sha" "$digest"; fi
+
 if [[ ${OPERATIONS_ALLOW_NON_DEPLOY_TEST_USER:-} == 1 ]]; then
   root=${SALES_QUOTATION_ROOT:-/opt/sales-quotation}
 else
   root=/opt/sales-quotation
 fi
 [[ $root = /* && $root != */../* ]] || { echo "invalid sales quotation root" >&2; exit 2; }
+bootstrap_marker=$root/state/bootstrap-failed
+if ((recover == 1)); then
+  [[ -f $bootstrap_marker && ! -L $bootstrap_marker ]] \
+    || { echo "--recover-bootstrap requires an active regular bootstrap failure marker" >&2; exit 1; }
+elif [[ -e $bootstrap_marker || -L $bootstrap_marker ]]; then
+  echo "bootstrap failure requires explicit --recover-bootstrap operator recovery" >&2
+  exit 1
+fi
 
 releases=$root/releases
 current=$root/current

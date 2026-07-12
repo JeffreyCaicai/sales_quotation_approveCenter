@@ -11,17 +11,22 @@ script_dir=$(cd -- "$(dirname -- "$0")" && pwd)
 deploy_uid=$(id -u)
 export XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR:-/run/user/$deploy_uid}
 export DOCKER_HOST=${DOCKER_HOST:-unix://$XDG_RUNTIME_DIR/docker.sock}
+recover_bootstrap=0
+if [[ ${1:-} == --recover-bootstrap ]]; then recover_bootstrap=1; shift; fi
 sha=${1:-}
 [[ $sha =~ ^[0-9a-f]{40}$ ]] || { echo "release SHA must be 40 lowercase hexadecimal characters" >&2; exit 2; }
 expected_digest=${2:-}
 repository=ghcr.io/jeffreycaicai/sales_quotation_approvecenter
 [[ $expected_digest =~ ^ghcr\.io/jeffreycaicai/sales_quotation_approvecenter@sha256:[0-9a-f]{64}$ ]] \
   || { echo "canonical production image digest must be ${repository}@sha256:<64 lowercase hexadecimal characters>" >&2; exit 2; }
+[[ $# -eq 2 ]] || { echo "usage: $0 [--recover-bootstrap] <40-character-sha> <canonical-image-digest>" >&2; exit 2; }
 
 root=${SALES_QUOTATION_ROOT:-/opt/sales-quotation}
 [[ $root = /* && $root != */../* ]] || { echo "invalid sales quotation root" >&2; exit 2; }
 releases=$root/releases
 current=$root/current
+state=$root/state
+bootstrap_marker=$state/bootstrap-failed
 env_file=$root/shared/.env.production
 tagged_image=$repository:$sha
 [[ -r $env_file ]] || { echo "production environment file is not readable" >&2; exit 1; }
@@ -33,7 +38,7 @@ validate_env_file "$env_file" APP_IMAGE SITE_ORIGIN POSTGRES_DB POSTGRES_USER PO
   MINIO_ROOT_USER MINIO_ROOT_PASSWORD S3_ENDPOINT S3_REGION S3_ACCESS_KEY_ID S3_SECRET_ACCESS_KEY S3_BUCKET AUTH_SECRET
 acquire_operations_lock
 mkdir -p "$releases"
-require_bootstrap_recovery_clear "$root/bootstrap-failed"
+authorize_bootstrap_recovery "$bootstrap_marker" "$recover_bootstrap"
 
 previous_release=""
 previous_sha=""
@@ -46,12 +51,20 @@ elif [[ -e $current ]]; then
   echo "current must be a release symlink" >&2
   exit 1
 fi
+if ((recover_bootstrap == 1)) && [[ -n $previous_release ]]; then
+  echo "bootstrap recovery requires no current release" >&2
+  exit 1
+fi
 if [[ -n $previous_release ]]; then
   "$previous_release/deploy/backup.sh"
 elif docker volume inspect sales-quotation_postgres_data >/dev/null 2>&1 \
   || docker volume inspect sales-quotation_minio_data >/dev/null 2>&1; then
-  echo "stateful volumes exist without a current release; refusing an unbacked bootstrap" >&2
-  exit 1
+  if ((recover_bootstrap == 1)); then
+    echo "authorized bootstrap recovery: preserving known partial stateful volumes" >&2
+  else
+    echo "stateful volumes exist without a current release; refusing an unbacked bootstrap" >&2
+    exit 1
+  fi
 else
   echo "bootstrap: no current release or stateful volumes; no pre-deploy data exists to back up" >&2
 fi
@@ -97,7 +110,7 @@ rollback_on_error() {
   if ((switched == 1)) && [[ -n $previous_sha ]]; then
     "$script_dir/rollback.sh" "$previous_sha" || true
   elif [[ -z $previous_sha ]] && ((bootstrap_state_touched == 1)); then
-    record_failed_bootstrap_activation "$current" "$release" "$root/bootstrap-failed" \
+    record_failed_bootstrap_activation "$current" "$release" "$bootstrap_marker" \
       "$sha" "$digest" "$bootstrap_failure_phase" compose
   fi
   exit "$status"
@@ -127,6 +140,9 @@ for ((attempt=1; attempt<=HEALTH_ATTEMPTS; attempt++)); do
   ((attempt < HEALTH_ATTEMPTS)) || false
   sleep 2
 done
+if ((recover_bootstrap == 1)); then
+  archive_bootstrap_recovery "$bootstrap_marker" "$state/history" "$sha"
+fi
 switched=0
 trap - ERR
 record_release_lineage_and_prune "$root" "$sha"

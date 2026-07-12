@@ -37,7 +37,7 @@ describe("operations scripts static safety", () => {
       expect(read(path)).toContain("acquire_operations_lock");
       expect(read(path)).toContain("operations-common.sh");
     }
-    expect(read("deploy/sales-quotation-backup.service")).toContain("operations.lock");
+    expect(read("deploy/sales-quotation-backup.service")).toContain("/opt/sales-quotation/state");
   });
 
   test("dotenv is parsed as data and never sourced or evaluated", () => {
@@ -107,6 +107,9 @@ describe("operations scripts static safety", () => {
     const provision = read("deploy/provision-vps.sh");
     expect(provision).toMatch(/install -d -m 0700 -o deploy -g deploy \/opt\/sales-quotation\/backups/);
     expect(read("deploy/sales-quotation-backup.service")).toContain("ReadWritePaths=/opt/sales-quotation/backups");
+    expect(provision).toMatch(/install -d -m 0750 -o deploy -g deploy \/opt\/sales-quotation\/state/);
+    expect(read("deploy/sales-quotation-backup.service")).toContain("ReadWritePaths=/opt/sales-quotation/state");
+    expect(provision).not.toContain("/opt/sales-quotation/.operations.lock");
   });
 
   test("provisioning installs a root-owned stable launcher and reviewed bootstrap scripts", () => {
@@ -134,6 +137,17 @@ describe("operations scripts static safety", () => {
     expect(install).toContain("SITE_ORIGIN");
     expect(install).toContain("docker volume inspect sales-quotation_postgres_data");
     expect(install).toContain("docker volume inspect sales-quotation_minio_data");
+    expect(install).toContain("--recover-bootstrap");
+    expect(install).toContain("archive_bootstrap_recovery");
+    expect(install.indexOf("archive_bootstrap_recovery")).toBeGreaterThan(install.lastIndexOf("/api/health"));
+    expect(install.indexOf("archive_bootstrap_recovery")).toBeLessThan(install.lastIndexOf("trap - ERR"));
+  });
+
+  test("rollback prunes exact application images only after recording successful lineage", () => {
+    const rollback = read("deploy/rollback.sh");
+    expect(rollback).toContain("ghcr.io/jeffreycaicai/sales_quotation_approvecenter");
+    expect(rollback).toContain("prune_application_images");
+    expect(rollback.indexOf("prune_application_images")).toBeGreaterThan(rollback.indexOf("record_release_lineage_and_prune"));
   });
 
   test("backup uses custom PostgreSQL dump, MinIO mirror/checksums, age, verified offsite copy and retention", () => {
@@ -238,7 +252,9 @@ describe("operations scripts static safety", () => {
       "maintenance window", "quiesce", "operations lock",
     ]) expect(runbook.toLowerCase()).toContain(phrase.toLowerCase());
     expect(runbook).toContain("/opt/sales-quotation/bin/install-release");
-    expect(runbook).toContain("bootstrap-failed");
+    expect(runbook).toContain("state/bootstrap-failed");
+    expect(runbook).toContain("--recover-bootstrap");
+    expect(runbook).not.toContain("remove the marker");
     expect(runbook.toLowerCase()).toContain("operator");
   });
 });
@@ -323,18 +339,26 @@ exit 0
     const release = join(root, "releases", shaA); const outside = join(root, "outside");
     mkdirSync(join(root, "bootstrap", "deploy"), { recursive: true });
     mkdirSync(join(release, "deploy"), { recursive: true }); mkdirSync(outside);
-    writeFileSync(join(root, "bootstrap", "deploy", "install-release.sh"), "#!/bin/sh\nprintf 'bootstrap:%s:%s' \"$1\" \"$2\"\n");
-    writeFileSync(join(release, "deploy", "install-release.sh"), "#!/bin/sh\nprintf 'current:%s:%s' \"$1\" \"$2\"\n");
+    writeFileSync(join(root, "bootstrap", "deploy", "install-release.sh"), "#!/bin/sh\nprintf 'bootstrap:%s' \"$*\"\n");
+    writeFileSync(join(release, "deploy", "install-release.sh"), "#!/bin/sh\nprintf 'current:%s' \"$*\"\n");
     writeFileSync(join(outside, "install-release.sh"), "#!/bin/sh\nprintf escaped\n");
     for (const path of [join(root, "bootstrap", "deploy", "install-release.sh"), join(release, "deploy", "install-release.sh"), join(outside, "install-release.sh")]) chmodSync(path, 0o755);
     const env = { ...process.env, SALES_QUOTATION_ROOT: root, OPERATIONS_ALLOW_NON_DEPLOY_TEST_USER: "1" };
+    const digest = `ghcr.io/jeffreycaicai/sales_quotation_approvecenter@sha256:${"a".repeat(64)}`;
     try {
       execFileSync("ln", ["-s", release, join(root, "current")]);
-      expect(execFileSync(resolve("deploy/install-release-launcher.sh"), ["one", "two"], { encoding: "utf8", env })).toBe("current:one:two");
+      expect(execFileSync(resolve("deploy/install-release-launcher.sh"), [shaB, digest], { encoding: "utf8", env })).toBe(`current:${shaB} ${digest}`);
+      expect(spawnSync(resolve("deploy/install-release-launcher.sh"), ["--recover-bootstrap", shaB, digest], { encoding: "utf8", env }).status).not.toBe(0);
+      mkdirSync(join(root, "state")); writeFileSync(join(root, "state", "bootstrap-failed"), `release_sha=${shaA}\nrecovery=operator-review-required\n`);
+      expect(spawnSync(resolve("deploy/install-release-launcher.sh"), [shaB, digest], { encoding: "utf8", env }).status).not.toBe(0);
+      expect(execFileSync(resolve("deploy/install-release-launcher.sh"), ["--recover-bootstrap", shaB, digest], { encoding: "utf8", env })).toBe(`current:--recover-bootstrap ${shaB} ${digest}`);
+      expect(spawnSync(resolve("deploy/install-release-launcher.sh"), ["--recover-bootstrap", shaB], { encoding: "utf8", env }).status).not.toBe(0);
+      expect(spawnSync(resolve("deploy/install-release-launcher.sh"), ["--unsafe", shaB, digest], { encoding: "utf8", env }).status).not.toBe(0);
+      rmSync(join(root, "state", "bootstrap-failed"));
       rmSync(join(root, "current")); execFileSync("ln", ["-s", outside, join(root, "current")]);
-      expect(execFileSync(resolve("deploy/install-release-launcher.sh"), ["one", "two"], { encoding: "utf8", env })).toBe("bootstrap:one:two");
+      expect(execFileSync(resolve("deploy/install-release-launcher.sh"), [shaB, digest], { encoding: "utf8", env })).toBe(`bootstrap:${shaB} ${digest}`);
       rmSync(join(root, "bootstrap", "deploy"), { recursive: true }); execFileSync("ln", ["-s", outside, join(root, "bootstrap", "deploy")]);
-      const escapedBootstrap = spawnSync(resolve("deploy/install-release-launcher.sh"), ["one", "two"], { encoding: "utf8", env });
+      const escapedBootstrap = spawnSync(resolve("deploy/install-release-launcher.sh"), [shaB, digest], { encoding: "utf8", env });
       expect(escapedBootstrap.status).not.toBe(0);
       expect(escapedBootstrap.stdout).not.toContain("escaped");
     } finally { rmSync(root, { recursive: true, force: true }); }
@@ -342,8 +366,8 @@ exit 0
 
   test.each(["startup", "health"])("failed first %s activation removes only its web and current link, then records recovery state", (phase) => {
     const root = mkdtempSync(join(tmpdir(), `quotation-bootstrap-${phase}-`)); const release = join(root, "releases", shaA);
-    const marker = join(root, "bootstrap-failed"); const log = join(root, "log");
-    mkdirSync(release, { recursive: true }); mkdirSync(join(root, "volumes")); writeFileSync(join(root, "volumes", "preserve"), "data");
+    const marker = join(root, "state", "bootstrap-failed"); const log = join(root, "log");
+    mkdirSync(release, { recursive: true }); mkdirSync(join(root, "state")); mkdirSync(join(root, "volumes")); writeFileSync(join(root, "volumes", "preserve"), "data");
     execFileSync("ln", ["-s", release, join(root, "current")]);
     try {
       execFileSync("bash", ["-c", `. deploy/operations-common.sh
@@ -360,13 +384,63 @@ exit 0
   });
 
   test("bootstrap recovery marker fails closed until an operator clears it", () => {
-    const root = mkdtempSync(join(tmpdir(), "quotation-bootstrap-marker-")); const marker = join(root, "bootstrap-failed");
+    const root = mkdtempSync(join(tmpdir(), "quotation-bootstrap-marker-")); const marker = join(root, "state", "bootstrap-failed");
+    mkdirSync(join(root, "state"));
     writeFileSync(marker, "recovery=operator-review-required\n");
     try {
       const result = spawnSync("bash", ["-c", '. deploy/operations-common.sh; require_bootstrap_recovery_clear "$1"', "bash", marker], { encoding: "utf8" });
       expect(result.status).not.toBe(0);
       expect(result.stderr).toContain("operator recovery");
     } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+
+  test("bootstrap recovery authorization requires the marker and archives it only after explicit completion", () => {
+    const root = mkdtempSync(join(tmpdir(), "quotation-bootstrap-recovery-")); const state = join(root, "state");
+    const marker = join(state, "bootstrap-failed"); const history = join(state, "history");
+    mkdirSync(state);
+    try {
+      expect(spawnSync("bash", ["-c", '. deploy/operations-common.sh; authorize_bootstrap_recovery "$1" 1', "bash", marker], { encoding: "utf8" }).status).not.toBe(0);
+      writeFileSync(marker, `release_sha=${shaA}\nrecovery=operator-review-required\n`);
+      expect(spawnSync("bash", ["-c", '. deploy/operations-common.sh; authorize_bootstrap_recovery "$1" 0', "bash", marker], { encoding: "utf8" }).status).not.toBe(0);
+      expect(spawnSync("bash", ["-c", '. deploy/operations-common.sh; authorize_bootstrap_recovery "$1" 1', "bash", marker], { encoding: "utf8" }).status).toBe(0);
+      expect(read(marker)).toContain("operator-review-required");
+      execFileSync("bash", ["-c", `. deploy/operations-common.sh
+        cleanup_noop(){ :; }
+        record_failed_bootstrap_activation "$1/current" "$1/releases/$4" "$2" "$4" "$5" health cleanup_noop
+      `, "bash", root, marker, history, shaA, `ghcr.io/org/app@sha256:${"a".repeat(64)}`]);
+      expect(read(marker)).toContain("phase=health");
+      expect(spawnSync("bash", ["-c", '. deploy/operations-common.sh; authorize_bootstrap_recovery "$1" 1', "bash", marker], { encoding: "utf8" }).status).toBe(0);
+      execFileSync("bash", ["-c", '. deploy/operations-common.sh; archive_bootstrap_recovery "$1" "$2" "$3"', "bash", marker, history, shaB]);
+      expect(() => readFileSync(marker)).toThrow();
+      const archives = execFileSync("find", [history, "-type", "f"], { encoding: "utf8" }).trim().split("\n");
+      expect(archives).toHaveLength(1);
+      expect(read(archives[0])).toContain("operator-review-required");
+      expect(lstatSync(archives[0]).mode & 0o777).toBe(0o400);
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+
+  test("marker write errors never short-circuit failed web and current cleanup", () => {
+    const root = mkdtempSync(join(tmpdir(), "quotation-bootstrap-marker-error-")); const release = join(root, "releases", shaA);
+    const blocked = join(root, "blocked"); const log = join(root, "log");
+    mkdirSync(release, { recursive: true }); mkdirSync(blocked); chmodSync(blocked, 0o555); execFileSync("ln", ["-s", release, join(root, "current")]);
+    try {
+      const result = spawnSync("bash", ["-c", `. deploy/operations-common.sh
+        cleanup_web(){ local output=$1 log=\${!#}; [[ $1 == rm ]] && output='rm -f'; printf '%s web\\n' "$output" >> "$log"; }
+        record_failed_bootstrap_activation "$1/current" "$2" "$1/blocked/bootstrap-failed" "$3" "$4" startup cleanup_web "$5"
+      `, "bash", root, release, shaA, `ghcr.io/org/app@sha256:${"a".repeat(64)}`, log], { encoding: "utf8" });
+      expect(result.status).not.toBe(0);
+      expect(read(log).trim().split("\n")).toEqual(["stop web", "rm -f web"]);
+      expect(() => lstatSync(join(root, "current"))).toThrow();
+    } finally { chmodSync(blocked, 0o755); rmSync(root, { recursive: true, force: true }); }
+  });
+
+  test("deploy-owned state remains writable when the installation root is not", () => {
+    const root = mkdtempSync(join(tmpdir(), "quotation-state-ownership-")); const state = join(root, "state"); const fakeFlock = join(state, "flock");
+    mkdirSync(state); writeFileSync(fakeFlock, "#!/bin/sh\nexit 0\n"); chmodSync(fakeFlock, 0o755); chmodSync(state, 0o750); chmodSync(root, 0o555);
+    try {
+      execFileSync("bash", ["-c", '. deploy/operations-common.sh; SALES_QUOTATION_ROOT="$1" FLOCK_BIN="$2" acquire_operations_lock', "bash", root, fakeFlock]);
+      expect(lstatSync(join(state, "operations.lock")).isFile()).toBe(true);
+    } finally { chmodSync(root, 0o755); rmSync(root, { recursive: true, force: true }); }
   });
 
   test("shared flock serializes callers and permits an inherited nested call", () => {
@@ -429,13 +503,12 @@ fcntl.flock(9, fcntl.LOCK_EX)
     } finally { rmSync(root, { recursive: true, force: true }); }
   });
 
-  test("image retention prunes only unretained exact application SHA tags and digests", () => {
+  test("rollback lineage prunes only unretained exact application SHA tags and digests", () => {
     const root = mkdtempSync(join(tmpdir(), "quotation-image-retention-")); const bin = join(root, "bin"); const log = join(root, "log");
     const repo = "ghcr.io/jeffreycaicai/sales_quotation_approvecenter";
     const shas = ["1", "2", "3", "4"].map((value) => value.repeat(40));
     const digests = ["a", "b", "c", "d"].map((value) => `sha256:${value.repeat(64)}`);
     mkdirSync(bin); mkdirSync(join(root, "releases"));
-    for (const index of [1, 2, 3]) { mkdirSync(join(root, "releases", shas[index])); writeFileSync(join(root, "releases", shas[index], "image.digest"), `${repo}@${digests[index]}\n`); }
     writeFileSync(join(bin, "docker"), `#!/bin/sh
 if [ "$1 $2" = "image ls" ]; then
   printf '%s\\t%s\\t%s\\n' '${repo}' '${shas[0]}' '<none>'
@@ -449,8 +522,13 @@ if [ "$1 $2" = "image rm" ]; then printf '%s\\n' "$3" >> "$OPS_LOG"; exit 0; fi
 exit 9
 `); chmodSync(join(bin, "docker"), 0o755);
     try {
-      execFileSync("bash", ["-c", '. deploy/operations-common.sh; DOCKER_BIN="$1" OPS_LOG="$2" prune_application_images "$3" "$4"', "bash", join(bin, "docker"), log, root, repo]);
+      for (const [index, sha] of shas.entries()) {
+        mkdirSync(join(root, "releases", sha)); writeFileSync(join(root, "releases", sha, "image.digest"), `${repo}@${digests[index]}\n`);
+        execFileSync("bash", ["-c", '. deploy/operations-common.sh; record_release_lineage_and_prune "$1" "$2"', "bash", root, sha]);
+      }
+      execFileSync("bash", ["-c", '. deploy/operations-common.sh; record_release_lineage_and_prune "$1" "$2"; DOCKER_BIN="$3" OPS_LOG="$4" prune_application_images "$1" "$5"', "bash", root, shas[1], join(bin, "docker"), log, repo]);
       expect(read(log).trim().split("\n")).toEqual([`${repo}:${shas[0]}`, `${repo}@${digests[0]}`]);
+      for (const index of [1, 2, 3]) expect(() => readFileSync(join(root, "releases", shas[index], "image.digest"))).not.toThrow();
     } finally { rmSync(root, { recursive: true, force: true }); }
   });
 

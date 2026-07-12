@@ -32,6 +32,9 @@ The directory layout is:
 /opt/sales-quotation/
   bin/install-release
   bootstrap/deploy/
+  state/operations.lock
+  state/bootstrap-failed
+  state/history/
   current -> releases/<40-character-git-sha>
   releases/
   shared/.env.production
@@ -73,7 +76,14 @@ its tested manifest validator rather than maintaining a second parser:
 
 Provisioning installs the stable launcher and a reviewed bootstrap deploy-script set as root-owned, non-writable files. The launcher uses `current` only when it resolves to an exact 40-character release directory with a regular installer; otherwise it uses the fixed bootstrap installer. Release paths that escape `releases/` are never executed. The same stable command handles the first release and permits bootstrap only when both `current` and the two named stateful volumes are absent.
 
-If first activation fails during startup or health checks, the installer stops and removes only the failed web container, removes `current` only while it still points to that failed release, leaves PostgreSQL and MinIO volumes untouched, and atomically records `/opt/sales-quotation/bootstrap-failed`. Later attempts fail closed with an operator recovery message. Review the failure and the potentially migrated stateful volumes, then either recover/disposition that state or deliberately remove the marker before retrying; never clear it as an automated retry step.
+If first activation fails during startup or health checks, the installer stops and removes only the failed web container, removes `current` only while it still points to that failed release, leaves PostgreSQL and MinIO volumes untouched, and atomically records `/opt/sales-quotation/state/bootstrap-failed`. Later normal attempts fail closed with an operator recovery message. Inspect the marker, container logs, migration state, and preserved volumes, obtain approval for the recovery plan, then run the stable launcher explicitly:
+
+```sh
+/opt/sales-quotation/bin/install-release --recover-bootstrap "$GIT_SHA" \
+  "ghcr.io/jeffreycaicai/sales_quotation_approvecenter@sha256:$DIGEST"
+```
+
+The recovery flag is manual-only and requires an active, valid marker. It permits the known partial-volume/no-current state, preserves the marker through startup and health checks, repeats failed web/current cleanup on error, and atomically moves the marker into `state/history/` only after health succeeds. Do not edit, move, or delete recovery state by hand.
 
 The installer performs an encrypted off-VPS backup before pulling. It resolves
 the tag to a repository digest and refuses to continue unless that digest

@@ -172,6 +172,7 @@ describe("production delivery workflow", () => {
     expect(delivery).toContain("APP_IMAGE");
     expect(delivery).toMatch(/\/opt\/sales-quotation\/bin\/install-release[^\n]*"\$RELEASE_SHA"[^\n]*"\$APP_IMAGE"/);
     expect(delivery).not.toMatch(/current\/deploy\/install-release\.sh/);
+    expect(delivery).not.toContain("--recover-bootstrap");
   });
 
   test("exposes only the five VPS environment secrets and uses a dedicated strict known-hosts file", () => {

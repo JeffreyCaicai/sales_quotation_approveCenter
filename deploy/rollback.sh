@@ -14,6 +14,7 @@ export DOCKER_HOST=${DOCKER_HOST:-unix://$XDG_RUNTIME_DIR/docker.sock}
 sha=${1:-}
 [[ $sha =~ ^[0-9a-f]{40}$ ]] || { echo "release SHA must be 40 lowercase hexadecimal characters" >&2; exit 2; }
 root=${SALES_QUOTATION_ROOT:-/opt/sales-quotation}
+repository=ghcr.io/jeffreycaicai/sales_quotation_approvecenter
 release=$root/releases/$sha
 current=$root/current
 env_file=$root/shared/.env.production
@@ -49,6 +50,7 @@ activate_release() {
 
 if failure_atomic_release_switch "$current" "$release" "$original" activate_release; then
   record_release_lineage_and_prune "$root" "$sha"
+  prune_application_images "$root" "$repository"
   exit 0
 fi
 exit 1

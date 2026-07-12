@@ -28,7 +28,7 @@ matches the value in the immutable SHA-and-run-bound manifest published by the
 successful CI run and strictly validated by the delivery workflow:
 
 ```sh
-/opt/sales-quotation/current/deploy/install-release.sh "$GIT_SHA" "$APP_IMAGE"
+/opt/sales-quotation/bin/install-release "$GIT_SHA" "$APP_IMAGE"
 ```
 
 Before accepting uploads, create `S3_BUCKET` and a bucket-scoped application user
