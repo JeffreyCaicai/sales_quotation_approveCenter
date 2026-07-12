@@ -42,14 +42,13 @@ The dotenv contract is machine-safe `KEY=value`: one exact key per line, no `exp
 
 ```text
 BACKUP_AGE_RECIPIENT=
-BACKUP_AGE_IDENTITY_FILE=
 BACKUP_S3_ENDPOINT=
 BACKUP_S3_BUCKET=
 BACKUP_S3_ACCESS_KEY_ID=
 BACKUP_S3_SECRET_ACCESS_KEY=
 ```
 
-The backup S3 credentials must be separate from the live MinIO credentials and limited to the off-VPS backup prefix. Store the age identity outside the VPS as part of the recovery kit; the VPS needs only the public recipient for backup creation. A restore operator temporarily provides the identity file with mode `0600`.
+The backup S3 credentials must be separate from the live MinIO credentials and limited to the off-VPS backup prefix. Store the age identity outside the VPS as part of the recovery kit; normal production configuration contains no `BACKUP_AGE_IDENTITY_FILE` assignment. For an approved restore only, copy the identity to a mode-`0600` safe path and add a nonempty line such as `BACKUP_AGE_IDENTITY_FILE=/safe/restore/identity.txt`. Remove that line and the identity file immediately after the restore. Restore fails closed while the key is absent.
 
 ## Nginx and TLS
 

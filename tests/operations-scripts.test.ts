@@ -197,9 +197,27 @@ describe("operations scripts static safety", () => {
     expect(example).toContain("0640");
     expect(example).not.toContain("chmod 0600");
     for (const name of [
-      "BACKUP_AGE_RECIPIENT", "BACKUP_AGE_IDENTITY_FILE", "BACKUP_S3_ENDPOINT",
+      "BACKUP_AGE_RECIPIENT", "BACKUP_S3_ENDPOINT",
       "BACKUP_S3_BUCKET", "BACKUP_S3_ACCESS_KEY_ID", "BACKUP_S3_SECRET_ACCESS_KEY",
     ]) expect(example).toMatch(new RegExp(`^${name}=`, "m"));
+    expect(example).not.toMatch(/^BACKUP_AGE_IDENTITY_FILE=/m);
+    expect(example).toMatch(/^# BACKUP_AGE_IDENTITY_FILE=\/safe\/restore\/identity\.txt$/m);
+  });
+
+  test("normal template validates without a recovery identity and restore requires an explicit temporary key", () => {
+    const root = mkdtempSync(join(tmpdir(), "quotation-normal-env-")); const env = join(root, "env");
+    const normal = read("deploy/env.production.example").split("\n").map((line) => {
+      const match = line.match(/^([A-Z][A-Z0-9_]*)=$/);
+      return match ? `${match[1]}=SafeValue` : line;
+    }).join("\n");
+    writeFileSync(env, normal);
+    const activeKeys = normal.split("\n").flatMap((line) => line.match(/^([A-Z][A-Z0-9_]*)=/)?.[1] ?? []);
+    try {
+      expect(spawnSync("bash", ["-c", '. deploy/operations-common.sh; validate_env_file "$1" "${@:2}"', "bash", env, ...activeKeys]).status).toBe(0);
+      expect(spawnSync("bash", ["-c", '. deploy/operations-common.sh; validate_env_file "$1" BACKUP_AGE_IDENTITY_FILE', "bash", env]).status).not.toBe(0);
+      writeFileSync(env, `${normal}\nBACKUP_AGE_IDENTITY_FILE=/safe/restore/identity.txt\n`);
+      expect(spawnSync("bash", ["-c", '. deploy/operations-common.sh; validate_env_file "$1" BACKUP_AGE_IDENTITY_FILE', "bash", env]).status).toBe(0);
+    } finally { rmSync(root, { recursive: true, force: true }); }
   });
 
   test("runbook covers fresh-session SSH safety, rootless operation, Nginx preservation, and migration policy", () => {
