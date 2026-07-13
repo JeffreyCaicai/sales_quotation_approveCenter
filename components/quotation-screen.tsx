@@ -2,7 +2,7 @@ import { useMemo } from "react";
 
 import { localizeApprovalEvent, localizeBuilding, localizeCustomer, localizePackage, localizeUser } from "@/lib/display-data";
 import { BUILDINGS, CUSTOMERS, DEMO_TAX_RATE, PACKAGES, USERS } from "@/lib/mock-data";
-import type { ApprovalEvent, Building, Quote } from "@/lib/types";
+import type { ApprovalEvent, Building, CommercialSelectionInput, Quote } from "@/lib/types";
 
 import { useLocale } from "./locale-provider";
 import { Money } from "./ui";
@@ -37,16 +37,9 @@ export function QuotationScreen({ quote, onBack, onPrint, onViewHistory }: Quota
   const brand = customer?.brands.find((item) => item.id === quote.brandId);
   const sourceOwner = USERS.find((item) => item.id === quote.salesId);
   const owner = sourceOwner ? localizeUser(sourceOwner, locale) : undefined;
-  const selectedPackages = quote.placementMode === "package"
-    ? PACKAGES.filter((item) => quote.placementIds.includes(item.id)).map((item) => localizePackage(item, locale))
-    : [];
-  const selectedBuildings = quote.placementMode === "building"
-    ? BUILDINGS.filter((item) => quote.placementIds.includes(item.id)).map((item) => localizeBuilding(item, locale))
-    : [];
-  const resources = quote.placementMode === "package" ? selectedPackages : selectedBuildings;
-  const appendixBuildings = getAppendixBuildings(quote, selectedPackages).map((item) => localizeBuilding(item, locale));
-  const traffic = resources.reduce((total, item) => total + item.traffic, 0);
-  const impressions = resources.reduce((total, item) => total + item.impressions, 0);
+  const placementResources = localizedResources(quote.placement, locale);
+  const bonusResources = localizedResources(quote.bonus, locale);
+  const appendixBuildings = getAppendixBuildings([quote.placement, quote.bonus]).map((item) => localizeBuilding(item, locale));
   const issueDate = quote.approvedAt ?? quote.updatedAt;
   const taxRate = DEMO_TAX_RATE * 100;
 
@@ -85,7 +78,7 @@ export function QuotationScreen({ quote, onBack, onPrint, onViewHistory }: Quota
             <div><dt>{t("quotation.customer")}</dt><dd>{customer?.name ?? t("dashboard.unknownCustomer")}</dd></div>
             <div><dt>{t("quotation.brand")}</dt><dd>{brand?.name ?? t("approval.unknownBrand")}</dd></div>
             <div><dt>{t("quotation.salesOwner")}</dt><dd>{owner?.name ?? quote.salesId} · {owner?.title ?? t("approval.roleSales")}</dd></div>
-            <div><dt>{t("quotation.campaignPeriod")}</dt><dd>{t("quotation.periodValue", { weeks: formatNumber(quote.weeks) })}</dd></div>
+            <div><dt>{t("quotation.campaignPeriod")}</dt><dd>{t("quotation.periodValue", { weeks: formatNumber(quote.placement?.weeks ?? 0) })}</dd></div>
           </dl>
         </section>
 
@@ -97,33 +90,31 @@ export function QuotationScreen({ quote, onBack, onPrint, onViewHistory }: Quota
                 <tr><th>{t("quotation.item")}</th><th>{t("quotation.typeRegion")}</th><th>{t("quotation.period")}</th><th className="align-right">{t("quotation.campaignAmount")}</th></tr>
               </thead>
               <tbody>
-                {resources.map((resource) => (
-                  <tr key={resource.id}>
-                    <td><strong>{resource.name}</strong><small>{resource.category}</small></td>
-                    <td>{t(quote.placementMode === "package" ? "quotation.package" : "quotation.building")}<small>{resource.location}</small></td>
-                    <td>{formatNumber(quote.weeks)} {t("wizard.weekUnit")}</td>
-                    <td className="align-right"><Money amount={Math.round(resource.priceIdr * (quote.weeks / 4))} /></td>
-                  </tr>
-                ))}
+                <CommercialRow label={t("commercial.placement")} selection={quote.placement} resources={placementResources} amount={quote.pricing.placementGross} />
+                <CommercialRow label={t("commercial.bonus")} selection={quote.bonus} resources={bonusResources} amount={quote.pricing.bonusGross} bonus />
               </tbody>
             </table>
           </div>
           <div className="quotation-delivery-grid" aria-label={t("quotation.deliveryMetrics")}>
-            <Metric label={t("commercial.spot")} value={`${formatNumber(quote.spots)} ${t("quotation.occurrenceUnit")}`} />
-            <Metric label={t("commercial.bonus")} value={`${formatNumber(quote.bonus)} ${t("quotation.occurrenceUnit")}`} />
-            <Metric label={t("quotation.dailyTraffic")} value={formatNumber(traffic)} />
-            <Metric label={t("quotation.monthlyImpressions")} value={formatNumber(impressions)} />
+            <Metric label={`${t("commercial.placement")} · ${t("commercial.spot")}`} value={`${formatNumber(quote.placement?.spots ?? 0)} ${t("quotation.occurrenceUnit")}`} />
+            <Metric label={`${t("commercial.bonus")} · ${t("commercial.spot")}`} value={`${formatNumber(quote.bonus?.spots ?? 0)} ${t("quotation.occurrenceUnit")}`} />
+            <Metric label={t("quotation.dailyTraffic")} value={formatNumber((quote.placement?.traffic ?? 0) + (quote.bonus?.traffic ?? 0))} />
+            <Metric label={t("quotation.monthlyImpressions")} value={formatNumber((quote.placement?.impressions ?? 0) + (quote.bonus?.impressions ?? 0))} />
           </div>
         </section>
 
         <section className="quotation-section quotation-pricing" aria-labelledby="quotation-pricing-heading">
           <header><span>03</span><h2 id="quotation-pricing-heading">{t("quotation.priceDetails")}</h2></header>
           <dl className="quotation-pricing__ledger">
-            <PriceRow label={t("quotation.basePrice")} amount={quote.pricing.basePrice} />
-            <PriceRow label={t("quotation.discountDeduction", { discount: formatNumber(quote.discount) })} amount={quote.pricing.discountAmount} deduction />
-            <PriceRow label={t("quotation.netPrice")} amount={quote.pricing.netPrice} />
+            <PriceRow label={t("commercial.placementGross")} amount={quote.pricing.placementGross} />
+            <PriceRow label={t("quotation.discountDeduction", { discount: formatNumber(quote.discount) })} amount={quote.pricing.placementDiscountAmount} deduction />
+            <PriceRow label={t("commercial.placementNett")} amount={quote.pricing.placementNet} />
+            <PriceRow label={t("commercial.bonusGross")} amount={quote.pricing.bonusGross} />
+            <PriceRow label={`${t("commercial.bonusNett")} · ${t("commercial.free")}`} amount={quote.pricing.bonusNet} />
+            <PriceRow label={t("commercial.totalGross")} amount={quote.pricing.totalGross} />
+            <PriceRow label={t("commercial.totalNett")} amount={quote.pricing.totalNet} />
             <PriceRow label={t("quotation.simulatedTax", { tax: formatNumber(taxRate) })} amount={quote.pricing.tax} />
-            <div className="quotation-total"><dt>{t("quotation.totalWithTax")}</dt><dd><Money amount={quote.pricing.total} /></dd></div>
+            <div className="quotation-total"><dt>{t("quotation.totalWithTax")}</dt><dd><Money amount={quote.pricing.totalIncludingTax} /></dd></div>
           </dl>
         </section>
 
@@ -201,12 +192,12 @@ function PriceRow({ label, amount, deduction = false }: { label: string; amount:
   );
 }
 
-function getAppendixBuildings(quote: Quote, selectedPackages: typeof PACKAGES): Building[] {
-  if (quote.placementMode === "building") {
-    return BUILDINGS.filter((building) => quote.placementIds.includes(building.id));
-  }
-
-  const buildingIds = new Set(selectedPackages.flatMap((item) => item.buildingIds));
+function getAppendixBuildings(selections: Array<CommercialSelectionInput | undefined>): Building[] {
+  const buildingIds = new Set(selections.flatMap((selection) => {
+    if (!selection) return [];
+    if (selection.mode === "building") return selection.resourceIds ?? [];
+    return PACKAGES.filter((item) => (selection.resourceIds ?? []).includes(item.id)).flatMap((item) => item.buildingIds);
+  }));
   return BUILDINGS.filter((building) => buildingIds.has(building.id));
 }
 
@@ -223,5 +214,18 @@ function approvalActionLabel(event: ApprovalEvent) {
 function approvalRoleLabel(event: ApprovalEvent) {
   if (event.role === "sales") return "approval.roleSales" as const;
   if (event.role === "manager") return "approval.roleManager" as const;
+  if (event.role === "business_control") return "approval.roleBusinessControl" as const;
   return "approval.roleCeo" as const;
+}
+
+function localizedResources(selection: CommercialSelectionInput | undefined, locale: "en" | "zh-CN") {
+  if (!selection) return [];
+  const resourceIds = selection.resourceIds ?? [];
+  return selection.mode === "package" ? PACKAGES.filter((item) => resourceIds.includes(item.id)).map((item) => localizePackage(item, locale)) : BUILDINGS.filter((item) => resourceIds.includes(item.id)).map((item) => localizeBuilding(item, locale));
+}
+
+function CommercialRow({ label, selection, resources, amount, bonus = false }: { label: string; selection?: CommercialSelectionInput; resources: ReturnType<typeof localizedResources>; amount: number; bonus?: boolean }) {
+  const { t, formatNumber } = useLocale();
+  if (!selection) return <tr><td><strong>{label}</strong><small>{t("commercial.noBonus")}</small></td><td>—</td><td>—</td><td className="align-right"><strong>{t("commercial.free")}</strong></td></tr>;
+  return <tr><td><strong>{label}</strong><small>{resources.map((item) => item.name).join(", ")}</small></td><td>{t(selection.mode === "package" ? "quotation.package" : "quotation.building")}<small>TVC {formatNumber(selection.tvcDurationSeconds ?? 0)}s</small></td><td>{formatNumber(selection.weeks ?? 0)} {t("wizard.weekUnit")} · {formatNumber(selection.spots ?? 0)} {t("commercial.spot")}</td><td className="align-right"><Money amount={amount} />{bonus ? <small>{t("commercial.free")}</small> : null}</td></tr>;
 }

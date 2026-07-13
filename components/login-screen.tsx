@@ -4,9 +4,10 @@ import type { Role, User } from "@/lib/types";
 import { LanguageSwitcher } from "./language-switcher";
 import { useLocale } from "./locale-provider";
 
-const ROLE_SECTIONS: Record<Role, "roleSales" | "roleManager" | "roleCeo"> = {
+const ROLE_SECTIONS: Record<Role, "roleSales" | "roleManager" | "roleBusinessControl" | "roleCeo"> = {
   sales: "roleSales",
   manager: "roleManager",
+  business_control: "roleBusinessControl",
   ceo: "roleCeo",
 };
 

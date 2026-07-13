@@ -1,5 +1,9 @@
 import type {
+  ApprovalDirectory,
+  ApproverRole,
   Building,
+  CommercialSelection,
+  CommercialSelectionInput,
   Customer,
   DiscountBand,
   PricingSummary,
@@ -7,11 +11,14 @@ import type {
   QuoteInput,
   QuoteStatus,
   QuoteVersionSnapshot,
+  Role,
   SalesPackage,
+  SubmittedQuote,
   User,
 } from "./types.ts";
+import { USERS } from "./mock-data.ts";
 
-interface QuoteReferenceData {
+export interface QuoteReferenceData {
   customers: readonly Customer[];
   buildings: readonly Building[];
   packages: readonly SalesPackage[];
@@ -22,11 +29,13 @@ const VALIDATION = {
   brandRequired: "validation.brandRequired",
   placementModeRequired: "validation.placementModeRequired",
   placementRequired: "validation.placementRequired",
+  tvcDurationPositiveInteger: "validation.tvcDurationPositiveInteger",
   weeksPositiveInteger: "validation.weeksPositiveInteger",
   spotsPositiveInteger: "validation.spotsPositiveInteger",
-  bonusNonnegativeInteger: "validation.bonusNonnegativeInteger",
   discountRange: "validation.discountRange",
-  basePriceFiniteNonnegative: "validation.basePriceFiniteNonnegative",
+  grossPriceFiniteNonnegative: "validation.grossPriceFiniteNonnegative",
+  pricingUnsafeInteger: "validation.pricingUnsafeInteger",
+  effectiveDiscountRateRange: "validation.effectiveDiscountRateRange",
   taxRateFiniteNonnegative: "validation.taxRateFiniteNonnegative",
   trafficNonnegativeInteger: "validation.trafficNonnegativeInteger",
   impressionsNonnegativeInteger: "validation.impressionsNonnegativeInteger",
@@ -34,98 +43,138 @@ const VALIDATION = {
   brandBelongsToCustomer: "validation.brandBelongsToCustomer",
   resourceModeMismatch: "validation.resourceModeMismatch",
   basePriceMismatch: "validation.basePriceMismatch",
+  trafficMismatch: "validation.trafficMismatch",
+  impressionsMismatch: "validation.impressionsMismatch",
   returnReasonRequired: "validation.returnReasonRequired",
 } as const;
 
 const DOMAIN_ERROR = {
   salesRoleRequired: "quotation.submit.salesRoleRequired",
   approvalRoleRequired: "quotation.approval.roleRequired",
-  managerStageRequired: "quotation.approval.managerStageRequired",
-  ceoStageRequired: "quotation.approval.ceoStageRequired",
+  approvalStageRequired: "quotation.approval.stageRequired",
 } as const;
+
+const APPROVER_STATUS_BY_ROLE = {
+  manager: "pending_manager",
+  business_control: "pending_business_control",
+  ceo: "pending_ceo",
+} as const satisfies Partial<Record<Role, QuoteStatus>>;
 
 export const VALIDATION_KEYS = Object.values(VALIDATION);
 export type ValidationKey = (typeof VALIDATION)[keyof typeof VALIDATION];
 
 export function getDiscountBand(discount: number): DiscountBand {
-  if (discount <= 60) return "standard";
+  if (discount <= 65) return "standard";
   if (discount <= 70) return "elevated";
   return "executive";
 }
 
-export function getNextApproval(discount: number, managerApproved: boolean): QuoteStatus {
-  if (!managerApproved) return "pending_manager";
-  return discount > 70 ? "pending_ceo" : "approved";
+export function getApprovalStatus(effectiveDiscountRate: number): QuoteStatus {
+  if (!Number.isFinite(effectiveDiscountRate) || effectiveDiscountRate < 0 || effectiveDiscountRate > 100) {
+    throw new RangeError(VALIDATION.effectiveDiscountRateRange);
+  }
+  if (effectiveDiscountRate <= 65) return "pending_manager";
+  if (effectiveDiscountRate <= 70) return "pending_business_control";
+  return "pending_ceo";
+}
+
+export function getNextApproval(effectiveDiscountRate: number): QuoteStatus {
+  return getApprovalStatus(effectiveDiscountRate);
 }
 
 export function calculatePricing(input: QuoteInput): PricingSummary {
-  const basePrice = input.basePrice ?? 0;
-  const discountAmount = Math.round(basePrice * (input.discount / 100));
-  const netPrice = basePrice - discountAmount;
-  const tax = Math.round(netPrice * (input.taxRate ?? 0.06));
+  const placementGross = safeIdrOrZero(input.placement?.grossPrice);
+  const placementDiscountAmount = Math.round(placementGross * (input.discount / 100));
+  const placementNet = placementGross - placementDiscountAmount;
+  const bonusGross = safeIdrOrZero(input.bonus?.grossPrice);
+  const bonusNet = 0 as const;
+  const totalGross = placementGross + bonusGross;
+  const totalNet = placementNet;
+  const effectiveDiscountAmount = totalGross - totalNet;
+  const effectiveDiscountRate = totalGross === 0 ? 0 : (effectiveDiscountAmount / totalGross) * 100;
+  const tax = Math.round(totalNet * (input.taxRate ?? 0.06));
+  const totalIncludingTax = totalNet + tax;
+
+  assertSafeIdrAmounts([
+    placementGross,
+    placementDiscountAmount,
+    placementNet,
+    bonusGross,
+    bonusNet,
+    totalGross,
+    totalNet,
+    effectiveDiscountAmount,
+    tax,
+    totalIncludingTax,
+  ]);
 
   return {
-    basePrice,
-    discountAmount,
-    netPrice,
+    placementGross,
+    placementDiscountAmount,
+    placementNet,
+    bonusGross,
+    bonusNet,
+    totalGross,
+    totalNet,
+    effectiveDiscountAmount,
+    effectiveDiscountRate,
     tax,
-    total: netPrice + tax,
+    totalIncludingTax,
   };
 }
 
 export function validateQuote(input: QuoteInput): Record<string, ValidationKey> {
   const errors: Record<string, ValidationKey> = {};
-
   if (!input.customerId) errors.customerId = VALIDATION.customerRequired;
   if (!input.brandId) errors.brandId = VALIDATION.brandRequired;
-  if (!input.placementMode) errors.placementMode = VALIDATION.placementModeRequired;
-  if (!input.placementIds?.length) {
-    errors.placementIds = VALIDATION.placementRequired;
-  }
-  if (!Number.isInteger(input.weeks) || (input.weeks ?? 0) <= 0) {
-    errors.weeks = VALIDATION.weeksPositiveInteger;
-  }
-  if (!Number.isInteger(input.spots) || (input.spots ?? 0) <= 0) {
-    errors.spots = VALIDATION.spotsPositiveInteger;
-  }
-  if (!Number.isInteger(input.bonus ?? 0) || (input.bonus ?? 0) < 0) {
-    errors.bonus = VALIDATION.bonusNonnegativeInteger;
-  }
+  if (!input.placement) errors.placement = VALIDATION.placementRequired;
+  else validateCommercialSelection(input.placement, "placement", errors);
+  if (input.bonus) validateCommercialSelection(input.bonus, "bonus", errors);
   if (!Number.isFinite(input.discount) || input.discount < 0 || input.discount > 100) {
     errors.discount = VALIDATION.discountRange;
-  }
-  if (input.basePrice !== undefined && (!Number.isFinite(input.basePrice) || input.basePrice < 0)) {
-    errors.basePrice = VALIDATION.basePriceFiniteNonnegative;
   }
   if (input.taxRate !== undefined && (!Number.isFinite(input.taxRate) || input.taxRate < 0)) {
     errors.taxRate = VALIDATION.taxRateFiniteNonnegative;
   }
-  if (input.traffic !== undefined && (!Number.isInteger(input.traffic) || input.traffic < 0)) {
-    errors.traffic = VALIDATION.trafficNonnegativeInteger;
-  }
-  if (input.impressions !== undefined && (!Number.isInteger(input.impressions) || input.impressions < 0)) {
-    errors.impressions = VALIDATION.impressionsNonnegativeInteger;
-  }
-
   return errors;
+}
+
+function validateCommercialSelection(
+  selection: CommercialSelectionInput,
+  field: "placement" | "bonus",
+  errors: Record<string, ValidationKey>,
+): void {
+  if (!selection.mode) errors[`${field}.mode`] = VALIDATION.placementModeRequired;
+  if (!selection.resourceIds?.length) errors[`${field}.resourceIds`] = VALIDATION.placementRequired;
+  if (!Number.isInteger(selection.tvcDurationSeconds) || (selection.tvcDurationSeconds ?? 0) <= 0) {
+    errors[`${field}.tvcDurationSeconds`] = VALIDATION.tvcDurationPositiveInteger;
+  }
+  if (!Number.isInteger(selection.weeks) || (selection.weeks ?? 0) <= 0) {
+    errors[`${field}.weeks`] = VALIDATION.weeksPositiveInteger;
+  }
+  if (!Number.isInteger(selection.spots) || (selection.spots ?? 0) <= 0) {
+    errors[`${field}.spots`] = VALIDATION.spotsPositiveInteger;
+  }
+  if (!Number.isSafeInteger(selection.grossPrice) || (selection.grossPrice ?? -1) < 0) {
+    errors[`${field}.grossPrice`] = VALIDATION.grossPriceFiniteNonnegative;
+  }
+  if (!Number.isInteger(selection.traffic) || (selection.traffic ?? -1) < 0) {
+    errors[`${field}.traffic`] = VALIDATION.trafficNonnegativeInteger;
+  }
+  if (!Number.isInteger(selection.impressions) || (selection.impressions ?? -1) < 0) {
+    errors[`${field}.impressions`] = VALIDATION.impressionsNonnegativeInteger;
+  }
 }
 
 export function createDraftQuote(input: QuoteInput, previousQuote: Quote | undefined, actor: User): Quote {
   const now = new Date().toISOString();
   const identifier = now.replace(/\D/g, "");
-  const placementIds = [...(input.placementIds ?? [])];
-  const weeks = normalizeDraftInteger(input.weeks);
-  const hasPricedPlacement = Boolean(input.placementMode && placementIds.length > 0 && weeks > 0);
   const normalizedInput: QuoteInput = {
-    ...input,
     customerId: input.customerId ?? "",
     brandId: input.brandId ?? "",
-    placementIds,
-    weeks,
-    spots: normalizeDraftInteger(input.spots),
-    bonus: normalizeDraftInteger(input.bonus),
+    placement: normalizeDraftSelection(input.placement),
+    bonus: normalizeDraftSelection(input.bonus),
     discount: normalizeDraftDiscount(input.discount),
-    basePrice: hasPricedPlacement ? normalizeDraftAmount(input.basePrice) : 0,
     taxRate: normalizeDraftTaxRate(input.taxRate),
   };
 
@@ -135,17 +184,14 @@ export function createDraftQuote(input: QuoteInput, previousQuote: Quote | undef
     salesId: actor.id,
     customerId: normalizedInput.customerId ?? "",
     brandId: normalizedInput.brandId ?? "",
-    placementMode: normalizedInput.placementMode,
-    placementIds: [...(normalizedInput.placementIds ?? [])],
-    weeks: normalizedInput.weeks ?? 0,
-    spots: normalizedInput.spots ?? 0,
-    bonus: normalizedInput.bonus ?? 0,
+    placement: cloneSelectionInput(normalizedInput.placement),
+    bonus: cloneSelectionInput(normalizedInput.bonus),
     discount: normalizedInput.discount,
     pricing: calculatePricing(normalizedInput),
     status: previousQuote?.status === "returned" ? "returned" : "draft",
     version: previousQuote?.version ?? 1,
     versionSnapshots: cloneVersionSnapshots(previousQuote?.versionSnapshots ?? []),
-    approvalHistory: [...(previousQuote?.approvalHistory ?? [])],
+    approvalHistory: structuredClone(previousQuote?.approvalHistory ?? []),
     createdAt: previousQuote?.createdAt ?? now,
     updatedAt: now,
     isDemoData: true,
@@ -159,53 +205,65 @@ export function validateQuoteReferences(
 ): Record<string, ValidationKey> {
   const errors: Record<string, ValidationKey> = {};
   const customer = references.customers.find((item) => item.id === input.customerId);
-
   if (!customer || customer.salesId !== salesId) {
     errors.customerId = VALIDATION.customerOwned;
   } else if (!customer.brands.some((brand) => brand.id === input.brandId)) {
     errors.brandId = VALIDATION.brandBelongsToCustomer;
   }
-
-  const resourceIds = input.placementIds ?? [];
-  const resources = input.placementMode === "building"
-    ? references.buildings
-    : input.placementMode === "package"
-      ? references.packages
-      : undefined;
-  const selectedResources = resources
-    ? resourceIds.map((id) => resources.find((resource) => resource.id === id))
-    : [];
-  const hasWrongResource = !resources
-    || new Set(resourceIds).size !== resourceIds.length
-    || selectedResources.some((resource) => !resource)
-    || (input.placementMode === "package" && resourceIds.length !== 1);
-
-  if (resourceIds.length > 0 && hasWrongResource) {
-    errors.placementIds = VALIDATION.resourceModeMismatch;
-  } else if (
-    resourceIds.length > 0
-    && selectedResources.every((resource) => resource !== undefined)
-    && Number.isInteger(input.weeks)
-    && (input.weeks ?? 0) > 0
-  ) {
-    const expectedBasePrice = Math.round(
-      selectedResources.reduce((total, resource) => total + resource.priceIdr, 0)
-      * ((input.weeks ?? 0) / 4),
-    );
-    if (!Number.isFinite(input.basePrice) || input.basePrice !== expectedBasePrice) {
-      errors.basePrice = VALIDATION.basePriceMismatch;
-    }
-  }
-
+  if (input.placement) validateSelectionReferences(input.placement, "placement", references, errors);
+  if (input.bonus) validateSelectionReferences(input.bonus, "bonus", references, errors);
   return errors;
 }
 
-export function submitQuote(input: QuoteInput, previousQuote: Quote | undefined, actor: User): Quote {
-  if (actor.role !== "sales") throw new Error(DOMAIN_ERROR.salesRoleRequired);
+function validateSelectionReferences(
+  selection: CommercialSelectionInput,
+  field: "placement" | "bonus",
+  references: QuoteReferenceData,
+  errors: Record<string, ValidationKey>,
+): void {
+  const ids = selection.resourceIds ?? [];
+  const resources = selection.mode === "building"
+    ? references.buildings
+    : selection.mode === "package"
+      ? references.packages
+      : undefined;
+  const selected = resources ? ids.map((id) => resources.find((resource) => resource.id === id)) : [];
+  const invalid = !resources
+    || ids.length === 0
+    || new Set(ids).size !== ids.length
+    || selected.some((resource) => !resource)
+    || (selection.mode === "package" && ids.length !== 1);
+  if (invalid) {
+    errors[`${field}.resourceIds`] = VALIDATION.resourceModeMismatch;
+    return;
+  }
+  if (Number.isInteger(selection.weeks) && (selection.weeks ?? 0) > 0) {
+    const expected = Math.round(
+      selected.reduce((sum, resource) => sum + (resource?.priceIdr ?? 0), 0) * ((selection.weeks ?? 0) / 4),
+    );
+    if (selection.grossPrice !== expected) errors[`${field}.grossPrice`] = VALIDATION.basePriceMismatch;
+  }
+  const expectedTraffic = selected.reduce((sum, resource) => sum + (resource?.traffic ?? 0), 0);
+  const expectedImpressions = selected.reduce((sum, resource) => sum + (resource?.impressions ?? 0), 0);
+  if (selection.traffic !== expectedTraffic) errors[`${field}.traffic`] = VALIDATION.trafficMismatch;
+  if (selection.impressions !== expectedImpressions) errors[`${field}.impressions`] = VALIDATION.impressionsMismatch;
+}
 
-  const errors = validateQuote(input);
-  if (Object.keys(errors).length > 0) {
-    throw new Error(Object.values(errors).join(","));
+export function submitQuote(
+  input: QuoteInput,
+  previousQuote: Quote | undefined,
+  actor: User,
+  references: QuoteReferenceData,
+  approvalDirectory: ApprovalDirectory,
+): SubmittedQuote {
+  if (actor.role !== "sales") throw new Error(DOMAIN_ERROR.salesRoleRequired);
+  const errors = {
+    ...validateQuote(input),
+    ...validateQuoteReferences(input, actor.id, references),
+  };
+  if (Object.keys(errors).length > 0) throw new Error(Object.values(errors).join(","));
+  if (previousQuote && (previousQuote.salesId !== actor.id || (previousQuote.status !== "draft" && previousQuote.status !== "returned"))) {
+    throw new Error(DOMAIN_ERROR.salesRoleRequired);
   }
 
   const now = new Date().toISOString();
@@ -214,10 +272,15 @@ export function submitQuote(input: QuoteInput, previousQuote: Quote | undefined,
   const identifier = now.replace(/\D/g, "");
   const id = previousQuote?.id ?? `quote-demo-${identifier}`;
   const action = isResubmission ? "resubmitted" : "submitted";
-  const snapshot = createVersionSnapshot(input, version, now, previousQuote);
-  const previousSnapshots = isResubmission
-    ? cloneVersionSnapshots(previousQuote?.versionSnapshots ?? [])
-    : [];
+  const placement = toCommercialSelection(input.placement);
+  const bonus = input.bonus ? toCommercialSelection(input.bonus) : undefined;
+  const pricing = calculatePricing(input);
+  const status = getApprovalStatus(pricing.effectiveDiscountRate) as SubmittedQuote["status"];
+  const approverRole = getApproverRole(status);
+  const requiredApproverId = approvalDirectory[approverRole];
+  const requiredApprover = USERS.find((user) => user.id === requiredApproverId && user.role === approverRole);
+  if (!requiredApprover) throw new Error(DOMAIN_ERROR.approvalStageRequired);
+  const snapshot = createVersionSnapshot(input, version, now, requiredApproverId);
 
   return {
     id,
@@ -225,21 +288,22 @@ export function submitQuote(input: QuoteInput, previousQuote: Quote | undefined,
     salesId: actor.id,
     customerId: input.customerId ?? "",
     brandId: input.brandId ?? "",
-    placementMode: input.placementMode ?? "building",
-    placementIds: [...(input.placementIds ?? [])],
-    weeks: input.weeks ?? 0,
-    spots: input.spots ?? 0,
-    bonus: input.bonus ?? 0,
+    placement: cloneCommercialSelection(placement)!,
+    bonus: cloneCommercialSelection(bonus),
     discount: input.discount,
-    pricing: calculatePricing(input),
-    status: "pending_manager",
+    pricing: { ...pricing },
+    status,
+    requiredApproverId,
     version,
-    versionSnapshots: [...previousSnapshots, snapshot],
+    versionSnapshots: [
+      ...(isResubmission ? cloneVersionSnapshots(previousQuote?.versionSnapshots ?? []) : []),
+      snapshot,
+    ],
     approvalHistory: [
-      ...(previousQuote?.approvalHistory ?? []),
+      ...structuredClone(previousQuote?.approvalHistory ?? []),
       {
         id: `${id}-v${version}-${action}`,
-        role: actor.role,
+        role: "sales",
         action,
         actorId: actor.id,
         actorName: actor.name,
@@ -257,29 +321,17 @@ function createVersionSnapshot(
   input: QuoteInput,
   version: number,
   submittedAt: string,
-  previousQuote: Quote | undefined,
+  requiredApproverId: string,
 ): QuoteVersionSnapshot {
-  const matchingPreviousSnapshot = previousQuote?.versionSnapshots.at(-1);
-  const hasSamePlacement = Boolean(
-    matchingPreviousSnapshot
-    && matchingPreviousSnapshot.placementMode === input.placementMode
-    && matchingPreviousSnapshot.placementIds.length === (input.placementIds?.length ?? 0)
-    && matchingPreviousSnapshot.placementIds.every((id, index) => id === input.placementIds?.[index]),
-  );
-
   return {
     version,
     customerId: input.customerId ?? "",
     brandId: input.brandId ?? "",
-    placementMode: input.placementMode ?? "building",
-    placementIds: [...(input.placementIds ?? [])],
-    weeks: input.weeks ?? 0,
-    spots: input.spots ?? 0,
-    bonus: input.bonus ?? 0,
-    pricing: calculatePricing(input),
-    traffic: input.traffic ?? (hasSamePlacement ? matchingPreviousSnapshot?.traffic ?? 0 : 0),
-    impressions: input.impressions ?? (hasSamePlacement ? matchingPreviousSnapshot?.impressions ?? 0 : 0),
+    placement: toCommercialSelection(input.placement),
+    bonus: input.bonus ? toCommercialSelection(input.bonus) : undefined,
+    pricing: { ...calculatePricing(input) },
     discount: input.discount,
+    requiredApproverId,
     submittedAt,
   };
 }
@@ -287,25 +339,24 @@ function createVersionSnapshot(
 function cloneVersionSnapshots(snapshots: QuoteVersionSnapshot[]): QuoteVersionSnapshot[] {
   return snapshots.map((snapshot) => ({
     ...snapshot,
-    placementIds: [...snapshot.placementIds],
+    placement: cloneCommercialSelection(snapshot.placement)!,
+    bonus: cloneCommercialSelection(snapshot.bonus),
     pricing: { ...snapshot.pricing },
   }));
 }
 
 export function approveQuote(quote: Quote, actor: User): Quote {
   assertApprovalTransition(quote, actor);
-
   const now = new Date().toISOString();
-  const status = actor.role === "manager" && quote.discount > 70
-    ? "pending_ceo"
-    : "approved";
   const eventNumber = quote.approvalHistory.length + 1;
-
   return {
     ...quote,
-    status,
+    placement: cloneSelectionInput(quote.placement),
+    bonus: cloneSelectionInput(quote.bonus),
+    pricing: { ...quote.pricing },
+    versionSnapshots: cloneVersionSnapshots(quote.versionSnapshots),
     approvalHistory: [
-      ...quote.approvalHistory,
+      ...structuredClone(quote.approvalHistory),
       {
         id: `${quote.id}-v${quote.version}-approved-${eventNumber}`,
         role: actor.role,
@@ -316,31 +367,40 @@ export function approveQuote(quote: Quote, actor: User): Quote {
         version: quote.version,
       },
     ],
+    status: "approved",
+    requiredApproverId: undefined,
     updatedAt: now,
-    approvedAt: status === "approved" ? now : undefined,
+    approvedAt: now,
   };
 }
 
 export function canApproveQuote(quote: Quote, actor: User): boolean {
-  if (actor.role === "manager") return quote.status === "pending_manager";
-  if (actor.role === "ceo") return quote.status === "pending_ceo" && quote.discount > 70;
-  return false;
+  if (!isApproverRole(actor.role)) return false;
+  if (!isSubmittedQuote(quote)) return false;
+  const requiredStatus = APPROVER_STATUS_BY_ROLE[actor.role];
+  if (quote.status !== requiredStatus) return false;
+  if (actor.id !== quote.requiredApproverId) return false;
+  try {
+    return getApprovalStatus(quote.pricing.effectiveDiscountRate) === requiredStatus;
+  } catch {
+    return false;
+  }
 }
 
 export function returnQuote(quote: Quote, actor: User, reason: string): Quote {
   assertApprovalTransition(quote, actor);
-
   const comment = reason.trim();
   if (!comment) throw new Error(VALIDATION.returnReasonRequired);
-
   const now = new Date().toISOString();
   const eventNumber = quote.approvalHistory.length + 1;
-
   return {
     ...quote,
-    status: "returned",
+    placement: cloneSelectionInput(quote.placement),
+    bonus: cloneSelectionInput(quote.bonus),
+    pricing: { ...quote.pricing },
+    versionSnapshots: cloneVersionSnapshots(quote.versionSnapshots),
     approvalHistory: [
-      ...quote.approvalHistory,
+      ...structuredClone(quote.approvalHistory),
       {
         id: `${quote.id}-v${quote.version}-returned-${eventNumber}`,
         role: actor.role,
@@ -352,22 +412,98 @@ export function returnQuote(quote: Quote, actor: User, reason: string): Quote {
         comment,
       },
     ],
+    status: "returned",
+    requiredApproverId: undefined,
     updatedAt: now,
     approvedAt: undefined,
   };
 }
 
-function assertApprovalTransition(quote: Quote, actor: User): asserts actor is User & { role: "manager" | "ceo" } {
-  if (actor.role !== "manager" && actor.role !== "ceo") {
-    throw new Error(DOMAIN_ERROR.approvalRoleRequired);
-  }
+function assertApprovalTransition(quote: Quote, actor: User): asserts actor is User & { role: ApproverRole } {
+  if (!isApproverRole(actor.role)) throw new Error(DOMAIN_ERROR.approvalRoleRequired);
+  if (!canApproveQuote(quote, actor)) throw new Error(DOMAIN_ERROR.approvalStageRequired);
+}
 
-  if (actor.role === "manager" && !canApproveQuote(quote, actor)) {
-    throw new Error(DOMAIN_ERROR.managerStageRequired);
-  }
+function isApproverRole(role: Role): role is ApproverRole {
+  return role in APPROVER_STATUS_BY_ROLE;
+}
 
-  if (actor.role === "ceo" && !canApproveQuote(quote, actor)) {
-    throw new Error(DOMAIN_ERROR.ceoStageRequired);
+function getApproverRole(status: SubmittedQuote["status"]): ApproverRole {
+  if (status === "pending_manager") return "manager";
+  if (status === "pending_business_control") return "business_control";
+  return "ceo";
+}
+
+export function isSubmittedQuote(quote: Quote): quote is SubmittedQuote {
+  return (quote.status === "pending_manager" || quote.status === "pending_business_control" || quote.status === "pending_ceo")
+    && typeof quote.requiredApproverId === "string"
+    && quote.requiredApproverId.length > 0
+    && isCompleteCommercialSelection(quote.placement)
+    && (quote.bonus === undefined || isCompleteCommercialSelection(quote.bonus));
+}
+
+function isCompleteCommercialSelection(value: CommercialSelectionInput | undefined): value is CommercialSelection {
+  return value !== undefined
+    && (value.mode === "building" || value.mode === "package")
+    && Array.isArray(value.resourceIds)
+    && value.resourceIds.length > 0
+    && Number.isInteger(value.tvcDurationSeconds) && (value.tvcDurationSeconds ?? 0) > 0
+    && Number.isInteger(value.weeks) && (value.weeks ?? 0) > 0
+    && Number.isInteger(value.spots) && (value.spots ?? 0) > 0
+    && Number.isSafeInteger(value.grossPrice) && (value.grossPrice ?? -1) >= 0
+    && Number.isInteger(value.traffic) && (value.traffic ?? -1) >= 0
+    && Number.isInteger(value.impressions) && (value.impressions ?? -1) >= 0;
+}
+
+function toCommercialSelection(input: CommercialSelectionInput | undefined): CommercialSelection {
+  if (!input?.mode || !input.resourceIds || input.tvcDurationSeconds === undefined || input.weeks === undefined
+    || input.spots === undefined || input.grossPrice === undefined || input.traffic === undefined
+    || input.impressions === undefined) {
+    throw new Error(VALIDATION.placementRequired);
+  }
+  return {
+    mode: input.mode,
+    resourceIds: [...input.resourceIds],
+    tvcDurationSeconds: input.tvcDurationSeconds,
+    weeks: input.weeks,
+    spots: input.spots,
+    grossPrice: input.grossPrice,
+    traffic: input.traffic,
+    impressions: input.impressions,
+  };
+}
+
+function cloneCommercialSelection(selection: CommercialSelection | undefined): CommercialSelection | undefined {
+  return selection ? { ...selection, resourceIds: [...selection.resourceIds] } : undefined;
+}
+
+function cloneSelectionInput(selection: CommercialSelectionInput | undefined): CommercialSelectionInput | undefined {
+  return selection ? { ...selection, resourceIds: [...(selection.resourceIds ?? [])] } : undefined;
+}
+
+function normalizeDraftSelection(selection: CommercialSelectionInput | undefined): CommercialSelectionInput | undefined {
+  if (!selection) return undefined;
+  return {
+    mode: selection.mode,
+    resourceIds: [...(selection.resourceIds ?? [])],
+    tvcDurationSeconds: normalizeDraftInteger(selection.tvcDurationSeconds),
+    weeks: normalizeDraftInteger(selection.weeks),
+    spots: normalizeDraftInteger(selection.spots),
+    grossPrice: normalizeDraftAmount(selection.grossPrice),
+    traffic: normalizeDraftInteger(selection.traffic),
+    impressions: normalizeDraftInteger(selection.impressions),
+  };
+}
+
+function safeIdrOrZero(value: number | undefined): number {
+  if (value === undefined) return 0;
+  if (!Number.isSafeInteger(value) || value < 0) throw new RangeError(VALIDATION.grossPriceFiniteNonnegative);
+  return value;
+}
+
+function assertSafeIdrAmounts(amounts: number[]): void {
+  if (amounts.some((amount) => !Number.isSafeInteger(amount) || amount < 0)) {
+    throw new RangeError(VALIDATION.pricingUnsafeInteger);
   }
 }
 
@@ -380,7 +516,7 @@ function normalizeDraftDiscount(value: number): number {
 }
 
 function normalizeDraftAmount(value: number | undefined): number {
-  return Number.isFinite(value) && (value ?? 0) >= 0 ? (value ?? 0) : 0;
+  return Number.isSafeInteger(value) && (value ?? 0) >= 0 ? (value ?? 0) : 0;
 }
 
 function normalizeDraftTaxRate(value: number | undefined): number {

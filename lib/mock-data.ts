@@ -1,5 +1,14 @@
-import { calculatePricing } from "./quotation.ts";
-import type { Building, Customer, Quote, SalesPackage, User } from "./types.ts";
+import { calculatePricing, getApprovalStatus } from "./quotation.ts";
+import type {
+  ApprovalDirectory,
+  ApprovalEvent,
+  Building,
+  CommercialSelection,
+  Customer,
+  Quote,
+  SalesPackage,
+  User,
+} from "./types.ts";
 
 export const DEMO_TAX_RATE = 0.06;
 export const DEMO_CNY_TO_IDR_RATE = 2_662;
@@ -13,49 +22,50 @@ export const USERS: User[] = [
   { id: "sales-chen", name: "陈晨", role: "sales", title: "雅加达客户经理", isDemoData: true },
   {
     id: "manager-lin",
-    name: "林玥",
+    name: "Ayu Purnama",
     role: "manager",
-    title: "销售主管",
+    title: "销售负责人",
     teamMemberIds: ["sales-chen"],
     isDemoData: true,
   },
-  { id: "ceo-zhao", name: "赵明远", role: "ceo", title: "首席执行官", isDemoData: true },
+  {
+    id: "business-control-april",
+    name: "Aprilliani Shintia Dewi",
+    role: "business_control",
+    title: "业务控制负责人",
+    isDemoData: true,
+  },
+  { id: "ceo-zhao", name: "Thomas", role: "ceo", title: "首席执行官", isDemoData: true },
 ];
+
+export const APPROVAL_DIRECTORY: ApprovalDirectory = {
+  manager: "manager-lin",
+  business_control: "business-control-april",
+  ceo: "ceo-zhao",
+};
 
 export const CUSTOMERS: Customer[] = [
   {
-    id: "customer-kopi",
-    name: "Kopi Nusantara 集团",
-    industry: "餐饮与咖啡",
-    salesId: "sales-chen",
-    isDemoData: true,
+    id: "customer-kopi", name: "Kopi Nusantara 集团", industry: "餐饮与咖啡",
+    salesId: "sales-chen", isDemoData: true,
     brands: [
       { id: "brand-kopi-kenangan", name: "Kopi Kenangan", category: "现制咖啡", isDemoData: true },
       { id: "brand-chaco", name: "Chaco", category: "即饮饮品", isDemoData: true },
     ],
   },
   {
-    id: "customer-traveloka",
-    name: "Traveloka Indonesia",
-    industry: "在线旅行",
-    salesId: "sales-chen",
-    isDemoData: true,
+    id: "customer-traveloka", name: "Traveloka Indonesia", industry: "在线旅行",
+    salesId: "sales-chen", isDemoData: true,
     brands: [{ id: "brand-traveloka", name: "Traveloka", category: "旅游服务", isDemoData: true }],
   },
   {
-    id: "customer-bank-mandiri",
-    name: "Bank Mandiri",
-    industry: "金融服务",
-    salesId: "sales-chen",
-    isDemoData: true,
+    id: "customer-bank-mandiri", name: "Bank Mandiri", industry: "金融服务",
+    salesId: "sales-chen", isDemoData: true,
     brands: [{ id: "brand-livin", name: "Livin' by Mandiri", category: "数字银行", isDemoData: true }],
   },
   {
-    id: "customer-gojek",
-    name: "GoTo Gojek Tokopedia",
-    industry: "本地生活与电商",
-    salesId: "sales-chen",
-    isDemoData: true,
+    id: "customer-gojek", name: "GoTo Gojek Tokopedia", industry: "本地生活与电商",
+    salesId: "sales-chen", isDemoData: true,
     brands: [
       { id: "brand-gofood", name: "GoFood", category: "本地生活", isDemoData: true },
       { id: "brand-tokopedia", name: "Tokopedia", category: "电子商务", isDemoData: true },
@@ -64,350 +74,178 @@ export const CUSTOMERS: Customer[] = [
 ];
 
 export const BUILDINGS: Building[] = [
-  {
-    id: "building-pacific-place",
-    name: "Pacific Place Jakarta",
-    location: "SCBD · South Jakarta",
-    category: "高端商场",
-    traffic: 38_000,
-    impressions: 720_000,
-    priceIdr: toDemoIdr(128_000),
-    isDemoData: true,
-  },
-  {
-    id: "building-menara-bca",
-    name: "Menara BCA",
-    location: "Thamrin · Central Jakarta",
-    category: "甲级写字楼",
-    traffic: 18_500,
-    impressions: 365_000,
-    priceIdr: toDemoIdr(92_000),
-    isDemoData: true,
-  },
-  {
-    id: "building-wisma-46",
-    name: "Wisma 46",
-    location: "Sudirman · Central Jakarta",
-    category: "甲级写字楼",
-    traffic: 17_200,
-    impressions: 338_000,
-    priceIdr: toDemoIdr(86_000),
-    isDemoData: true,
-  },
-  {
-    id: "building-menara-astra",
-    name: "Menara Astra",
-    location: "Sudirman · Central Jakarta",
-    category: "企业总部",
-    traffic: 16_800,
-    impressions: 326_000,
-    priceIdr: toDemoIdr(89_000),
-    isDemoData: true,
-  },
-  {
-    id: "building-kota-kasablanka",
-    name: "Kota Kasablanka",
-    location: "Tebet · South Jakarta",
-    category: "城市综合体",
-    traffic: 52_000,
-    impressions: 910_000,
-    priceIdr: toDemoIdr(118_000),
-    isDemoData: true,
-  },
-  {
-    id: "building-gandaria-8",
-    name: "Gandaria 8 Office Tower",
-    location: "Kebayoran Lama · South Jakarta",
-    category: "甲级写字楼",
-    traffic: 14_900,
-    impressions: 284_000,
-    priceIdr: toDemoIdr(78_000),
-    isDemoData: true,
-  },
-  {
-    id: "building-sampoerna",
-    name: "Sampoerna Strategic Square",
-    location: "Karet Semanggi · South Jakarta",
-    category: "商务综合体",
-    traffic: 20_600,
-    impressions: 402_000,
-    priceIdr: toDemoIdr(96_000),
-    isDemoData: true,
-  },
-  {
-    id: "building-pik-avenue",
-    name: "PIK Avenue",
-    location: "Pantai Indah Kapuk · North Jakarta",
-    category: "高端商场",
-    traffic: 43_000,
-    impressions: 790_000,
-    priceIdr: toDemoIdr(112_000),
-    isDemoData: true,
-  },
+  { id: "building-pacific-place", name: "Pacific Place Jakarta", location: "SCBD · South Jakarta", category: "高端商场", traffic: 38_000, impressions: 720_000, priceIdr: toDemoIdr(128_000), isDemoData: true },
+  { id: "building-menara-bca", name: "Menara BCA", location: "Thamrin · Central Jakarta", category: "甲级写字楼", traffic: 18_500, impressions: 365_000, priceIdr: toDemoIdr(92_000), isDemoData: true },
+  { id: "building-wisma-46", name: "Wisma 46", location: "Sudirman · Central Jakarta", category: "甲级写字楼", traffic: 17_200, impressions: 338_000, priceIdr: toDemoIdr(86_000), isDemoData: true },
+  { id: "building-menara-astra", name: "Menara Astra", location: "Sudirman · Central Jakarta", category: "企业总部", traffic: 16_800, impressions: 326_000, priceIdr: toDemoIdr(89_000), isDemoData: true },
+  { id: "building-kota-kasablanka", name: "Kota Kasablanka", location: "Tebet · South Jakarta", category: "城市综合体", traffic: 52_000, impressions: 910_000, priceIdr: toDemoIdr(118_000), isDemoData: true },
+  { id: "building-gandaria-8", name: "Gandaria 8 Office Tower", location: "Kebayoran Lama · South Jakarta", category: "甲级写字楼", traffic: 14_900, impressions: 284_000, priceIdr: toDemoIdr(78_000), isDemoData: true },
+  { id: "building-sampoerna", name: "Sampoerna Strategic Square", location: "Karet Semanggi · South Jakarta", category: "商务综合体", traffic: 20_600, impressions: 402_000, priceIdr: toDemoIdr(96_000), isDemoData: true },
+  { id: "building-pik-avenue", name: "PIK Avenue", location: "Pantai Indah Kapuk · North Jakarta", category: "高端商场", traffic: 43_000, impressions: 790_000, priceIdr: toDemoIdr(112_000), isDemoData: true },
 ];
 
 export const PACKAGES: SalesPackage[] = [
   {
-    id: "package-cbd-premium",
-    name: "CBD Premium",
+    id: "package-cbd-premium", name: "CBD Premium",
     description: "覆盖 Sudirman、Thamrin 与 SCBD 的高价值商务人群。",
     buildingIds: ["building-pacific-place", "building-menara-bca", "building-wisma-46"],
-    location: "Central & South Jakarta",
-    category: "商务核心",
-    traffic: 73_700,
-    impressions: 1_423_000,
-    priceIdr: toDemoIdr(276_000),
-    isDemoData: true,
+    location: "Central & South Jakarta", category: "商务核心", traffic: 73_700,
+    impressions: 1_423_000, priceIdr: toDemoIdr(276_000), isDemoData: true,
   },
   {
-    id: "package-south-lifestyle",
-    name: "South Lifestyle",
+    id: "package-south-lifestyle", name: "South Lifestyle",
     description: "连接南雅加达办公、餐饮与购物场景。",
     buildingIds: ["building-kota-kasablanka", "building-gandaria-8", "building-sampoerna"],
-    location: "South Jakarta",
-    category: "生活方式",
-    traffic: 87_500,
-    impressions: 1_596_000,
-    priceIdr: toDemoIdr(248_000),
-    isDemoData: true,
+    location: "South Jakarta", category: "生活方式", traffic: 87_500,
+    impressions: 1_596_000, priceIdr: toDemoIdr(248_000), isDemoData: true,
   },
   {
-    id: "package-jakarta-signature",
-    name: "Jakarta Signature",
+    id: "package-jakarta-signature", name: "Jakarta Signature",
     description: "横跨雅加达核心商圈与高消费生活圈的旗舰组合。",
-    buildingIds: [
-      "building-pacific-place",
-      "building-menara-astra",
-      "building-kota-kasablanka",
-      "building-pik-avenue",
-    ],
-    location: "Central, South & North Jakarta",
-    category: "旗舰全域",
-    traffic: 149_800,
-    impressions: 2_746_000,
-    priceIdr: toDemoIdr(386_000),
-    isDemoData: true,
+    buildingIds: ["building-pacific-place", "building-menara-astra", "building-kota-kasablanka", "building-pik-avenue"],
+    location: "Central, South & North Jakarta", category: "旗舰全域", traffic: 149_800,
+    impressions: 2_746_000, priceIdr: toDemoIdr(386_000), isDemoData: true,
   },
 ];
 
+function selection(
+  mode: CommercialSelection["mode"],
+  resourceIds: string[],
+  weeks: number,
+  spots: number,
+): CommercialSelection {
+  const catalog = mode === "building" ? BUILDINGS : PACKAGES;
+  const resources = resourceIds.map((id) => catalog.find((resource) => resource.id === id));
+  if (resources.some((resource) => !resource)) throw new Error("invalid demo resource");
+  return {
+    mode,
+    resourceIds: [...resourceIds],
+    tvcDurationSeconds: 15,
+    weeks,
+    spots,
+    grossPrice: Math.round(resources.reduce((sum, resource) => sum + (resource?.priceIdr ?? 0), 0) * (weeks / 4)),
+    traffic: resources.reduce((sum, resource) => sum + (resource?.traffic ?? 0), 0),
+    impressions: resources.reduce((sum, resource) => sum + (resource?.impressions ?? 0), 0),
+  };
+}
+
+const APPROVER_ROLE_BY_STATUS = {
+  pending_manager: "manager",
+  pending_business_control: "business_control",
+  pending_ceo: "ceo",
+} as const;
+
+function seedQuote({
+  id,
+  quoteNumber,
+  customerId,
+  brandId,
+  placement,
+  bonus,
+  discount,
+  status,
+  submittedAt,
+  decidedAt,
+  comment,
+}: {
+  id: string;
+  quoteNumber: string;
+  customerId: string;
+  brandId: string;
+  placement: CommercialSelection;
+  bonus?: CommercialSelection;
+  discount: number;
+  status: "pending_manager" | "pending_business_control" | "pending_ceo" | "returned" | "approved";
+  submittedAt: string;
+  decidedAt?: string;
+  comment?: string;
+}): Quote {
+  const pricing = calculatePricing({ customerId, brandId, placement, bonus, discount, taxRate: DEMO_TAX_RATE });
+  const route = getApprovalStatus(pricing.effectiveDiscountRate) as keyof typeof APPROVER_ROLE_BY_STATUS;
+  const approverRole = APPROVER_ROLE_BY_STATUS[route];
+  const requiredApproverId = APPROVAL_DIRECTORY[approverRole];
+  const history: ApprovalEvent[] = [{
+    id: `${id}-submitted`, role: "sales", action: "submitted", actorId: "sales-chen",
+    actorName: USERS[0].name, createdAt: submittedAt, version: 1,
+  }];
+  if (status === "returned" || status === "approved") {
+    const approver = USERS.find((user) => user.id === requiredApproverId && user.role === approverRole);
+    if (!approver) throw new Error("invalid demo approval directory");
+    const action = status === "returned" ? "returned" : "approved";
+    history.push({
+      id: `${id}-${action}`, role: approver.role, action, actorId: approver.id,
+      actorName: approver.name, createdAt: decidedAt!, version: 1,
+      ...(action === "returned" ? { comment: comment ?? "请调整方案后重新提交。" } : { ...(comment ? { comment } : {}) }),
+    } as ApprovalEvent);
+  } else if (status !== route) {
+    throw new Error("demo status does not match pricing route");
+  }
+
+  return {
+    id,
+    quoteNumber,
+    salesId: "sales-chen",
+    customerId,
+    brandId,
+    placement: structuredClone(placement),
+    bonus: bonus ? structuredClone(bonus) : undefined,
+    discount,
+    pricing: { ...pricing },
+    status,
+    ...(status === route ? { requiredApproverId } : {}),
+    version: 1,
+    versionSnapshots: [{
+      version: 1,
+      customerId,
+      brandId,
+      placement: structuredClone(placement),
+      bonus: bonus ? structuredClone(bonus) : undefined,
+      pricing: { ...pricing },
+      discount,
+      requiredApproverId,
+      submittedAt,
+    }],
+    approvalHistory: history,
+    createdAt: submittedAt,
+    updatedAt: decidedAt ?? submittedAt,
+    ...(status === "approved" ? { approvedAt: decidedAt } : {}),
+    isDemoData: true,
+  };
+}
+
 export const SEEDED_QUOTES: Quote[] = [
-  {
-    id: "quote-returned",
-    quoteNumber: "DEMO-Q-202607-001",
-    salesId: "sales-chen",
-    customerId: "customer-kopi",
-    brandId: "brand-kopi-kenangan",
-    placementMode: "building",
-    placementIds: ["building-pacific-place", "building-kota-kasablanka"],
-    weeks: 4,
-    spots: 160,
-    bonus: 16,
-    discount: 65,
-    pricing: calculatePricing({ basePrice: toDemoIdr(246_000), discount: 65, taxRate: DEMO_TAX_RATE }),
-    status: "returned",
-    version: 1,
-    versionSnapshots: [
-      {
-        version: 1,
-        customerId: "customer-kopi",
-        brandId: "brand-kopi-kenangan",
-        placementMode: "building",
-        placementIds: ["building-pacific-place", "building-kota-kasablanka"],
-        weeks: 4,
-        spots: 160,
-        bonus: 16,
-        discount: 65,
-        pricing: calculatePricing({ basePrice: toDemoIdr(246_000), discount: 65, taxRate: DEMO_TAX_RATE }),
-        traffic: 90_000,
-        impressions: 1_630_000,
-        submittedAt: "2026-07-02T02:15:00.000Z",
-      },
-    ],
-    approvalHistory: [
-      {
-        id: "event-returned-submit",
-        role: "sales",
-        action: "submitted",
-        actorId: "sales-chen",
-        actorName: "陈晨",
-        createdAt: "2026-07-02T02:15:00.000Z",
-        version: 1,
-      },
-      {
-        id: "event-returned-manager",
-        role: "manager",
-        action: "returned",
-        actorId: "manager-lin",
-        actorName: "林玥",
-        createdAt: "2026-07-02T05:40:00.000Z",
-        version: 1,
-        comment: "请补充周末商场场景，并确认 Bonus 排期。",
-      },
-    ],
-    createdAt: "2026-07-02T02:15:00.000Z",
-    updatedAt: "2026-07-02T05:40:00.000Z",
-    isDemoData: true,
-  },
-  {
-    id: "quote-pending-manager",
-    quoteNumber: "DEMO-Q-202607-002",
-    salesId: "sales-chen",
-    customerId: "customer-traveloka",
-    brandId: "brand-traveloka",
-    placementMode: "package",
-    placementIds: ["package-cbd-premium"],
-    weeks: 6,
-    spots: 240,
-    bonus: 24,
-    discount: 50,
-    pricing: calculatePricing({ basePrice: toDemoIdr(414_000), discount: 50, taxRate: DEMO_TAX_RATE }),
-    status: "pending_manager",
-    version: 1,
-    versionSnapshots: [
-      {
-        version: 1,
-        customerId: "customer-traveloka",
-        brandId: "brand-traveloka",
-        placementMode: "package",
-        placementIds: ["package-cbd-premium"],
-        weeks: 6,
-        spots: 240,
-        bonus: 24,
-        discount: 50,
-        pricing: calculatePricing({ basePrice: toDemoIdr(414_000), discount: 50, taxRate: DEMO_TAX_RATE }),
-        traffic: 73_700,
-        impressions: 1_423_000,
-        submittedAt: "2026-07-05T03:30:00.000Z",
-      },
-    ],
-    approvalHistory: [
-      {
-        id: "event-manager-submit",
-        role: "sales",
-        action: "submitted",
-        actorId: "sales-chen",
-        actorName: "陈晨",
-        createdAt: "2026-07-05T03:30:00.000Z",
-        version: 1,
-      },
-    ],
-    createdAt: "2026-07-05T03:30:00.000Z",
-    updatedAt: "2026-07-05T03:30:00.000Z",
-    isDemoData: true,
-  },
-  {
-    id: "quote-pending-ceo",
-    quoteNumber: "DEMO-Q-202607-003",
-    salesId: "sales-chen",
-    customerId: "customer-bank-mandiri",
-    brandId: "brand-livin",
-    placementMode: "package",
-    placementIds: ["package-jakarta-signature"],
-    weeks: 8,
-    spots: 320,
-    bonus: 40,
-    discount: 75,
-    pricing: calculatePricing({ basePrice: toDemoIdr(772_000), discount: 75, taxRate: DEMO_TAX_RATE }),
-    status: "pending_ceo",
-    version: 1,
-    versionSnapshots: [
-      {
-        version: 1,
-        customerId: "customer-bank-mandiri",
-        brandId: "brand-livin",
-        placementMode: "package",
-        placementIds: ["package-jakarta-signature"],
-        weeks: 8,
-        spots: 320,
-        bonus: 40,
-        discount: 75,
-        pricing: calculatePricing({ basePrice: toDemoIdr(772_000), discount: 75, taxRate: DEMO_TAX_RATE }),
-        traffic: 149_800,
-        impressions: 2_746_000,
-        submittedAt: "2026-07-06T01:10:00.000Z",
-      },
-    ],
-    approvalHistory: [
-      {
-        id: "event-ceo-submit",
-        role: "sales",
-        action: "submitted",
-        actorId: "sales-chen",
-        actorName: "陈晨",
-        createdAt: "2026-07-06T01:10:00.000Z",
-        version: 1,
-      },
-      {
-        id: "event-ceo-manager-approve",
-        role: "manager",
-        action: "approved",
-        actorId: "manager-lin",
-        actorName: "林玥",
-        createdAt: "2026-07-06T04:25:00.000Z",
-        version: 1,
-        comment: "战略客户年度活动，建议 CEO 审批。",
-      },
-    ],
-    createdAt: "2026-07-06T01:10:00.000Z",
-    updatedAt: "2026-07-06T04:25:00.000Z",
-    isDemoData: true,
-  },
-  {
-    id: "quote-approved",
-    quoteNumber: "DEMO-Q-202607-004",
-    salesId: "sales-chen",
-    customerId: "customer-gojek",
-    brandId: "brand-gofood",
-    placementMode: "package",
-    placementIds: ["package-south-lifestyle"],
-    weeks: 4,
-    spots: 180,
-    bonus: 18,
-    discount: 58,
-    pricing: calculatePricing({ basePrice: toDemoIdr(248_000), discount: 58, taxRate: DEMO_TAX_RATE }),
-    status: "approved",
-    version: 1,
-    versionSnapshots: [
-      {
-        version: 1,
-        customerId: "customer-gojek",
-        brandId: "brand-gofood",
-        placementMode: "package",
-        placementIds: ["package-south-lifestyle"],
-        weeks: 4,
-        spots: 180,
-        bonus: 18,
-        discount: 58,
-        pricing: calculatePricing({ basePrice: toDemoIdr(248_000), discount: 58, taxRate: DEMO_TAX_RATE }),
-        traffic: 87_500,
-        impressions: 1_596_000,
-        submittedAt: "2026-07-01T02:00:00.000Z",
-      },
-    ],
-    approvalHistory: [
-      {
-        id: "event-approved-submit",
-        role: "sales",
-        action: "submitted",
-        actorId: "sales-chen",
-        actorName: "陈晨",
-        createdAt: "2026-07-01T02:00:00.000Z",
-        version: 1,
-      },
-      {
-        id: "event-approved-manager",
-        role: "manager",
-        action: "approved",
-        actorId: "manager-lin",
-        actorName: "林玥",
-        createdAt: "2026-07-01T06:20:00.000Z",
-        version: 1,
-        comment: "价格与投放目标匹配，同意。",
-      },
-    ],
-    createdAt: "2026-07-01T02:00:00.000Z",
-    updatedAt: "2026-07-01T06:20:00.000Z",
-    approvedAt: "2026-07-01T06:20:00.000Z",
-    isDemoData: true,
-  },
+  seedQuote({
+    id: "quote-returned", quoteNumber: "DEMO-Q-202607-001",
+    customerId: "customer-kopi", brandId: "brand-kopi-kenangan",
+    placement: selection("building", ["building-pacific-place", "building-kota-kasablanka"], 4, 160),
+    discount: 60, status: "returned", submittedAt: "2026-07-02T02:15:00.000Z",
+    decidedAt: "2026-07-02T05:40:00.000Z", comment: "请补充周末商场场景，并确认 Bonus 排期。",
+  }),
+  seedQuote({
+    id: "quote-pending-manager", quoteNumber: "DEMO-Q-202607-002",
+    customerId: "customer-traveloka", brandId: "brand-traveloka",
+    placement: selection("package", ["package-cbd-premium"], 6, 240),
+    discount: 50, status: "pending_manager", submittedAt: "2026-07-05T03:30:00.000Z",
+  }),
+  seedQuote({
+    id: "quote-pending-business-control", quoteNumber: "DEMO-Q-202607-003",
+    customerId: "customer-bank-mandiri", brandId: "brand-livin",
+    placement: selection("package", ["package-cbd-premium"], 4, 180),
+    bonus: selection("building", ["building-menara-bca"], 4, 60),
+    discount: 55, status: "pending_business_control", submittedAt: "2026-07-06T01:10:00.000Z",
+  }),
+  seedQuote({
+    id: "quote-pending-ceo", quoteNumber: "DEMO-Q-202607-004",
+    customerId: "customer-bank-mandiri", brandId: "brand-livin",
+    placement: selection("package", ["package-jakarta-signature"], 8, 320),
+    bonus: selection("building", ["building-pacific-place"], 8, 100),
+    discount: 65, status: "pending_ceo", submittedAt: "2026-07-06T04:25:00.000Z",
+  }),
+  seedQuote({
+    id: "quote-approved", quoteNumber: "DEMO-Q-202607-005",
+    customerId: "customer-gojek", brandId: "brand-gofood",
+    placement: selection("package", ["package-south-lifestyle"], 4, 180),
+    discount: 58, status: "approved", submittedAt: "2026-07-01T02:00:00.000Z",
+    decidedAt: "2026-07-01T06:20:00.000Z", comment: "价格与投放目标匹配，同意。",
+  }),
 ];

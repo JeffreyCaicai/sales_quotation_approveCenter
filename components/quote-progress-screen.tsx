@@ -45,7 +45,7 @@ export function QuoteProgressScreen({ quote, backLabel, onBack, onEdit }: QuoteP
             <h2 id="latest-return-heading">{t("progress.latestReturnReason")}</h2>
           </div>
           <blockquote>{latestReturn.comment}</blockquote>
-          <p>{latestReturn.actorName} · {t(latestReturn.role === "ceo" ? "approval.roleCeo" : "approval.roleManager")}</p>
+          <p>{latestReturn.actorName} · {t(returnRoleKey(latestReturn.role))}</p>
         </section>
       ) : (
         <section className="progress-callout" aria-label={t("progress.currentProgress")}>
@@ -68,7 +68,15 @@ export function QuoteProgressScreen({ quote, backLabel, onBack, onEdit }: QuoteP
 
 function pendingProgressKey(status: Quote["status"]) {
   if (status === "pending_ceo") return "progress.waitingCeo" as const;
+  if (status === "pending_business_control") return "progress.waitingBusinessControl" as const;
   return "progress.waitingManager" as const;
+}
+
+function returnRoleKey(role: ApprovalEvent["role"]) {
+  if (role === "ceo") return "approval.roleCeo" as const;
+  if (role === "business_control") return "approval.roleBusinessControl" as const;
+  if (role === "sales") return "approval.roleSales" as const;
+  return "approval.roleManager" as const;
 }
 
 function getLatestReturn(history: ApprovalEvent[]) {

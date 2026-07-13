@@ -21,7 +21,7 @@ export function DashboardScreen({ user, quotes, onAction }: DashboardScreenProps
     return <SalesDashboard user={user} quotes={visibleQuotes} onAction={onAction} />;
   }
 
-  if (user.role === "manager") {
+  if (user.role === "manager" || user.role === "business_control") {
     return <ManagerDashboard user={user} quotes={visibleQuotes} onAction={onAction} />;
   }
 
@@ -34,7 +34,7 @@ function SalesDashboard({ user, quotes, onAction }: DashboardScreenProps) {
   const counts = {
     draft: quotes.filter((quote) => quote.status === "draft").length,
     returned: quotes.filter((quote) => quote.status === "returned").length,
-    pending: quotes.filter((quote) => quote.status === "pending_manager" || quote.status === "pending_ceo").length,
+    pending: quotes.filter((quote) => ["pending_manager", "pending_business_control", "pending_ceo"].includes(quote.status)).length,
     approved: quotes.filter((quote) => quote.status === "approved").length,
     total: quotes.length,
   };
@@ -68,17 +68,18 @@ function SalesDashboard({ user, quotes, onAction }: DashboardScreenProps) {
 function ManagerDashboard({ user, quotes, onAction }: DashboardScreenProps) {
   const { formatNumber, locale, t } = useLocale();
   const displayUser = localizeUser(user, locale);
-  const pending = quotes.filter((quote) => quote.status === "pending_manager");
-  const elevated = quotes.filter((quote) => getDiscountBand(quote.discount) !== "standard").length;
+  const queueStatus = user.role === "business_control" ? "pending_business_control" : "pending_manager";
+  const pending = quotes.filter((quote) => quote.status === queueStatus);
+  const elevated = pending.filter((quote) => getDiscountBand(quote.pricing.effectiveDiscountRate) !== "standard").length;
   const teamMember = USERS.find((member) => user.teamMemberIds?.includes(member.id));
   const teamMemberName = teamMember ? localizeUser(teamMember, locale).name : "—";
 
   return (
     <div className="dashboard">
       <DashboardHeading
-        eyebrow={t("dashboard.managerEyebrow")}
+        eyebrow={t(user.role === "business_control" ? "roleBusinessControl.eyebrow" : "dashboard.managerEyebrow")}
         title={t("dashboard.managerTitle", { name: displayUser.name })}
-        description={t("dashboard.managerDescription")}
+        description={t(user.role === "business_control" ? "roleBusinessControl.description" : "dashboard.managerDescription")}
       />
       <section className="metric-grid metric-grid--three" aria-label={t("dashboard.teamOverview")}>
         <MetricCard label={t("dashboard.metricPendingMine")} value={formatNumber(pending.length)} tone="amber" note={t("dashboard.metricPendingMineNote")} />
@@ -88,8 +89,8 @@ function ManagerDashboard({ user, quotes, onAction }: DashboardScreenProps) {
       <QuoteTable
         title={t("dashboard.teamQueue")}
         description={t("dashboard.teamQueueDescription")}
-        role="manager"
-        quotes={quotes}
+        role={user.role}
+        quotes={pending}
         onAction={onAction}
         showRisk
       />
@@ -106,7 +107,7 @@ function CeoDashboard({
   const { formatNumber, locale, t } = useLocale();
   const displayUser = localizeUser(user, locale);
   const approvedQuotes = quotes.filter((quote) => quote.status === "approved");
-  const approvedValue = approvedQuotes.reduce((total, quote) => total + quote.pricing.total, 0);
+  const approvedValue = approvedQuotes.reduce((total, quote) => total + quote.pricing.totalIncludingTax, 0);
 
   return (
     <div className="dashboard">
@@ -210,7 +211,7 @@ function QuoteTable({
       ) : (
         <div className="quote-list">
           <div className="quote-row quote-row--header" aria-hidden="true">
-            <span>{t("dashboard.quoteCustomer")}</span><span>{t("dashboard.owner")}</span><span>{t("dashboard.discount")}</span><span>{t("dashboard.taxIncludedTotal")}</span><span>{t("dashboard.status")}</span><span>{t("dashboard.action")}</span>
+            <span>{t("dashboard.quoteCustomer")}</span><span>{t("dashboard.owner")}</span><span>{t("commercial.effectiveDiscount")}</span><span>{t("dashboard.taxIncludedTotal")}</span><span>{t("dashboard.status")}</span><span>{t("dashboard.action")}</span>
           </div>
           {quotes.map((quote) => {
             const sourceCustomer = CUSTOMERS.find((item) => item.id === quote.customerId);
@@ -219,7 +220,7 @@ function QuoteTable({
             const owner = sourceOwner ? localizeUser(sourceOwner, locale) : undefined;
             const action = actionFor(role, quote);
             const actionLabel = t(action.labelKey);
-            const band = getDiscountBand(quote.discount);
+            const band = getDiscountBand(quote.pricing.effectiveDiscountRate);
             return (
               <article className="quote-row" key={quote.id}>
                 <div className="quote-row__primary">
@@ -227,11 +228,11 @@ function QuoteTable({
                   <span>{t("dashboard.updatedAt", { number: quote.quoteNumber, date: formatDate(quote.updatedAt) })}</span>
                 </div>
                 <span data-label={t("dashboard.owner")}>{owner?.name ?? "—"}</span>
-                <span data-label={t("dashboard.discount")}>
-                  <strong>{formatNumber(quote.discount)}%</strong>
+                <span data-label={t("commercial.effectiveDiscount")}>
+                  <strong>{formatNumber(Math.round(quote.pricing.effectiveDiscountRate * 100) / 100)}%</strong>
                   {showRisk ? <RiskBadge band={band} /> : null}
                 </span>
-                <span data-label={t("dashboard.taxIncludedTotal")}><Money amount={quote.pricing.total} /></span>
+                <span data-label={t("dashboard.taxIncludedTotal")}><Money amount={quote.pricing.totalIncludingTax} /></span>
                 <span data-label={t("dashboard.status")}><StatusBadge status={quote.status} /></span>
                 <span className="quote-row__action">
                   <button className={`button ${action.primary ? "button--primary" : "button--secondary"}`} type="button" onClick={() => onAction(actionLabel, quote)}>
@@ -257,6 +258,10 @@ function actionFor(role: Role, quote: Quote): { labelKey: TranslationKey; primar
   }
 
   if (role === "manager" && quote.status === "pending_manager") {
+    return { labelKey: "dashboard.reviewQuote", primary: true };
+  }
+
+  if (role === "business_control" && quote.status === "pending_business_control") {
     return { labelKey: "dashboard.reviewQuote", primary: true };
   }
 

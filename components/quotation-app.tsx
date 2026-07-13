@@ -2,9 +2,10 @@
 
 import { useState } from "react";
 
-import { BUILDINGS, CUSTOMERS, PACKAGES } from "@/lib/mock-data";
+import { APPROVAL_DIRECTORY, BUILDINGS, CUSTOMERS, PACKAGES } from "@/lib/mock-data";
 import {
   approveQuote,
+  canApproveQuote,
   createDraftQuote,
   returnQuote,
   submitQuote,
@@ -51,7 +52,16 @@ function QuotationWorkspace() {
   const [progressQuoteId, setProgressQuoteId] = useState<string | null>(null);
   const [quotationQuoteId, setQuotationQuoteId] = useState<string | null>(null);
 
-  if (!user) return <LoginScreen onLogin={setUser} />;
+  if (!user) {
+    return (
+      <LoginScreen
+        onLogin={(nextUser) => {
+          resetViewport();
+          setUser(nextUser);
+        }}
+      />
+    );
+  }
 
   const openPlaceholder = (label: string, quote?: Quote) => {
     setPlaceholder({
@@ -85,15 +95,17 @@ function QuotationWorkspace() {
       return;
     }
 
-    if (user.role === "sales" && quote && (quote.status === "returned" || quote.status === "pending_manager" || quote.status === "pending_ceo")) {
+    if (user.role === "sales" && quote && (
+      quote.status === "returned"
+      || quote.status === "pending_manager"
+      || quote.status === "pending_business_control"
+      || quote.status === "pending_ceo"
+    )) {
       setProgressQuoteId(quote.id);
       return;
     }
 
-    if (quote && (
-      (user.role === "manager" && quote.status === "pending_manager")
-      || (user.role === "ceo" && quote.status === "pending_ceo")
-    )) {
+    if (quote && canApproveQuote(quote, user)) {
       setApprovalQuoteId(quote.id);
       return;
     }
@@ -120,7 +132,11 @@ function QuotationWorkspace() {
 
   const handleSubmit = (input: QuoteInput) => {
     assertPersistableQuote(input, user);
-    const quote = submitQuote(input, wizard?.initialQuote, user);
+    const quote = submitQuote(input, wizard?.initialQuote, user, {
+      customers: CUSTOMERS,
+      buildings: BUILDINGS,
+      packages: PACKAGES,
+    }, APPROVAL_DIRECTORY);
     persistQuote(quote, wizard?.initialQuote);
     setWizard(null);
     setPlaceholder({
@@ -145,10 +161,8 @@ function QuotationWorkspace() {
     persistQuote(nextQuote, approvalQuote);
     setApprovalQuoteId(null);
     setPlaceholder({
-      title: t(nextQuote.status === "pending_ceo" ? "outcome.sentToCeoTitle" : "outcome.approvedTitle"),
-      message: nextQuote.status === "pending_ceo"
-        ? t("outcome.sentToCeoMessage", { number: nextQuote.quoteNumber })
-        : t("outcome.approvedMessage", { number: nextQuote.quoteNumber }),
+      title: t("outcome.approvedTitle"),
+      message: t("outcome.approvedMessage", { number: nextQuote.quoteNumber }),
     });
   };
 
@@ -167,6 +181,7 @@ function QuotationWorkspace() {
     <AppShell
       user={user}
       onSwitchUser={(nextUser) => {
+        resetViewport();
         setUser(nextUser);
         setWizard(null);
         setApprovalQuoteId(null);
@@ -206,7 +221,7 @@ function QuotationWorkspace() {
             setProgressQuoteId(null);
           }}
         />
-      ) : approvalQuote && (user.role === "manager" || user.role === "ceo") ? (
+      ) : approvalQuote && user.role !== "sales" ? (
         <ApprovalScreen
           quote={approvalQuote}
           actor={user}
@@ -232,6 +247,10 @@ function QuotationWorkspace() {
   );
 }
 
+function resetViewport() {
+  window.scrollTo({ top: 0, left: 0, behavior: "auto" });
+}
+
 function assertPersistableQuote(input: QuoteInput, actor: User) {
   const errors = {
     ...validateQuoteReferences(input, actor.id, {
@@ -240,7 +259,6 @@ function assertPersistableQuote(input: QuoteInput, actor: User) {
       packages: PACKAGES,
     }),
     ...validateQuote(input),
-    ...(!input.placementMode ? { placementMode: "validation.placementModeRequired" } : {}),
   };
 
   if (Object.keys(errors).length > 0) {

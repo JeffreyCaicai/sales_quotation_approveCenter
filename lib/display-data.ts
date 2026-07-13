@@ -3,8 +3,9 @@ import type { ApprovalEvent, Brand, Building, Customer, SalesPackage, User } fro
 
 const USER_ENGLISH: Record<string, Pick<User, "name" | "title">> = {
   "sales-chen": { name: "Chen Chen", title: "Jakarta Account Manager" },
-  "manager-lin": { name: "Lin Yue", title: "Sales Manager" },
-  "ceo-zhao": { name: "Zhao Mingyuan", title: "Chief Executive Officer" },
+  "manager-lin": { name: "Ayu Purnama", title: "Head of Sales" },
+  "business-control-april": { name: "Aprilliani Shintia Dewi", title: "Head of Business Control" },
+  "ceo-zhao": { name: "Thomas", title: "Chief Executive Officer" },
 };
 
 const CUSTOMER_ENGLISH: Record<string, Pick<Customer, "name" | "industry">> = {
@@ -50,9 +51,8 @@ const PACKAGE_ENGLISH: Record<string, Pick<SalesPackage, "description" | "catego
 };
 
 const SEEDED_EVENT_COMMENT_ENGLISH: Record<string, string> = {
-  "event-returned-manager": "Please add weekend mall scenarios and confirm the Bonus schedule.",
-  "event-ceo-manager-approve": "Annual campaign for a strategic customer; CEO approval is recommended.",
-  "event-approved-manager": "Pricing aligns with the campaign objective. Approved.",
+  "quote-returned-returned": "Please add weekend mall scenarios and confirm the Bonus schedule.",
+  "quote-approved-approved": "Pricing aligns with the campaign objective. Approved.",
 };
 
 export function localizeUser(user: User, locale: Locale): User {

@@ -1,8 +1,8 @@
 import { useMemo } from "react";
 
-import { localizeApprovalEvent, localizeBuilding, localizeCustomer, localizePackage } from "@/lib/display-data";
-import { BUILDINGS, CUSTOMERS, PACKAGES } from "@/lib/mock-data";
-import type { ApprovalEvent, Quote, QuoteVersionSnapshot } from "@/lib/types";
+import { localizeApprovalEvent, localizeBuilding, localizeCustomer, localizePackage, localizeUser } from "@/lib/display-data";
+import { BUILDINGS, CUSTOMERS, PACKAGES, USERS } from "@/lib/mock-data";
+import type { ApprovalEvent, CommercialSelection, Quote, QuoteVersionSnapshot } from "@/lib/types";
 
 import { useLocale } from "./locale-provider";
 import { Money } from "./ui";
@@ -44,16 +44,15 @@ export function QuoteVersionHistory({ quote }: QuoteVersionHistoryProps) {
 }
 
 function SnapshotSummary({ snapshot }: { snapshot: QuoteVersionSnapshot }) {
-  const { locale, t, formatNumber, formatMoney } = useLocale();
+  const { locale, t, formatNumber } = useLocale();
   const dateTimeFormatter = useMemo(() => new Intl.DateTimeFormat(locale, {
     year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit",
   }), [locale]);
   const sourceCustomer = CUSTOMERS.find((item) => item.id === snapshot.customerId);
   const customer = sourceCustomer ? localizeCustomer(sourceCustomer, locale) : undefined;
   const brand = customer?.brands.find((item) => item.id === snapshot.brandId);
-  const resources = snapshot.placementMode === "package"
-    ? PACKAGES.filter((item) => snapshot.placementIds.includes(item.id)).map((item) => localizePackage(item, locale))
-    : BUILDINGS.filter((item) => snapshot.placementIds.includes(item.id)).map((item) => localizeBuilding(item, locale));
+  const approver = USERS.find((item) => item.id === snapshot.requiredApproverId);
+  const displayApprover = approver ? localizeUser(approver, locale) : undefined;
 
   return (
     <section className="version-record__snapshot" aria-labelledby={`version-${snapshot.version}-heading`}>
@@ -66,14 +65,20 @@ function SnapshotSummary({ snapshot }: { snapshot: QuoteVersionSnapshot }) {
       </header>
       <dl className="version-summary-grid">
         <div><dt>{t("history.clientBrand")}</dt><dd>{customer?.name ?? snapshot.customerId}<small>{brand?.name ?? snapshot.brandId}</small></dd></div>
-        <div><dt>{t("history.resources")}</dt><dd>{t(snapshot.placementMode === "package" ? "history.packageMode" : "history.buildingMode")}<small>{resources.map((item) => item.name).join(locale === "zh-CN" ? "、" : ", ")}</small></dd></div>
-        <div><dt>{t("history.parameters")}</dt><dd>{formatNumber(snapshot.weeks)} {t("wizard.weekUnit")} · {formatNumber(snapshot.spots)} {t("commercial.spot")}<small>{formatNumber(snapshot.bonus)} {t("commercial.bonus")}</small></dd></div>
-        <div><dt>{t("history.audienceMetrics")}</dt><dd>{t("history.dailyTraffic", { value: formatNumber(snapshot.traffic) })}<small>{t("history.monthlyImpressions", { value: formatNumber(snapshot.impressions) })}</small></dd></div>
-        <div><dt>{t("history.discount")}</dt><dd>{formatNumber(snapshot.discount)}%<small>{t("commercial.rateCard")} <Money amount={snapshot.pricing.basePrice} /></small></dd></div>
-        <div><dt>{t("history.totalWithTax")}</dt><dd><Money amount={snapshot.pricing.total} /><small>{t("history.netPrice", { amount: formatMoney(snapshot.pricing.netPrice) })}</small></dd></div>
+        <SelectionSnapshot label={t("commercial.placement")} selection={snapshot.placement} />
+        {snapshot.bonus ? <SelectionSnapshot label={t("commercial.bonus")} selection={snapshot.bonus} /> : <div><dt>{t("commercial.bonus")}</dt><dd>{t("commercial.noBonus")}</dd></div>}
+        <div><dt>{t("commercial.totalGross")}</dt><dd><Money amount={snapshot.pricing.totalGross} /><small>{t("commercial.totalNett")} <Money amount={snapshot.pricing.totalNet} /></small></dd></div>
+        <div><dt>{t("commercial.effectiveDiscount")}</dt><dd>{formatNumber(Math.round(snapshot.pricing.effectiveDiscountRate * 100) / 100)}%<small>{t("commercial.directApprover")}: {displayApprover?.name ?? snapshot.requiredApproverId} · {displayApprover?.title ?? "—"}</small></dd></div>
+        <div><dt>{t("history.totalWithTax")}</dt><dd><Money amount={snapshot.pricing.totalIncludingTax} /></dd></div>
       </dl>
     </section>
   );
+}
+
+function SelectionSnapshot({ label, selection }: { label: string; selection: CommercialSelection }) {
+  const { locale, t, formatNumber } = useLocale();
+  const resources = selection.mode === "package" ? PACKAGES.filter((item) => selection.resourceIds.includes(item.id)).map((item) => localizePackage(item, locale)) : BUILDINGS.filter((item) => selection.resourceIds.includes(item.id)).map((item) => localizeBuilding(item, locale));
+  return <div><dt>{label}</dt><dd>{t(selection.mode === "package" ? "history.packageMode" : "history.buildingMode")} · TVC {formatNumber(selection.tvcDurationSeconds)}s<small>{resources.map((item) => item.name).join(locale === "zh-CN" ? "、" : ", ")} · {formatNumber(selection.weeks)} {t("wizard.weekUnit")} · {formatNumber(selection.spots)} {t("commercial.spot")} · {formatNumber(selection.traffic)} / {formatNumber(selection.impressions)}</small></dd></div>;
 }
 
 function TimelineEvent({ event }: { event: ApprovalEvent }) {
@@ -100,5 +105,6 @@ function TimelineEvent({ event }: { event: ApprovalEvent }) {
 function roleLabel(role: ApprovalEvent["role"]) {
   if (role === "sales") return "approval.roleSales" as const;
   if (role === "manager") return "approval.roleManager" as const;
+  if (role === "business_control") return "approval.roleBusinessControl" as const;
   return "approval.roleCeo" as const;
 }

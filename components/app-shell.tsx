@@ -17,9 +17,10 @@ interface AppShellProps {
   onPlaceholder: (label: string) => void;
 }
 
-const ROLE_LABEL_KEYS: Record<Role, "roleSales.label" | "roleManager.label" | "roleCeo.label"> = {
+const ROLE_LABEL_KEYS: Record<Role, "roleSales.label" | "roleManager.label" | "roleBusinessControl.label" | "roleCeo.label"> = {
   sales: "roleSales.label",
   manager: "roleManager.label",
+  business_control: "roleBusinessControl.label",
   ceo: "roleCeo.label",
 };
 

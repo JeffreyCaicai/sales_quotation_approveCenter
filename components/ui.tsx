@@ -8,6 +8,7 @@ import { useLocale } from "./locale-provider";
 const STATUS_LABEL_KEYS: Record<QuoteStatus, TranslationKey> = {
   draft: "status.draft",
   pending_manager: "status.pendingManager",
+  pending_business_control: "status.pendingBusinessControl",
   pending_ceo: "status.pendingCeo",
   returned: "status.returned",
   approved: "status.approved",

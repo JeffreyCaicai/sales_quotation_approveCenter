@@ -116,11 +116,13 @@ test("quotation workflow dictionaries cover validation, decisions, versions, and
     "validation.brandRequired",
     "validation.placementModeRequired",
     "validation.placementRequired",
+    "validation.tvcDurationPositiveInteger",
     "validation.weeksPositiveInteger",
     "validation.spotsPositiveInteger",
-    "validation.bonusNonnegativeInteger",
     "validation.discountRange",
-    "validation.basePriceFiniteNonnegative",
+    "validation.grossPriceFiniteNonnegative",
+    "validation.pricingUnsafeInteger",
+    "validation.effectiveDiscountRateRange",
     "validation.taxRateFiniteNonnegative",
     "validation.trafficNonnegativeInteger",
     "validation.impressionsNonnegativeInteger",
@@ -162,6 +164,17 @@ test("quotation workflow dictionaries cover validation, decisions, versions, and
     "commercial.spot",
     "commercial.bonus",
     "commercial.rateCard",
+    "commercial.placementGross",
+    "commercial.placementNett",
+    "commercial.bonusGross",
+    "commercial.bonusNett",
+    "commercial.free",
+    "commercial.totalGross",
+    "commercial.totalNett",
+    "commercial.effectiveDiscount",
+    "commercial.noBonus",
+    "commercial.addBonus",
+    "commercial.directApprover",
   ] as const;
   const englishLeaves = dictionaryLeaves(translations.en);
   const chineseLeaves = dictionaryLeaves(translations["zh-CN"]);
@@ -172,6 +185,60 @@ test("quotation workflow dictionaries cover validation, decisions, versions, and
     assert.notEqual(englishLeaves[key], "", `English ${key} is empty`);
     assert.notEqual(chineseLeaves[key], "", `Chinese ${key} is empty`);
   }
+});
+
+test("English and Chinese localize Business Control and the new direct-approval pricing vocabulary", () => {
+  const expected = {
+    en: {
+      "roleBusinessControl.label": "Head of Business Control",
+      "status.pendingBusinessControl": "Awaiting Head of Business Control",
+      "commercial.placementGross": "Placement Gross",
+      "commercial.placementNett": "Placement Nett",
+      "commercial.bonusGross": "Bonus Gross",
+      "commercial.bonusNett": "Bonus Nett",
+      "commercial.free": "FREE",
+      "commercial.totalGross": "Total Gross",
+      "commercial.totalNett": "Total Nett",
+      "commercial.effectiveDiscount": "Effective Discount",
+      "commercial.noBonus": "No Bonus",
+      "commercial.addBonus": "Add Bonus",
+      "commercial.directApprover": "Direct approver",
+    },
+    "zh-CN": {
+      "roleBusinessControl.label": "业务控制负责人",
+      "status.pendingBusinessControl": "待业务控制负责人审批",
+      "commercial.placementGross": "投放原价",
+      "commercial.placementNett": "投放净价",
+      "commercial.bonusGross": "Bonus 原价",
+      "commercial.bonusNett": "Bonus 净价",
+      "commercial.free": "免费",
+      "commercial.totalGross": "总原价",
+      "commercial.totalNett": "总净价",
+      "commercial.effectiveDiscount": "有效折扣",
+      "commercial.noBonus": "无 Bonus",
+      "commercial.addBonus": "添加 Bonus",
+      "commercial.directApprover": "直接审批人",
+    },
+  } as const;
+
+  for (const locale of ["en", "zh-CN"] as const) {
+    const leaves = dictionaryLeaves(translations[locale]);
+    for (const [key, value] of Object.entries(expected[locale])) {
+      assert.equal(leaves[key], value, `${locale} ${key}`);
+    }
+  }
+});
+
+test("approval copy describes one direct approver and never the retired manager-to-CEO sequence", () => {
+  const englishCopy = Object.values(dictionaryLeaves(translations.en)).join("\n");
+  const chineseCopy = Object.values(dictionaryLeaves(translations["zh-CN"])).join("\n");
+
+  assert.match(englishCopy, /effective discount[^\n]*directly|direct approver/i);
+  assert.match(chineseCopy, /有效折扣[^\n]*直接|直接审批人/);
+  assert.doesNotMatch(englishCopy, /Sales Manager\s*(?:→|->)\s*CEO|after (?:the )?Sales Manager|goes to the CEO after|passed Sales Manager review/i);
+  assert.doesNotMatch(chineseCopy, /销售主管\s*(?:→|->)\s*CEO|主管通过后.*CEO|主管批准后.*CEO|完成主管审批.*CEO|经主管.*流转.*CEO/);
+  assert.doesNotMatch(englishCopy, /Bonus must be a nonnegative integer|Spot and Bonus confirm scheduling/i);
+  assert.doesNotMatch(chineseCopy, /Bonus 必须为非负整数|Spot 与 Bonus 用于排期/);
 });
 
 test("every exported domain validation key exists in both dictionaries", () => {
@@ -198,10 +265,11 @@ test("quotation workflow components render copy through the locale context", () 
 
   for (const componentName of componentNames) {
     const source = readFileSync(new URL(`../components/${componentName}`, import.meta.url), "utf8");
+    const renderedSource = source.replace(/t\("[^"]+"(?:,\s*\{[^)]*\})?\)/g, "t(localized-key)");
     assert.match(source, /useLocale\(\)/, `${componentName} must subscribe to locale changes`);
     assert.doesNotMatch(source, /[\u3400-\u9fff]/, `${componentName} contains untranslated UI copy`);
     assert.doesNotMatch(
-      source,
+      renderedSource,
       /(?:label=")?(?:Spot|Bonus|Rate Card)(?:"|\s*<|\s*\{|\s*$)|}\s*(?:Spot|Bonus)\b|>\s*Rate Card\b/m,
       `${componentName} contains a raw commercial label`,
     );
@@ -266,11 +334,11 @@ test("resetting quotation data does not remove the locale preference", () => {
 
   withStorage(storage, () => {
     saveLocale("zh-CN");
-    storage.setItem("quotation-prototype-v2", "stored quotation data");
+    storage.setItem("quotation-prototype-v3", "stored quotation data");
     resetQuotes();
 
     assert.equal(loadLocale(), "zh-CN");
-    assert.equal(storage.getItem("quotation-prototype-v2"), null);
+    assert.equal(storage.getItem("quotation-prototype-v3"), null);
   });
 });
 
@@ -335,7 +403,7 @@ test("localized display helpers preserve identifiers and user-authored approval 
   };
   const localizedEvent = localizeApprovalEvent(customEvent, "en");
   assert.equal(localizedEvent.id, customEvent.id);
-  assert.equal(localizedEvent.actorName, "Lin Yue");
+  assert.equal(localizedEvent.actorName, "Ayu Purnama");
   assert.equal(localizedEvent.comment, customEvent.comment);
 });
 
