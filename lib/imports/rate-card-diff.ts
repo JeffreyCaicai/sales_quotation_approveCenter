@@ -4,7 +4,7 @@ export interface RateCardDiffSnapshot {
   versionId: string | null;
   buildingPrices: Map<string, string>;
   packagePrices: Map<string, string>;
-  packageMemberships: Set<string>;
+  packageMemberships: Array<{ packageCode: string; irisBuildingId: string }>;
 }
 
 export type RateCardChangeValue =
@@ -17,6 +17,32 @@ export interface RateCardChange {
   changeType: "added" | "modified" | "removed" | "unchanged";
   before: RateCardChangeValue | null;
   after: RateCardChangeValue | null;
+}
+
+function internalKey(value: RateCardChangeValue): string {
+  switch (value.kind) {
+    case "building_price":
+      return JSON.stringify([value.kind, value.irisBuildingId]);
+    case "package_price":
+      return JSON.stringify([value.kind, value.packageCode]);
+    case "package_membership":
+      return JSON.stringify([value.kind, value.packageCode, value.irisBuildingId]);
+  }
+}
+
+function entityKey(value: RateCardChangeValue): string {
+  switch (value.kind) {
+    case "building_price":
+      return `building:${encodeURIComponent(value.irisBuildingId)}`;
+    case "package_price":
+      return `package:${encodeURIComponent(value.packageCode)}`;
+    case "package_membership":
+      return `membership:${encodeURIComponent(value.packageCode)}:${encodeURIComponent(value.irisBuildingId)}`;
+  }
+}
+
+function setValue(map: Map<string, RateCardChangeValue>, value: RateCardChangeValue): void {
+  map.set(internalKey(value), value);
 }
 
 function classifiedChange(
@@ -42,45 +68,46 @@ export function calculateRateCardDiff(
   const candidate = new Map<string, RateCardChangeValue>();
 
   for (const [irisBuildingId, priceIdr] of snapshot.buildingPrices) {
-    current.set(`building:${irisBuildingId}`, { kind: "building_price", irisBuildingId, priceIdr });
+    setValue(current, { kind: "building_price", irisBuildingId, priceIdr });
   }
   for (const [packageCode, priceIdr] of snapshot.packagePrices) {
-    current.set(`package:${packageCode}`, { kind: "package_price", packageCode, priceIdr });
+    setValue(current, { kind: "package_price", packageCode, priceIdr });
   }
-  for (const identity of snapshot.packageMemberships) {
-    const separator = identity.indexOf(":");
-    const packageCode = identity.slice(0, separator);
-    const irisBuildingId = identity.slice(separator + 1);
-    current.set(`membership:${packageCode}:${irisBuildingId}`, {
-      kind: "package_membership", packageCode, irisBuildingId,
+  for (const membership of snapshot.packageMemberships) {
+    setValue(current, {
+      kind: "package_membership",
+      packageCode: membership.packageCode,
+      irisBuildingId: membership.irisBuildingId,
     });
   }
 
   for (const row of staged.buildingPrices) {
     const irisBuildingId = row.irisBuildingId.trim();
-    candidate.set(`building:${irisBuildingId}`, {
+    setValue(candidate, {
       kind: "building_price", irisBuildingId, priceIdr: row.priceIdr,
     });
   }
   for (const row of staged.packagePrices) {
     const packageCode = row.packageCode.trim();
-    candidate.set(`package:${packageCode}`, {
+    setValue(candidate, {
       kind: "package_price", packageCode, priceIdr: row.priceIdr,
     });
   }
   for (const row of staged.packageMemberships) {
     const packageCode = row.packageCode.trim();
     const irisBuildingId = row.irisBuildingId.trim();
-    candidate.set(`membership:${packageCode}:${irisBuildingId}`, {
+    setValue(candidate, {
       kind: "package_membership", packageCode, irisBuildingId,
     });
   }
 
   return [...new Set([...current.keys(), ...candidate.keys()])]
-    .sort()
-    .map((entityKey) => classifiedChange(
-      entityKey,
-      current.get(entityKey) ?? null,
-      candidate.get(entityKey) ?? null,
-    ));
+    .map((key) => {
+      const before = current.get(key) ?? null;
+      const after = candidate.get(key) ?? null;
+      const value = before ?? after;
+      if (!value) throw new Error("Rate Card difference key has no value");
+      return classifiedChange(entityKey(value), before, after);
+    })
+    .sort((left, right) => left.entityKey < right.entityKey ? -1 : left.entityKey > right.entityKey ? 1 : 0);
 }

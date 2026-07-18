@@ -37,10 +37,10 @@ describe("Rate Card difference preview", () => {
         ["PKG-CHANGE", "700"],
         ["PKG-REMOVE", "800"],
       ]),
-      packageMemberships: new Set([
-        "PKG-KEEP:B-KEEP",
-        "PKG-REMOVE:B-REMOVE",
-      ]),
+      packageMemberships: [
+        { packageCode: "PKG-KEEP", irisBuildingId: "B-KEEP" },
+        { packageCode: "PKG-REMOVE", irisBuildingId: "B-REMOVE" },
+      ],
     })).toEqual([
       expect.objectContaining({ entityKey: "building:B-ADD", changeType: "added", before: null }),
       expect.objectContaining({ entityKey: "building:B-CHANGE", changeType: "modified" }),
@@ -53,6 +53,43 @@ describe("Rate Card difference preview", () => {
       expect.objectContaining({ entityKey: "package:PKG-CHANGE", changeType: "modified" }),
       expect.objectContaining({ entityKey: "package:PKG-KEEP", changeType: "unchanged" }),
       expect.objectContaining({ entityKey: "package:PKG-REMOVE", changeType: "removed", after: null }),
+    ]);
+  });
+
+  test("keeps colon-containing package membership tuples distinct without corrupting values", () => {
+    const staged: StagedRateCardImport = {
+      templateVersion: "TMN-IMPORT-2",
+      currency: "IDR",
+      basedOnVersionId: "current-version",
+      buildingPrices: [],
+      packagePrices: [],
+      packageMemberships: [
+        { rowNumber: 2, packageCode: "PKG:A", irisBuildingId: "B" },
+        { rowNumber: 3, packageCode: "PKG", irisBuildingId: "A:B" },
+      ],
+    };
+
+    expect(calculateRateCardDiff(staged, {
+      versionId: "current-version",
+      buildingPrices: new Map(),
+      packagePrices: new Map(),
+      packageMemberships: [
+        { packageCode: "PKG:A", irisBuildingId: "B" },
+        { packageCode: "PKG", irisBuildingId: "A:B" },
+      ],
+    })).toEqual([
+      {
+        entityKey: "membership:PKG%3AA:B",
+        changeType: "unchanged",
+        before: { kind: "package_membership", packageCode: "PKG:A", irisBuildingId: "B" },
+        after: { kind: "package_membership", packageCode: "PKG:A", irisBuildingId: "B" },
+      },
+      {
+        entityKey: "membership:PKG:A%3AB",
+        changeType: "unchanged",
+        before: { kind: "package_membership", packageCode: "PKG", irisBuildingId: "A:B" },
+        after: { kind: "package_membership", packageCode: "PKG", irisBuildingId: "A:B" },
+      },
     ]);
   });
 });

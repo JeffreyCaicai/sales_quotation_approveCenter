@@ -98,7 +98,7 @@ export class PostgresImportProcessingRepository implements ImportProcessingRepos
         versionId: null,
         buildingPrices: new Map<string, string>(),
         packagePrices: new Map<string, string>(),
-        packageMemberships: new Set<string>(),
+        packageMemberships: [],
       };
     }
 
@@ -129,7 +129,10 @@ export class PostgresImportProcessingRepository implements ImportProcessingRepos
       versionId: currentVersion.id,
       buildingPrices: new Map(buildingPrices.map((item) => [item.irisBuildingId, String(item.priceIdr)])),
       packagePrices: new Map(packagePrices.map((item) => [item.packageCode, String(item.priceIdr)])),
-      packageMemberships: new Set(packageMemberships.map((item) => `${item.packageCode}:${item.irisBuildingId}`)),
+      packageMemberships: packageMemberships.map((item) => ({
+        packageCode: item.packageCode,
+        irisBuildingId: item.irisBuildingId,
+      })),
     };
   }
 

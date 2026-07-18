@@ -85,17 +85,20 @@ function duplicateErrors(
     }
   }
 
-  const membershipCounts = countBy(input.packageMemberships, (row) =>
-    `${row.packageCode}\0${row.irisBuildingId.trim()}`);
+  const membershipCounts = countBy(input.packageMemberships, (row) => JSON.stringify([
+    row.packageCode.trim(),
+    row.irisBuildingId.trim(),
+  ]));
   for (const row of input.packageMemberships) {
     const irisBuildingId = row.irisBuildingId.trim();
-    if ((membershipCounts.get(`${row.packageCode}\0${irisBuildingId}`) ?? 0) > 1) {
+    const packageCode = row.packageCode.trim();
+    if ((membershipCounts.get(JSON.stringify([packageCode, irisBuildingId])) ?? 0) > 1) {
       errors.push({
         sheet: "Package Membership",
         rowNumber: row.rowNumber,
         column: "IRIS Building ID",
         key: "import.error.rate_card_membership_duplicate",
-        params: { irisBuildingId, packageCode: row.packageCode },
+        params: { irisBuildingId, packageCode },
       });
     }
   }

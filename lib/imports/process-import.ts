@@ -235,7 +235,10 @@ function duplicateRateCardErrors(input: RateCardImport): ImportValidationError[]
   };
   const buildingCounts = duplicates(input.buildingPrices, (row) => row.irisBuildingId.trim());
   const packageCounts = duplicates(input.packagePrices, (row) => row.packageCode.trim());
-  const membershipCounts = duplicates(input.packageMemberships, (row) => `${row.packageCode.trim()}:${row.irisBuildingId.trim()}`);
+  const membershipCounts = duplicates(input.packageMemberships, (row) => JSON.stringify([
+    row.packageCode.trim(),
+    row.irisBuildingId.trim(),
+  ]));
   for (const row of input.buildingPrices) {
     const irisBuildingId = row.irisBuildingId.trim();
     if ((buildingCounts.get(irisBuildingId) ?? 0) > 1) errors.push({
@@ -253,7 +256,7 @@ function duplicateRateCardErrors(input: RateCardImport): ImportValidationError[]
   for (const row of input.packageMemberships) {
     const packageCode = row.packageCode.trim();
     const irisBuildingId = row.irisBuildingId.trim();
-    if ((membershipCounts.get(`${packageCode}:${irisBuildingId}`) ?? 0) > 1) errors.push({
+    if ((membershipCounts.get(JSON.stringify([packageCode, irisBuildingId])) ?? 0) > 1) errors.push({
       sheet: "Package Membership", rowNumber: row.rowNumber, column: "Package Code / IRIS Building ID",
       key: "import.error.rate_card_membership_duplicate", params: { packageCode, irisBuildingId },
     });

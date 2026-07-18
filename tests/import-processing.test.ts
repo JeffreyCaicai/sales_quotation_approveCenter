@@ -73,7 +73,7 @@ class Repository implements ImportProcessingRepository {
     versionId: "current-version",
     buildingPrices: new Map([["B001", "100"]]),
     packagePrices: new Map([["PKG-A", "250"]]),
-    packageMemberships: new Set(["PKG-A:B001"]),
+    packageMemberships: [{ packageCode: "PKG-A", irisBuildingId: "B001" }],
   };
 
   async claim() {
@@ -293,7 +293,7 @@ describe("production import processing", () => {
       versionId: null,
       buildingPrices: new Map(),
       packagePrices: new Map(),
-      packageMemberships: new Set(),
+      packageMemberships: [],
     };
     expect(validateRateCardForProcessing(base, snapshot).map((error) => error.key)).toContain("import.error.rate_card_empty");
     expect(validateRateCardForProcessing({
@@ -322,13 +322,45 @@ describe("production import processing", () => {
     ]));
   });
 
+  test("does not classify distinct colon-containing membership tuples as duplicates", () => {
+    const snapshot: RateCardProcessingSnapshot = {
+      buildings: [
+        { id: "b1", irisBuildingId: "B", erpBuildingId: null, status: "active" },
+        { id: "b2", irisBuildingId: "A:B", erpBuildingId: null, status: "active" },
+      ],
+      packages: [
+        { packageCode: "PKG:A", status: "active" },
+        { packageCode: "PKG", status: "active" },
+      ],
+      versionId: null,
+      buildingPrices: new Map(),
+      packagePrices: new Map(),
+      packageMemberships: [],
+    };
+    const input: RateCardImport = {
+      templateVersion: "TMN-IMPORT-2",
+      currency: "IDR",
+      buildingPrices: [],
+      packagePrices: [
+        { rowNumber: 2, packageCode: "PKG:A", priceIdr: "100" },
+        { rowNumber: 3, packageCode: "PKG", priceIdr: "200" },
+      ],
+      packageMemberships: [
+        { rowNumber: 2, packageCode: "PKG:A", irisBuildingId: "B" },
+        { rowNumber: 3, packageCode: "PKG", irisBuildingId: "A:B" },
+      ],
+    };
+
+    expect(validateRateCardForProcessing(input, snapshot)).toEqual([]);
+  });
+
   test.each(["-1", "1.0", "1e3", "+1", "1,000", " 1", "1 "])(
     "rejects non-canonical IDR integer text %j while accepting zero",
     (priceIdr) => {
       const snapshot: RateCardProcessingSnapshot = {
         buildings: [{ id: "b1", irisBuildingId: "B1", erpBuildingId: null, status: "active" }],
         packages: [], versionId: null,
-        buildingPrices: new Map(), packagePrices: new Map(), packageMemberships: new Set(),
+        buildingPrices: new Map(), packagePrices: new Map(), packageMemberships: [],
       };
       const input = (value: string): RateCardImport => ({
         templateVersion: "TMN-IMPORT-2", currency: "IDR",

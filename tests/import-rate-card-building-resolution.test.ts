@@ -105,4 +105,26 @@ describe("Rate Card IRIS reference resolution", () => {
       ]);
     }
   });
+
+  test("does not collide distinct colon-containing membership identities", () => {
+    const colonSnapshot: BuildingValidationSnapshot = {
+      buildings: [
+        { id: "uuid-b", irisBuildingId: "B", erpBuildingId: null, status: "active" },
+        { id: "uuid-a-colon-b", irisBuildingId: "A:B", erpBuildingId: null, status: "active" },
+      ],
+    };
+
+    expect(resolveRateCardBuildingReferences(rateCard({
+      packageMemberships: [
+        { rowNumber: 2, packageCode: "PKG:A", irisBuildingId: "B" },
+        { rowNumber: 3, packageCode: "PKG", irisBuildingId: "A:B" },
+      ],
+    }), colonSnapshot)).toEqual({
+      buildingPrices: [],
+      packageMemberships: [
+        { rowNumber: 2, packageCode: "PKG:A", buildingId: "uuid-b" },
+        { rowNumber: 3, packageCode: "PKG", buildingId: "uuid-a-colon-b" },
+      ],
+    });
+  });
 });

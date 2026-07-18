@@ -1,10 +1,14 @@
-import { access, readFile } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { access, copyFile, mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { promisify } from "node:util";
 
 import { describe, expect, test } from "vitest";
 import * as XLSX from "xlsx";
 
 import { generateImportTemplate } from "@/lib/imports/generate-template";
+import { parseImportFiles } from "@/lib/imports/normalize";
 import {
   BUILDING_HEADERS,
   PACKAGE_HEADERS,
@@ -18,6 +22,7 @@ import {
 const SERVER_TEMPLATE_ROOT = join(process.cwd(), "server-assets", "templates", "v2");
 const PUBLIC_TEMPLATE_ROOT = join(process.cwd(), "public", "templates", "v2");
 const FORMULA_ERROR_TOKENS = new Set(["#REF!", "#DIV/0!", "#VALUE!", "#NAME?", "#N/A"]);
+const execFileAsync = promisify(execFile);
 
 function readWorkbook(buffer: Buffer): XLSX.WorkBook {
   return XLSX.read(buffer, { type: "buffer", cellFormula: true, cellDates: false });
@@ -45,6 +50,61 @@ function expectNoFormulasOrErrors(workbook: XLSX.WorkBook): void {
 }
 
 describe("formal TMN-IMPORT-2 templates", () => {
+  test("the asset builder regenerates an exact v2 Rate Card workbook accepted by the parser", async () => {
+    const temporaryRoot = await mkdtemp(join(tmpdir(), "tmn-template-assets-"));
+    const temporaryRenderRoot = join(temporaryRoot, "renders");
+    try {
+      await mkdir(join(temporaryRoot, "lib", "imports"), { recursive: true });
+      await copyFile(
+        join(process.cwd(), "lib", "imports", "template-v2.ts"),
+        join(temporaryRoot, "lib", "imports", "template-v2.ts"),
+      );
+      await execFileAsync(process.execPath, [
+        "--import",
+        "tsx",
+        join(process.cwd(), "scripts", "build-import-template-assets.mjs"),
+        temporaryRoot,
+        temporaryRenderRoot,
+      ], { cwd: process.cwd(), timeout: 60_000 });
+
+      const buffer = await readFile(join(
+        temporaryRoot,
+        "server-assets",
+        "templates",
+        "v2",
+        "04_Rate_Card_Template.xlsx",
+      ));
+      const workbook = readWorkbook(buffer);
+      expect(workbook.SheetNames).toEqual([
+        "Instructions",
+        "Metadata",
+        "Building Prices",
+        "Package Prices",
+        "Package Membership",
+      ]);
+      expect(rows(buffer, "Metadata")).toEqual([
+        ["Template Version", TEMPLATE_VERSION_V2],
+        ["Currency", "IDR"],
+      ]);
+      expect(rows(buffer, "Building Prices")[0]).toEqual([...RATE_CARD_BUILDING_PRICE_HEADERS]);
+      expect(rows(buffer, "Package Prices")[0]).toEqual([...RATE_CARD_PACKAGE_PRICE_HEADERS]);
+      expect(rows(buffer, "Package Membership")[0]).toEqual([...RATE_CARD_PACKAGE_MEMBERSHIP_HEADERS]);
+
+      await expect(parseImportFiles("rate_card", [{
+        filename: "04_Rate_Card_Template.xlsx",
+        body: new Uint8Array(buffer),
+      }])).resolves.toMatchObject({
+        templateVersion: TEMPLATE_VERSION_V2,
+        currency: "IDR",
+        buildingPrices: [{ irisBuildingId: "B003004", priceIdr: "1000000" }],
+        packagePrices: [{ packageCode: "PKG-01", priceIdr: "1500000" }],
+        packageMemberships: [{ packageCode: "PKG-01", irisBuildingId: "B003004" }],
+      });
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  }, 60_000);
+
   test("building template protects exact v2 headers and keeps the ERP example blank", async () => {
     const buffer = await generateImportTemplate("building", TEMPLATE_VERSION_V2);
     const data = rows(buffer, "Data");
