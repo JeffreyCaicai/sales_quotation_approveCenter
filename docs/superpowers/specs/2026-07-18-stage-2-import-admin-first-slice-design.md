@@ -6,7 +6,7 @@
 
 ## 1. Purpose
 
-This first Stage 2 delivery creates a usable administrative import loop on the existing central PostgreSQL and object-storage foundation. A permitted administrator can download a fixed template, upload an Excel or CSV file, monitor validation, review errors and differences, publish the validated batch, and inspect publication history after a browser refresh.
+This first Stage 2 delivery creates a usable administrative import loop on the existing central PostgreSQL and object-storage foundation. A permitted administrator can download a fixed template, upload an Excel file or the dataset's defined CSV file set, monitor validation, review errors and differences, publish the validated batch, and inspect publication history after a browser refresh.
 
 The delivery covers three dependent datasets in this order:
 
@@ -124,7 +124,7 @@ The overview shows:
 Each included dataset page follows the same workflow:
 
 1. download the current template and field guide;
-2. select or drag an `.xlsx` or `.csv` file;
+2. select or drag one `.xlsx` file or the dataset's defined `.csv` file set;
 3. upload and receive a durable Import Job ID;
 4. watch validation progress, including after refresh;
 5. view summary counts and row-level errors;
@@ -179,7 +179,7 @@ One Rate Card publication contains three logical datasets:
 - package prices: Package Code and IDR price;
 - package membership: Package Code and IRIS Building ID.
 
-Excel uses one workbook with exactly three data worksheets: `Building Prices`, `Package Prices`, and `Package Membership`. CSV uses one file with `Record Type`, `IRIS Building ID`, `Package Code`, and `Price IDR` columns. `Record Type` is one of `BUILDING_PRICE`, `PACKAGE_PRICE`, or `PACKAGE_MEMBER`; fields that do not apply to that row type must be blank. The template contains examples for all three row types. There are no business-entered effective or expiry date fields.
+Excel uses one workbook with exactly three data worksheets: `Building Prices`, `Package Prices`, and `Package Membership`. For operational upload, the equivalent CSV representation is one atomic four-file set named `building-prices.csv`, `metadata.csv`, `package-buildings.csv`, and `package-prices.csv`. All four files are uploaded into one Import Job and validated and published together; missing, extra, mixed-format, or differently named files reject the batch. There are no business-entered effective or expiry date fields.
 
 The system generates a unique immutable version code at publication, using publication time plus a collision-safe sequence or identifier. The generated code, uploader, publisher, checksum, source file, row counts, and publication timestamp are retained.
 

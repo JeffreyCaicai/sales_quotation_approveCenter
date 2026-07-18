@@ -794,7 +794,7 @@ The shell contains Overview, Buildings, Sales Packages, Rate Cards, disabled Cus
 For each operational dataset, `ImportWorkspace` must:
 
 1. link to its current template;
-2. accept one `.xlsx` or `.csv` file;
+2. accept one `.xlsx` or `.csv` file for Buildings and Sales Packages; for Rate Card accept one `.xlsx` or exactly the four named CSV files `building-prices.csv`, `metadata.csv`, `package-buildings.csv`, and `package-prices.csv` as one batch;
 3. upload and show the durable Job ID;
 4. call process and poll detail every two seconds while state is transient;
 5. preserve the selected Job ID in `?job=` so refresh restores the view;
@@ -832,7 +832,10 @@ git commit -m "feat: add bilingual import administration"
 - Modify: `tests/import-performance.integration.test.ts`
 - Create: `tests/import-admin-lifecycle.integration.test.ts`
 - Create: `tests/fixtures/imports/v2/packages-valid.csv`
-- Create: `tests/fixtures/imports/v2/rate-card-valid.csv`
+- Create: `tests/fixtures/imports/v2/rate-card-valid/building-prices.csv`
+- Create: `tests/fixtures/imports/v2/rate-card-valid/metadata.csv`
+- Create: `tests/fixtures/imports/v2/rate-card-valid/package-buildings.csv`
+- Create: `tests/fixtures/imports/v2/rate-card-valid/package-prices.csv`
 - Modify: `README.md`
 
 - [ ] **Step 1: Write failing lifecycle and browser scenarios**
@@ -900,7 +903,7 @@ Expected:
 - [ ] **Step 5: Commit acceptance coverage and documentation**
 
 ```bash
-git add tests/admin-imports-smoke.spec.ts playwright.config.ts package.json tests/import-performance.integration.test.ts tests/import-admin-lifecycle.integration.test.ts tests/fixtures/imports/v2/packages-valid.csv tests/fixtures/imports/v2/rate-card-valid.csv README.md
+git add tests/admin-imports-smoke.spec.ts playwright.config.ts package.json tests/import-performance.integration.test.ts tests/import-admin-lifecycle.integration.test.ts tests/fixtures/imports/v2/packages-valid.csv tests/fixtures/imports/v2/rate-card-valid README.md
 git commit -m "test: verify the import administration workflow"
 ```
 
