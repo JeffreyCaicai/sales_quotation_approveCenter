@@ -423,7 +423,7 @@ describe("generated PostgreSQL migration", () => {
     `)).rejects.toThrow();
   });
 
-  test("allows Current Rate Card assembly and freezes its Historical child rows", async () => {
+  test("allows unpublished Current assembly and freezes published Rate Card versions", async () => {
     db = new PGlite();
     await applyMigrations(db);
 
@@ -442,16 +442,26 @@ describe("generated PostgreSQL migration", () => {
       values ('RC-ASSEMBLY-BUILDING', 'Assembly Building', 'Jakarta')
       returning id
     `);
+    const secondBuilding = await db.query<{ id: string }>(`
+      insert into buildings (iris_building_id, name, address)
+      values ('RC-ASSEMBLY-BUILDING-SECOND', 'Assembly Building Two', 'Jakarta')
+      returning id
+    `);
     const salesPackage = await db.query<{ id: string }>(`
       insert into sales_packages (package_code, name)
       values ('RC-ASSEMBLY-PACKAGE', 'Assembly Package')
       returning id
     `);
+    const secondSalesPackage = await db.query<{ id: string }>(`
+      insert into sales_packages (package_code, name)
+      values ('RC-ASSEMBLY-PACKAGE-SECOND', 'Assembly Package Two')
+      returning id
+    `);
     const version = await db.query<{ id: string }>(`
       insert into rate_card_versions (
-        version_code, status, import_job_id, uploaded_by, published_at
+        version_code, status, import_job_id, uploaded_by
       ) values (
-        'RC-ASSEMBLY', 'current', '${job.rows[0].id}', '${user.rows[0].id}', now()
+        'RC-ASSEMBLY', 'current', '${job.rows[0].id}', '${user.rows[0].id}'
       ) returning id
     `);
 
@@ -474,22 +484,105 @@ describe("generated PostgreSQL migration", () => {
     `)).resolves.toBeDefined();
 
     await expect(db.exec(`
+      update rate_card_versions set published_at = now()
+      where id = '${version.rows[0].id}'
+    `)).resolves.toBeDefined();
+
+    await expect(db.exec(`
+      update rate_card_versions set version_code = 'RC-ASSEMBLY-CHANGED'
+      where id = '${version.rows[0].id}'
+    `)).rejects.toThrow(/published rate card version is immutable/i);
+    await expect(db.exec(`
+      delete from rate_card_versions where id = '${version.rows[0].id}'
+    `)).rejects.toThrow(/published rate card version is immutable/i);
+
+    await expect(db.exec(`
+      insert into rate_card_building_prices (
+        rate_card_version_id, building_id, price_idr
+      ) values ('${version.rows[0].id}', '${secondBuilding.rows[0].id}', 2000000)
+    `)).rejects.toThrow(/published or historical rate card child rows are immutable/i);
+    await expect(db.exec(`
+      update rate_card_building_prices set price_idr = 2000000
+      where rate_card_version_id = '${version.rows[0].id}'
+    `)).rejects.toThrow(/published or historical rate card child rows are immutable/i);
+    await expect(db.exec(`
+      delete from rate_card_building_prices
+      where rate_card_version_id = '${version.rows[0].id}'
+    `)).rejects.toThrow(/published or historical rate card child rows are immutable/i);
+
+    await expect(db.exec(`
+      insert into rate_card_package_configs (
+        rate_card_version_id, package_id, price_idr
+      ) values ('${version.rows[0].id}', '${secondSalesPackage.rows[0].id}', 2500000)
+    `)).rejects.toThrow(/published or historical rate card child rows are immutable/i);
+    await expect(db.exec(`
+      update rate_card_package_configs set price_idr = 2500000
+      where rate_card_version_id = '${version.rows[0].id}'
+    `)).rejects.toThrow(/published or historical rate card child rows are immutable/i);
+    await expect(db.exec(`
+      delete from rate_card_package_configs
+      where rate_card_version_id = '${version.rows[0].id}'
+    `)).rejects.toThrow(/published or historical rate card child rows are immutable/i);
+
+    await expect(db.exec(`
+      insert into rate_card_package_buildings (
+        rate_card_version_id, package_id, building_id
+      ) values (
+        '${version.rows[0].id}', '${salesPackage.rows[0].id}', '${secondBuilding.rows[0].id}'
+      )
+    `)).rejects.toThrow(/published or historical rate card child rows are immutable/i);
+    await expect(db.exec(`
+      update rate_card_package_buildings set created_at = now()
+      where rate_card_version_id = '${version.rows[0].id}'
+    `)).rejects.toThrow(/published or historical rate card child rows are immutable/i);
+    await expect(db.exec(`
+      delete from rate_card_package_buildings
+      where rate_card_version_id = '${version.rows[0].id}'
+    `)).rejects.toThrow(/published or historical rate card child rows are immutable/i);
+
+    await expect(db.exec(`
+      update rate_card_versions
+      set status = 'historical', version_code = 'RC-ASSEMBLY-PIGGYBACK'
+      where id = '${version.rows[0].id}'
+    `)).rejects.toThrow(/published rate card status transition must change only status/i);
+    await expect(db.exec(`
       update rate_card_versions set status = 'historical'
       where id = '${version.rows[0].id}'
     `)).resolves.toBeDefined();
 
     await expect(db.exec(`
-      update rate_card_building_prices set price_idr = 2000000
+      update rate_card_versions set currency = 'IDR'
+      where id = '${version.rows[0].id}'
+    `)).rejects.toThrow(/historical rate card version is immutable/i);
+    await expect(db.exec(`
+      delete from rate_card_versions where id = '${version.rows[0].id}'
+    `)).rejects.toThrow(/historical rate card version cannot be deleted/i);
+
+    await expect(db.exec(`
+      insert into rate_card_building_prices (
+        rate_card_version_id, building_id, price_idr
+      ) values ('${version.rows[0].id}', '${secondBuilding.rows[0].id}', 2000000)
+    `)).rejects.toThrow(/published or historical rate card child rows are immutable/i);
+    await expect(db.exec(`
+      insert into rate_card_package_configs (
+        rate_card_version_id, package_id, price_idr
+      ) values ('${version.rows[0].id}', '${secondSalesPackage.rows[0].id}', 2500000)
+    `)).rejects.toThrow(/published or historical rate card child rows are immutable/i);
+    await expect(db.exec(`
+      insert into rate_card_package_buildings (
+        rate_card_version_id, package_id, building_id
+      ) values (
+        '${version.rows[0].id}', '${salesPackage.rows[0].id}', '${secondBuilding.rows[0].id}'
+      )
+    `)).rejects.toThrow(/published or historical rate card child rows are immutable/i);
+    await expect(db.exec(`
+      update rate_card_building_prices set price_idr = 3000000
       where rate_card_version_id = '${version.rows[0].id}'
-    `)).rejects.toThrow(/historical rate card child rows are immutable/i);
+    `)).rejects.toThrow(/published or historical rate card child rows are immutable/i);
     await expect(db.exec(`
       delete from rate_card_package_configs
       where rate_card_version_id = '${version.rows[0].id}'
-    `)).rejects.toThrow(/historical rate card child rows are immutable/i);
-    await expect(db.exec(`
-      delete from rate_card_package_buildings
-      where rate_card_version_id = '${version.rows[0].id}'
-    `)).rejects.toThrow(/historical rate card child rows are immutable/i);
+    `)).rejects.toThrow(/published or historical rate card child rows are immutable/i);
   });
 
   test("creates the Stage 2 tables, constraints, and indexes", async () => {
