@@ -33,12 +33,15 @@ import { GET as rateCardsRoute } from "@/app/api/admin/rate-cards/route";
 import { AdminReadError } from "@/lib/imports/admin-read-model";
 
 const actor = { id: "actor-1", email: "admin@example.com", displayName: "Admin", status: "active", permissions: [] };
+const JOB_ID = "00000000-0000-4000-8000-000000000101";
+const FILE_ID = "00000000-0000-4000-8000-000000000201";
+const MISSING_JOB_ID = "00000000-0000-4000-8000-000000000102";
 
-function jobContext(jobId = "job-1") {
+function jobContext(jobId = JOB_ID) {
   return { params: Promise.resolve({ jobId }) };
 }
 
-function fileContext(jobId = "job-1", fileId = "file-1") {
+function fileContext(jobId = JOB_ID, fileId = FILE_ID) {
   return { params: Promise.resolve({ jobId, fileId }) };
 }
 
@@ -51,9 +54,9 @@ describe("protected import administration routes", () => {
   test.each([
     ["summary", () => summaryRoute(new Request("https://test/api/admin/imports/summary"))],
     ["jobs", () => jobsRoute(new Request("https://test/api/admin/imports"))],
-    ["detail", () => detailRoute(new Request("https://test/api/admin/imports/job-1"), jobContext())],
-    ["errors", () => errorsRoute(new Request("https://test/api/admin/imports/job-1/errors.csv"), jobContext())],
-    ["file", () => fileRoute(new Request("https://test/api/admin/imports/job-1/files/file-1"), fileContext())],
+    ["detail", () => detailRoute(new Request(`https://test/api/admin/imports/${JOB_ID}`), jobContext())],
+    ["errors", () => errorsRoute(new Request(`https://test/api/admin/imports/${JOB_ID}/errors.csv`), jobContext())],
+    ["file", () => fileRoute(new Request(`https://test/api/admin/imports/${JOB_ID}/files/${FILE_ID}`), fileContext())],
     ["rate cards", () => rateCardsRoute(new Request("https://test/api/admin/rate-cards"))],
   ])("%s calls requireSession first and maps unauthenticated requests to 401", async (_name, callRoute) => {
     mocks.requireSession.mockRejectedValue(new AuthError(401, "AUTH_REQUIRED"));
@@ -112,7 +115,7 @@ describe("protected import administration routes", () => {
 
   test("maps protected missing jobs to stable 404", async () => {
     mocks.getImportJobDetail.mockRejectedValue(new AdminReadError(404, "IMPORT_JOB_NOT_FOUND"));
-    const response = await detailRoute(new Request("https://test/api/admin/imports/missing"), jobContext("missing"));
+    const response = await detailRoute(new Request(`https://test/api/admin/imports/${MISSING_JOB_ID}`), jobContext(MISSING_JOB_ID));
 
     expect(response.status).toBe(404);
     await expect(response.json()).resolves.toEqual({ error: "IMPORT_JOB_NOT_FOUND" });
@@ -127,20 +130,20 @@ describe("protected import administration routes", () => {
     });
 
     const response = await errorsRoute(
-      new Request("https://test/api/admin/imports/job-1/errors.csv?locale=zh-CN"),
+      new Request(`https://test/api/admin/imports/${JOB_ID}/errors.csv?locale=zh-CN`),
       jobContext(),
     );
 
     expect(response.status).toBe(200);
     expect(response.headers.get("content-type")).toBe("text/csv; charset=utf-8");
-    expect(response.headers.get("content-disposition")).toBe('attachment; filename="import-job-1-errors.csv"');
+    expect(response.headers.get("content-disposition")).toBe(`attachment; filename="import-${JOB_ID}-errors.csv"`);
     expect(response.headers.get("cache-control")).toBe("private, no-store");
     expect(await response.text()).toContain("某个值无效。");
 
     vi.clearAllMocks();
     mocks.requireSession.mockResolvedValue(actor);
     const invalid = await errorsRoute(
-      new Request("https://test/api/admin/imports/job-1/errors.csv?locale=id"),
+      new Request(`https://test/api/admin/imports/${JOB_ID}/errors.csv?locale=id`),
       jobContext(),
     );
     expect(invalid.status).toBe(400);
@@ -152,14 +155,29 @@ describe("protected import administration routes", () => {
     mocks.getImportFileDownload.mockResolvedValue("https://objects.test/signed");
 
     const response = await fileRoute(
-      new Request("https://test/api/admin/imports/job-1/files/file-1"),
+      new Request(`https://test/api/admin/imports/${JOB_ID}/files/${FILE_ID}`),
       fileContext(),
     );
 
-    expect(mocks.getImportFileDownload).toHaveBeenCalledWith(actor, "job-1", "file-1");
+    expect(mocks.getImportFileDownload).toHaveBeenCalledWith(actor, JOB_ID, FILE_ID);
     expect(response.status).toBe(303);
     expect(response.headers.get("location")).toBe("https://objects.test/signed");
     expect(response.headers.get("cache-control")).toBe("private, no-store");
+  });
+
+  test.each([
+    ["detail job", () => detailRoute(new Request("https://test/api/admin/imports/not-a-uuid"), jobContext("not-a-uuid"))],
+    ["CSV job", () => errorsRoute(new Request("https://test/api/admin/imports/not-a-uuid/errors.csv"), jobContext("not-a-uuid"))],
+    ["file job", () => fileRoute(new Request(`https://test/api/admin/imports/not-a-uuid/files/${FILE_ID}`), fileContext("not-a-uuid", FILE_ID))],
+    ["file id", () => fileRoute(new Request(`https://test/api/admin/imports/${JOB_ID}/files/not-a-uuid`), fileContext(JOB_ID, "not-a-uuid"))],
+  ])("returns a stable 400 for malformed %s after requiring a session", async (_name, callRoute) => {
+    const response = await callRoute();
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({ error: "IMPORT_IDENTIFIER_INVALID" });
+    expect(mocks.requireSession).toHaveBeenCalledTimes(1);
+    expect(mocks.getImportJobDetail).not.toHaveBeenCalled();
+    expect(mocks.getImportFileDownload).not.toHaveBeenCalled();
   });
 
   test("delegates Rate Card history and preserves Current-first model output", async () => {

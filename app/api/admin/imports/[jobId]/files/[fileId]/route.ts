@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { AuthError, requireSession } from "@/lib/auth/session";
+import { isUuidIdentifier } from "@/lib/imports/admin-contracts";
 import { AdminReadError, getImportFileDownload } from "@/lib/imports/admin-read-model";
 
 export const runtime = "nodejs";
@@ -12,6 +13,9 @@ export async function GET(
   try {
     const actor = await requireSession();
     const { jobId, fileId } = await context.params;
+    if (!isUuidIdentifier(jobId) || !isUuidIdentifier(fileId)) {
+      return NextResponse.json({ error: "IMPORT_IDENTIFIER_INVALID" }, { status: 400 });
+    }
     const signedUrl = await getImportFileDownload(actor, jobId, fileId);
     const response = NextResponse.redirect(signedUrl, 303);
     response.headers.set("Cache-Control", "private, no-store");

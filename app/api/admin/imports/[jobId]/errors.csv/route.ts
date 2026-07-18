@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { AuthError, requireSession } from "@/lib/auth/session";
+import { isUuidIdentifier } from "@/lib/imports/admin-contracts";
 import { AdminReadError, getImportJobDetail } from "@/lib/imports/admin-read-model";
 import {
   renderImportErrorsCsv,
@@ -25,6 +26,9 @@ export async function GET(
       return NextResponse.json({ error: "IMPORT_LOCALE_INVALID" }, { status: 400 });
     }
     const { jobId } = await context.params;
+    if (!isUuidIdentifier(jobId)) {
+      return NextResponse.json({ error: "IMPORT_IDENTIFIER_INVALID" }, { status: 400 });
+    }
     const detail = await getImportJobDetail(actor, jobId);
     const safeJobId = jobId.replaceAll(/[^A-Za-z0-9._-]/g, "_");
     return new NextResponse(renderImportErrorsCsv(detail.errors, locale), {

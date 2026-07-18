@@ -120,6 +120,8 @@ export const IMPORT_JOB_LIST_DEFAULT_LIMIT = 50;
 export const IMPORT_JOB_LIST_MAX_LIMIT = 100;
 export const IMPORT_JOB_LIST_MAX_OFFSET = 10_000;
 
+const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 const allowedFilterKeys = new Set(["dataType", "state", "limit", "offset"]);
 
 export function parseImportJobFilters(searchParams: URLSearchParams): ImportJobFilters | null {
@@ -160,6 +162,10 @@ export function importJobFiltersAreBounded(filters: ImportJobFilters): boolean {
     && (filters.dataType === undefined || importDataTypes.includes(filters.dataType))
     && (filters.state === undefined || importStates.includes(filters.state))
   );
+}
+
+export function isUuidIdentifier(value: string): boolean {
+  return uuidPattern.test(value);
 }
 
 function optionalEnum<const T extends readonly string[]>(

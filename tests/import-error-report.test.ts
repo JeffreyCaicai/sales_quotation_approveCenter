@@ -64,6 +64,68 @@ describe("import error CSV", () => {
     expect(renderImportErrorsCsv([unknown], "en")).toContain("import.error.future_rule");
   });
 
+  test.each([
+    "import.error.address_required",
+    "import.error.building_controlled_values_unavailable",
+    "import.error.building_inactive",
+    "import.error.building_name_required",
+    "import.error.building_not_found",
+    "import.error.building_reactivation_requires_admin_workflow",
+    "import.error.building_type_invalid",
+    "import.error.erp_building_id_conflict",
+    "import.error.erp_building_id_duplicate",
+    "import.error.grade_resource_invalid",
+    "import.error.iris_building_id_duplicate",
+    "import.error.iris_building_id_required",
+    "import.error.operational_status_invalid",
+    "import.error.operational_status_required",
+    "import.error.package_code_duplicate",
+    "import.error.package_inactive",
+    "import.error.package_membership_missing_price",
+    "import.error.package_name_duplicate",
+    "import.error.package_name_immutable",
+    "import.error.package_name_required",
+    "import.error.package_not_found",
+    "import.error.package_price_missing_membership",
+    "import.error.rate_card_building_duplicate",
+    "import.error.rate_card_empty",
+    "import.error.rate_card_membership_duplicate",
+    "import.error.rate_card_package_duplicate",
+    "import.error.template_version",
+    "import.error.value_invalid",
+  ])("provides corrective English and Chinese messages for real validator key %s", (errorKey) => {
+    const item = error({
+      errorKey,
+      parameters: {
+        irisBuildingId: "B-001",
+        erpBuildingId: "ERP-001",
+        packageCode: "PKG-001",
+        packageName: "Metro",
+      },
+    });
+    const english = renderImportErrorsCsv([item], "en");
+    const chinese = renderImportErrorsCsv([item], "zh-CN");
+
+    expect(english).not.toContain("An import validation error occurred.");
+    expect(chinese).not.toContain("发生导入验证错误。");
+    expect(english).not.toBe(chinese);
+  });
+
+  test("renders specific corrective messages for representative business validation failures", () => {
+    expect(renderImportErrorsCsv([
+      error({ errorKey: "import.error.building_name_required", parameters: {} }),
+    ], "en")).toContain("Building Name is required.");
+    expect(renderImportErrorsCsv([
+      error({ errorKey: "import.error.building_inactive", parameters: { irisBuildingId: "B-001" } }),
+    ], "zh-CN")).toContain("建筑 B-001 已停用，不能用于价目表。");
+    expect(renderImportErrorsCsv([
+      error({ errorKey: "import.error.package_price_missing_membership", parameters: { packageCode: "PKG-001" } }),
+    ], "en")).toContain("Package PKG-001 has a price but no building membership.");
+    expect(renderImportErrorsCsv([
+      error({ errorKey: "import.error.rate_card_membership_duplicate", parameters: { packageCode: "PKG-001", irisBuildingId: "B-001" } }),
+    ], "zh-CN")).toContain("套餐 PKG-001 与建筑 B-001 的成员关系重复。");
+  });
+
   test.each(["=cmd", "+SUM(A1)", "-1+2", "@IMPORT"])(
     "neutralizes formula-like textual cells beginning with %s",
     (prefix) => {

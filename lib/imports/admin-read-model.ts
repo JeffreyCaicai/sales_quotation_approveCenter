@@ -26,6 +26,7 @@ import type { Permission } from "@/lib/auth/permissions";
 import type { SessionUser } from "@/lib/auth/session";
 import {
   importJobFiltersAreBounded,
+  isUuidIdentifier,
   type ImportAdminSummary,
   type ImportAdminUserItem,
   type ImportAuditItem,
@@ -44,6 +45,7 @@ export type AdminReadErrorKey =
   | "PERMISSION_DENIED"
   | "IMPORT_JOB_NOT_FOUND"
   | "IMPORT_FILE_NOT_FOUND"
+  | "IMPORT_IDENTIFIER_INVALID"
   | "IMPORT_FILTER_INVALID";
 
 export class AdminReadError extends Error {
@@ -143,6 +145,7 @@ export async function getImportJobDetail(
   jobId: string,
 ): Promise<ImportJobDetail> {
   await assertCurrentPermissions(actor, ["data.audit.read"]);
+  assertUuidIdentifiers(jobId);
   const rows = await selectJobRows({
     conditions: [eq(importJobs.id, jobId)],
     limit: 1,
@@ -213,11 +216,13 @@ export async function getImportJobDetail(
       .orderBy(desc(auditEvents.createdAt), asc(auditEvents.id)),
   ]);
 
+  const mappedFiles = fileRows.map(mapFileRow).sort(compareCreatedAscending);
+  const originalFilename = mappedFiles.find((file) => file.purpose === "original")?.originalFilename ?? "";
   return {
     ...mapJobRow(job),
-    errors: errorRows.map(mapErrorRow).sort(compareErrors),
+    errors: errorRows.map((row) => mapErrorRow(row, originalFilename)).sort(compareErrors),
     changes: changeRows.map(mapChangeRow).sort(compareCreatedAscending),
-    files: fileRows.map(mapFileRow).sort(compareCreatedAscending),
+    files: mappedFiles,
     auditEvents: auditRows.map(mapAuditRow).sort(compareCreatedDescending),
   };
 }
@@ -268,6 +273,7 @@ export async function getImportFileDownload(
   fileId: string,
 ): Promise<string> {
   await assertCurrentPermissions(actor, ["data.audit.read", "data.file.download"]);
+  assertUuidIdentifiers(jobId, fileId);
   const [file] = await getDb().select({ objectStorageKey: importFiles.objectStorageKey })
     .from(importFiles)
     .innerJoin(importJobs, eq(importFiles.importJobId, importJobs.id))
@@ -370,11 +376,11 @@ function mapErrorRow(row: {
   columnName: string | null;
   errorKey: string;
   localizedParameters: unknown;
-  createdAt: Date;
-}): ImportErrorItem {
+  createdAt: Date | string;
+}, originalFilename: string): ImportErrorItem {
   return {
     id: row.id,
-    file: row.filename ?? "",
+    file: row.filename?.trim() ? row.filename : originalFilename,
     sheet: row.sheetName ?? "",
     row: row.rowNumber,
     column: row.columnName ?? "",
@@ -391,7 +397,7 @@ function mapChangeRow(row: {
   changeType: ImportChangeItem["changeType"];
   beforeValue: unknown;
   afterValue: unknown;
-  createdAt: Date;
+  createdAt: Date | string;
 }): ImportChangeItem {
   return {
     ...row,
@@ -407,7 +413,7 @@ function mapFileRow(row: {
   mimeType: string;
   sizeBytes: number;
   purpose: ImportFileItem["purpose"];
-  createdAt: Date;
+  createdAt: Date | string;
 }): ImportFileItem {
   return { ...row, createdAt: iso(row.createdAt) };
 }
@@ -424,7 +430,7 @@ function mapAuditRow(row: {
   reason: string | null;
   beforeMetadata: unknown;
   afterMetadata: unknown;
-  createdAt: Date;
+  createdAt: Date | string;
 }): ImportAuditItem {
   return {
     id: row.id,
@@ -454,12 +460,20 @@ function nullableUserItem(
     : userItem(id, email, displayName);
 }
 
-function iso(value: Date): string {
-  return value.toISOString();
+function iso(value: Date | string): string {
+  const parsed = value instanceof Date ? value : new Date(value);
+  if (!Number.isFinite(parsed.getTime())) throw new TypeError("Invalid database timestamp");
+  return parsed.toISOString();
 }
 
-function nullableIso(value: Date | null): string | null {
+function nullableIso(value: Date | string | null): string | null {
   return value === null ? null : iso(value);
+}
+
+function assertUuidIdentifiers(...values: string[]): void {
+  if (values.some((value) => !isUuidIdentifier(value))) {
+    throw new AdminReadError(400, "IMPORT_IDENTIFIER_INVALID");
+  }
 }
 
 function entityCount(rows: readonly { status: "active" | "inactive"; count: number }[]) {
