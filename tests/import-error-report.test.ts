@@ -64,6 +64,22 @@ describe("import error CSV", () => {
     expect(renderImportErrorsCsv([unknown], "en")).toContain("import.error.future_rule");
   });
 
+  test("preserves the honest job-level upload-set label in the downloaded CSV", () => {
+    const csv = renderImportErrorsCsv([
+      error({
+        file: "Original upload set",
+        sheet: "Metadata",
+        row: 0,
+        column: "",
+        errorKey: "import.error.rate_card_empty",
+        parameters: {},
+      }),
+    ], "en");
+
+    expect(csv).toContain("Original upload set,Metadata,0,,import.error.rate_card_empty");
+    expect(csv).not.toContain("metadata.csv");
+  });
+
   test.each([
     "import.error.address_required",
     "import.error.building_controlled_values_unavailable",

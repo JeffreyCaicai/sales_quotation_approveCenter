@@ -37,6 +37,12 @@ const JOB_ID = "00000000-0000-4000-8000-000000000101";
 const FILE_ID = "00000000-0000-4000-8000-000000000201";
 const MISSING_JOB_ID = "00000000-0000-4000-8000-000000000102";
 const OTHER_FILE_ID = "00000000-0000-4000-8000-000000000202";
+const RATE_CARD_FILE_IDS = [
+  "00000000-0000-4000-8000-000000000211",
+  "00000000-0000-4000-8000-000000000212",
+  "00000000-0000-4000-8000-000000000213",
+  "00000000-0000-4000-8000-000000000214",
+] as const;
 
 function chainFor(rows: unknown[], whereConditions: unknown[]) {
   const chain: Record<string, unknown> = {};
@@ -67,6 +73,17 @@ function authorizedRows(...permissions: string[]) {
     status: "active",
     permissionKey,
   }));
+}
+
+function jobRow(overrides: Record<string, unknown> = {}) {
+  return {
+    id: JOB_ID, dataType: "rate_card", templateVersion: "TMN-IMPORT-2", state: "validation_failed",
+    totalRows: 4, validRows: 0, invalidRows: 4, sourceType: "manual", failureSummary: "import.error.value_invalid",
+    uploadedById: "u1", uploadedByEmail: "u@example.com", uploadedByDisplayName: "Uploader",
+    publishedById: null, publishedByEmail: null, publishedByDisplayName: null,
+    createdAt: new Date("2026-07-18T08:00:00Z"), updatedAt: new Date("2026-07-18T08:01:00Z"), publishedAt: null,
+    ...overrides,
+  };
 }
 
 describe("protected import administration read model", () => {
@@ -176,6 +193,76 @@ describe("protected import administration read model", () => {
       purpose: "original", createdAt: "2026-07-18T08:00:00.000Z",
     });
     expect(JSON.stringify(detail)).not.toContain("objectStorageKey");
+  });
+
+  test("attributes four-file Rate Card errors by source sheet and labels complete-set errors honestly", async () => {
+    const createdAt = new Date("2026-07-18T08:01:00Z");
+    mocks.getDb.mockReturnValue(queuedDatabase(
+      authorizedRows("data.audit.read"),
+      [jobRow()],
+      [
+        { id: "e1", filename: null, sheetName: "Building Prices", rowNumber: 2, columnName: "IRIS Building ID", errorKey: "import.error.building_not_found", localizedParameters: { irisBuildingId: "B-404" }, createdAt },
+        { id: "e2", filename: null, sheetName: "Package Prices", rowNumber: 3, columnName: "Package Code", errorKey: "import.error.package_inactive", localizedParameters: { packageCode: "PKG-OFF" }, createdAt },
+        { id: "e3", filename: null, sheetName: "Package Membership", rowNumber: 4, columnName: "Package Code", errorKey: "import.error.package_membership_missing_price", localizedParameters: { packageCode: "PKG-NO-PRICE" }, createdAt },
+        { id: "e4", filename: null, sheetName: "Metadata", rowNumber: 2, columnName: "Currency", errorKey: "import.error.value_invalid", localizedParameters: {}, createdAt },
+        { id: "e5", filename: null, sheetName: "Metadata", rowNumber: 0, columnName: "", errorKey: "import.error.rate_card_empty", localizedParameters: {}, createdAt },
+      ],
+      [],
+      [
+        { id: RATE_CARD_FILE_IDS[0], originalFilename: "package-prices.csv", mimeType: "text/csv", sizeBytes: 10, purpose: "original", createdAt },
+        { id: RATE_CARD_FILE_IDS[1], originalFilename: "metadata.csv", mimeType: "text/csv", sizeBytes: 10, purpose: "original", createdAt },
+        { id: RATE_CARD_FILE_IDS[2], originalFilename: "package-buildings.csv", mimeType: "text/csv", sizeBytes: 10, purpose: "original", createdAt },
+        { id: RATE_CARD_FILE_IDS[3], originalFilename: "building-prices.csv", mimeType: "text/csv", sizeBytes: 10, purpose: "original", createdAt },
+      ],
+      [],
+    ));
+
+    const detail = await getImportJobDetail(actor, JOB_ID);
+    const filesByKey = Object.fromEntries(detail.errors.map((item) => [item.errorKey, item.file]));
+
+    expect(filesByKey).toMatchObject({
+      "import.error.building_not_found": "building-prices.csv",
+      "import.error.package_inactive": "package-prices.csv",
+      "import.error.package_membership_missing_price": "package-buildings.csv",
+      "import.error.value_invalid": "metadata.csv",
+      "import.error.rate_card_empty": "Original upload set",
+    });
+  });
+
+  test("scopes every detail child query to the requested job ID", async () => {
+    const db = queuedDatabase(
+      authorizedRows("data.audit.read"),
+      [jobRow()],
+      [],
+      [],
+      [],
+      [],
+    );
+    mocks.getDb.mockReturnValue(db);
+
+    await getImportJobDetail(actor, JOB_ID);
+
+    const [errorsScope, changesScope, filesScope, auditScope] = db.whereConditions
+      .slice(-4)
+      .map((condition) => condition === undefined
+        ? null
+        : new PgDialect().sqlToQuery(condition as SQL));
+    expect(errorsScope).toMatchObject({
+      sql: expect.stringContaining('"import_errors"."import_job_id" = $1'),
+      params: [JOB_ID],
+    });
+    expect(changesScope).toMatchObject({
+      sql: expect.stringContaining('"import_changes"."import_job_id" = $1'),
+      params: [JOB_ID],
+    });
+    expect(filesScope).toMatchObject({
+      sql: expect.stringContaining('"import_files"."import_job_id" = $1'),
+      params: [JOB_ID],
+    });
+    expect(auditScope).toMatchObject({
+      sql: expect.stringContaining('"audit_events"."import_job_id" = $1'),
+      params: [JOB_ID],
+    });
   });
 
   test("returns not found only after database authorization succeeds", async () => {

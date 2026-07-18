@@ -65,6 +65,18 @@ const auditUsers = alias(users, "admin_import_audit_users");
 const publishedJobStates = ["published", "active", "superseded", "rolled_back"] as const;
 const validatingJobStates = new Set(["uploading", "uploaded", "validating"]);
 const readyJobStates = new Set(["ready_to_publish", "draft"]);
+const originalUploadSetLabel = "Original upload set";
+const completeSetErrorKeys = new Set([
+  "import.error.file_set_invalid",
+  "import.error.rate_card_empty",
+  "import.error.template_version",
+]);
+const rateCardCsvBySheet = new Map([
+  ["Metadata", "metadata.csv"],
+  ["Building Prices", "building-prices.csv"],
+  ["Package Prices", "package-prices.csv"],
+  ["Package Membership", "package-buildings.csv"],
+]);
 
 export async function getImportAdminSummary(actor: SessionUser): Promise<ImportAdminSummary> {
   await assertCurrentPermissions(actor, ["data.audit.read"]);
@@ -217,10 +229,12 @@ export async function getImportJobDetail(
   ]);
 
   const mappedFiles = fileRows.map(mapFileRow).sort(compareCreatedAscending);
-  const originalFilename = mappedFiles.find((file) => file.purpose === "original")?.originalFilename ?? "";
+  const originalFilenames = mappedFiles
+    .filter((file) => file.purpose === "original")
+    .map((file) => file.originalFilename);
   return {
     ...mapJobRow(job),
-    errors: errorRows.map((row) => mapErrorRow(row, originalFilename)).sort(compareErrors),
+    errors: errorRows.map((row) => mapErrorRow(row, originalFilenames)).sort(compareErrors),
     changes: changeRows.map(mapChangeRow).sort(compareCreatedAscending),
     files: mappedFiles,
     auditEvents: auditRows.map(mapAuditRow).sort(compareCreatedDescending),
@@ -377,10 +391,10 @@ function mapErrorRow(row: {
   errorKey: string;
   localizedParameters: unknown;
   createdAt: Date | string;
-}, originalFilename: string): ImportErrorItem {
+}, originalFilenames: readonly string[]): ImportErrorItem {
   return {
     id: row.id,
-    file: row.filename?.trim() ? row.filename : originalFilename,
+    file: resolveErrorFilename(row, originalFilenames),
     sheet: row.sheetName ?? "",
     row: row.rowNumber,
     column: row.columnName ?? "",
@@ -388,6 +402,25 @@ function mapErrorRow(row: {
     parameters: row.localizedParameters as JsonValue,
     createdAt: iso(row.createdAt),
   };
+}
+
+function resolveErrorFilename(
+  error: { filename: string | null; sheetName: string | null; errorKey: string },
+  originalFilenames: readonly string[],
+): string {
+  if (error.filename?.trim()) return error.filename;
+  if (originalFilenames.length === 1) return originalFilenames[0];
+  if (completeSetErrorKeys.has(error.errorKey)) return originalUploadSetLabel;
+
+  const expectedFilename = error.sheetName === null
+    ? undefined
+    : rateCardCsvBySheet.get(error.sheetName);
+  const matchingFilename = expectedFilename === undefined
+    ? undefined
+    : originalFilenames.find((filename) =>
+      filename.toLocaleLowerCase("en-US") === expectedFilename
+    );
+  return matchingFilename ?? originalUploadSetLabel;
 }
 
 function mapChangeRow(row: {
