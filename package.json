@@ -9,6 +9,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
+    "start:e2e": "tsx scripts/start-playwright-server.mts",
     "test:unit": "vitest run",
     "test:logic": "node --experimental-strip-types --test tests/quotation.test.ts",
     "test:localization": "node --experimental-strip-types --test tests/localization.test.ts",

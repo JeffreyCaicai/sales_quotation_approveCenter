@@ -10,7 +10,7 @@ export default defineConfig({
   retries: process.env.CI ? 1 : 0,
   use: { baseURL, trace: "retain-on-failure" },
   webServer: uiOnly ? undefined : {
-    command: "npm run start",
+    command: "npm run start:e2e",
     url: `${baseURL}/api/health`,
     reuseExistingServer: !process.env.CI,
     timeout: 60_000,
