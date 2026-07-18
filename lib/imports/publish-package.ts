@@ -194,14 +194,18 @@ export async function publishPackageImport(
       const current = change.before === null ? null : lockedByCode.get(change.before.packageCode) ?? null;
       let packageId: string;
       if (change.changeType === "added") {
-        const [inserted] = await tx.insert(salesPackages).values({
-          packageCode: after.packageCode,
-          name: after.packageName,
-          status: after.status,
-          sourceImportJobId: jobId,
-          updatedAt: now,
-        }).returning({ id: salesPackages.id });
-        packageId = inserted.id;
+        try {
+          const [inserted] = await tx.insert(salesPackages).values({
+            packageCode: after.packageCode,
+            name: after.packageName,
+            status: after.status,
+            sourceImportJobId: jobId,
+            updatedAt: now,
+          }).returning({ id: salesPackages.id });
+          packageId = inserted.id;
+        } catch (error) {
+          rethrowPackageInsertError(error);
+        }
       } else {
         if (current === null) staleChange();
         const [updated] = await tx.update(salesPackages).set({
@@ -377,6 +381,17 @@ function validStatus(value: unknown): "active" | "inactive" {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+export function rethrowPackageInsertError(error: unknown): never {
+  if (
+    isRecord(error)
+    && error.code === "23505"
+    && error.constraint === "sales_packages_package_code_unique"
+  ) {
+    staleChange();
+  }
+  throw error;
 }
 
 function invalidChange(): never {

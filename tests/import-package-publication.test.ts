@@ -3,7 +3,7 @@ import { describe, expect, test } from "vitest";
 import type { PackageChange, PackageSnapshot } from "@/lib/imports/package-diff";
 import { publicationLockIdentities } from "@/lib/imports/publication-locks";
 import { PublicationError } from "@/lib/imports/publish";
-import { assertPackageChangePublishable, assertPackageNamesAvailable, orderPackageChangesForLocking } from "@/lib/imports/publish-package";
+import { assertPackageChangePublishable, assertPackageNamesAvailable, orderPackageChangesForLocking, rethrowPackageInsertError } from "@/lib/imports/publish-package";
 
 const before: PackageSnapshot = {
   packageCode: "PKG-A",
@@ -87,5 +87,38 @@ describe("Sales Package Master publication preflight", () => {
     })], [before]);
     expect(publish).toThrowError(expect.objectContaining({ key: "IMPORT_CHANGE_STALE" }));
     expect(publish).toThrowError(PublicationError);
+  });
+
+  test("maps only a package-code unique race to a stale publication error", () => {
+    const collision = Object.assign(new Error("duplicate key"), {
+      code: "23505",
+      constraint: "sales_packages_package_code_unique",
+    });
+    expect(() => rethrowPackageInsertError(collision)).toThrowError(expect.objectContaining({
+      key: "IMPORT_CHANGE_STALE",
+      status: 409,
+    }));
+    expect(() => rethrowPackageInsertError(collision)).toThrowError(PublicationError);
+
+    const otherUnique = Object.assign(new Error("different unique constraint"), {
+      code: "23505",
+      constraint: "sales_packages_name_unique",
+    });
+    let otherUniqueCaught: unknown;
+    try {
+      rethrowPackageInsertError(otherUnique);
+    } catch (error) {
+      otherUniqueCaught = error;
+    }
+    expect(otherUniqueCaught).toBe(otherUnique);
+
+    const databaseFailure = Object.assign(new Error("connection lost"), { code: "08006" });
+    let databaseFailureCaught: unknown;
+    try {
+      rethrowPackageInsertError(databaseFailure);
+    } catch (error) {
+      databaseFailureCaught = error;
+    }
+    expect(databaseFailureCaught).toBe(databaseFailure);
   });
 });

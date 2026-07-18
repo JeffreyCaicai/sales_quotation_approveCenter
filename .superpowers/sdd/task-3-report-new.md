@@ -17,8 +17,8 @@ Implemented and ready for commit. Task 3 focused tests, the full unit suite, sco
 
 ### GREEN
 
-- Focused Task 3: 3 files, 21 tests passed.
-- Full unit suite, run alone to avoid PGlite/CPU timeout contention: 33 files, 389 tests passed.
+- Focused Task 3: 3 files, 22 tests passed.
+- Full unit suite, run alone to avoid PGlite/CPU timeout contention: 33 files, 390 tests passed.
 - Existing publish route coverage: 1 file, 6 tests passed.
 - Scoped ESLint: passed.
 - `git diff --check`: passed before staging; cached diff is checked again before commit.
@@ -39,6 +39,8 @@ The brief omitted `lib/imports/publication-locks.ts`, but the required call `pub
 ## Review
 
 An independent reviewer initially found that a private package error class would become HTTP 500 at the route boundary. After the RED/GREEN fix to reuse `PublicationError`, re-review reported the issue resolved with no remaining Critical or Important findings.
+
+A later independent review found a race between the collision precheck and the Package insert: a PostgreSQL unique violation could otherwise escape as HTTP 500. A focused RED/GREEN regression now converts only error code `23505` for constraint `sales_packages_package_code_unique` into `PublicationError("IMPORT_CHANGE_STALE", 409)`. Other unique constraints and all other database errors are rethrown unchanged. The exception still leaves the outer publication transaction to roll back the complete batch.
 
 ## Concerns / follow-up
 
