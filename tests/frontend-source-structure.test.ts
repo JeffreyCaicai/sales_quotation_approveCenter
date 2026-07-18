@@ -5,6 +5,18 @@ import { describe, expect, it } from "vitest";
 
 const wizardSource = readFileSync(join(process.cwd(), "components/quote-wizard.tsx"), "utf8");
 const appSource = readFileSync(join(process.cwd(), "components/quotation-app.tsx"), "utf8");
+const adminSources = [
+  "components/admin/import-admin-app.tsx",
+  "components/admin/admin-login.tsx",
+  "components/admin/import-admin-dashboard.tsx",
+  "components/admin/import-workspace.tsx",
+  "components/admin/import-job-detail.tsx",
+  "components/admin/import-history.tsx",
+  "components/admin/admin-locale-provider.tsx",
+  "app/admin/imports/page.tsx",
+  "lib/admin-i18n.ts",
+  "lib/client/import-admin-api.ts",
+].map((file) => readFileSync(join(process.cwd(), file), "utf8")).join("\n");
 
 describe("quotation wizard source structure", () => {
   it("models placement and optional bonus as independent commercial selections", () => {
@@ -41,5 +53,15 @@ describe("quotation workspace navigation", () => {
   it("resets the viewport after leaving the role picker", () => {
     expect(appSource).toContain("function resetViewport()");
     expect(appSource).toMatch(/onLogin=\{\(nextUser\) => \{[\s\S]*resetViewport\(\)/);
+  });
+});
+
+describe("import administration source isolation", () => {
+  it("does not depend on quotation demo users, role switching, or quotation components", () => {
+    expect(adminSources).not.toMatch(/@\/lib\/mock-data|@\/components\/(?:quotation|quote-)|role-switcher|USERS/);
+  });
+
+  it("does not render the visual reference as application UI", () => {
+    expect(adminSources).not.toContain("import-admin-reference.png");
   });
 });
