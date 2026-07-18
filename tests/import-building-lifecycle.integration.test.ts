@@ -40,15 +40,28 @@ function rateCardFiles(
   irisBuildingId = "B003004",
   packageCode = "PKG-IRIS",
 ) {
-  return [{
-    filename: "rate-card.csv",
-    body: new TextEncoder().encode([
-      "Record Type,IRIS Building ID,Package Code,Price IDR",
-      `BUILDING_PRICE,${irisBuildingId},,1000000`,
-      `PACKAGE_PRICE,,${packageCode},1500000`,
-      `PACKAGE_MEMBER,${irisBuildingId},${packageCode},`,
-    ].join("\n")),
-  }];
+  const csv = (filename: string, rows: string[]) => ({
+    filename,
+    body: new TextEncoder().encode(rows.join("\n")),
+  });
+  return [
+    csv("building-prices.csv", [
+      "IRIS Building ID,Price IDR",
+      `${irisBuildingId},1000000`,
+    ]),
+    csv("metadata.csv", [
+      "Template Version,TMN-IMPORT-2",
+      "Currency,IDR",
+    ]),
+    csv("package-buildings.csv", [
+      "Package Code,IRIS Building ID",
+      `${packageCode},${irisBuildingId}`,
+    ]),
+    csv("package-prices.csv", [
+      "Package Code,Price IDR",
+      `${packageCode},1500000`,
+    ]),
+  ];
 }
 
 async function applyMigrations(db: PGlite) {
@@ -148,7 +161,7 @@ describe("IRIS identity lifecycle in executable PostgreSQL-compatible coverage",
     )).toThrow(RateCardBuildingResolutionError);
     expect(validateRateCardBuildings(rejected, validationSnapshot(buildingId, "ERP-89321", "inactive"))).toEqual([
       { sheet: "Building Prices", rowNumber: 2, column: "IRIS Building ID", key: "import.error.building_inactive", params: { irisBuildingId: "B003004" } },
-      { sheet: "Package Membership", rowNumber: 4, column: "IRIS Building ID", key: "import.error.building_inactive", params: { irisBuildingId: "B003004" } },
+      { sheet: "Package Membership", rowNumber: 2, column: "IRIS Building ID", key: "import.error.building_inactive", params: { irisBuildingId: "B003004" } },
     ]);
 
     const history = await db.query<{ price_building_id: string; package_building_id: string; erp_building_id: string; status: string }>(`
