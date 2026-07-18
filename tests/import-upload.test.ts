@@ -172,20 +172,32 @@ describe("manual import upload contract", () => {
     expect(deps.objectStore.objects.size).toBe(0);
   });
 
-  test.each([
-    ["customer_brand", "data.import.customer_brand"],
-    ["package", "data.import.package"],
-  ] as const)("preserves the TMN-IMPORT-1 upload contract for %s", async (dataType, permission) => {
+  test("preserves the TMN-IMPORT-1 upload contract for customer_brand", async () => {
     const deps = dependencies();
     await expect(createImportJob(
-      { dataType, templateVersion: "TMN-IMPORT-1", files: [upload(`${dataType}.csv`, "text/csv", new TextEncoder().encode("header\nvalue"))] },
-      actor([permission]),
+      { dataType: "customer_brand", templateVersion: "TMN-IMPORT-1", files: [upload("customer_brand.csv", "text/csv", new TextEncoder().encode("header\nvalue"))] },
+      actor(["data.import.customer_brand"]),
       deps,
     )).resolves.toMatchObject({ state: "uploaded" });
     expect(deps.repository.jobs[0].templateVersion).toBe("TMN-IMPORT-1");
     await expect(createImportJob(
-      { dataType, templateVersion: "TMN-IMPORT-2", files: [upload(`${dataType}.csv`, "text/csv", new TextEncoder().encode("header\nother"))] },
-      actor([permission]),
+      { dataType: "customer_brand", templateVersion: "TMN-IMPORT-2", files: [upload("customer_brand.csv", "text/csv", new TextEncoder().encode("header\nother"))] },
+      actor(["data.import.customer_brand"]),
+      dependencies(),
+    )).rejects.toMatchObject({ key: "IMPORT_TEMPLATE_VERSION_INVALID" });
+  });
+
+  test("uses the TMN-IMPORT-2 upload contract for package", async () => {
+    const deps = dependencies();
+    await expect(createImportJob(
+      { dataType: "package", templateVersion: "TMN-IMPORT-2", files: [upload("package.csv", "text/csv", new TextEncoder().encode("header\nvalue"))] },
+      actor(["data.import.package"]),
+      deps,
+    )).resolves.toMatchObject({ state: "uploaded" });
+    expect(deps.repository.jobs[0].templateVersion).toBe("TMN-IMPORT-2");
+    await expect(createImportJob(
+      { dataType: "package", templateVersion: "TMN-IMPORT-1", files: [upload("package.csv", "text/csv", new TextEncoder().encode("header\nother"))] },
+      actor(["data.import.package"]),
       dependencies(),
     )).rejects.toMatchObject({ key: "IMPORT_TEMPLATE_VERSION_INVALID" });
   });

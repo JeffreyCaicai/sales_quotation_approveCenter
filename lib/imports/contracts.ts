@@ -55,7 +55,7 @@ export const CANONICAL_IMPORT_TEMPLATE_VERSION = "TMN-IMPORT-2" as const;
 export type ImportTemplateVersion = typeof TEMPLATE_VERSION_V1 | typeof CANONICAL_IMPORT_TEMPLATE_VERSION;
 
 export function canonicalTemplateVersionForDataType(dataType: ImportDataType): ImportTemplateVersion {
-  return dataType === "building" || dataType === "rate_card"
+  return dataType === "building" || dataType === "package" || dataType === "rate_card"
     ? CANONICAL_IMPORT_TEMPLATE_VERSION
     : TEMPLATE_VERSION_V1;
 }

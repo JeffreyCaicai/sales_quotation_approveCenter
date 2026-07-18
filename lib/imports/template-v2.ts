@@ -15,6 +15,12 @@ export const BUILDING_HEADERS = [
   "Data Source",
 ] as const;
 
+export const PACKAGE_HEADERS = [
+  "Package Code",
+  "Package Name",
+  "Operational Status",
+] as const;
+
 export const RATE_CARD_HEADERS = {
   "Building Prices": ["IRIS Building ID", "Price IDR"],
   "Package Prices": ["Package Code", "Price IDR"],
@@ -47,6 +53,18 @@ export interface BuildingImport {
   rows: BuildingRow[];
 }
 
+export interface PackageRow {
+  rowNumber: number;
+  packageCode: string | null;
+  packageName: string;
+  operationalStatus: "active" | "inactive";
+}
+
+export interface PackageImport {
+  templateVersion: typeof TEMPLATE_VERSION_V2;
+  rows: PackageRow[];
+}
+
 export interface RateCardImport {
   templateVersion: typeof TEMPLATE_VERSION_V2;
   versionCode: string;
@@ -69,7 +87,7 @@ export interface RateCardImport {
   }>;
 }
 
-export type NormalizedImport = BuildingImport | RateCardImport;
+export type NormalizedImport = BuildingImport | PackageImport | RateCardImport;
 
 export type ImportParseErrorKey =
   | "file.formula_not_allowed"

@@ -7,6 +7,7 @@ import * as XLSX from "xlsx";
 import { generateImportTemplate } from "@/lib/imports/generate-template";
 import {
   BUILDING_HEADERS,
+  PACKAGE_HEADERS,
   RATE_CARD_HEADERS,
   TEMPLATE_VERSION_V2,
 } from "@/lib/imports/template-v2";
@@ -76,8 +77,22 @@ describe("formal TMN-IMPORT-2 templates", () => {
     expect(packagePrice).toBeGreaterThan(0);
   });
 
+  test("sales-package template uses its exact schema and sample values", async () => {
+    const buffer = await generateImportTemplate("package", TEMPLATE_VERSION_V2);
+
+    expect(rows(buffer, "Sales Packages")).toEqual([
+      [...PACKAGE_HEADERS],
+      ["PKG-01", "Jakarta Prime", "active"],
+    ]);
+    expect(rows(buffer, "Instructions")).toEqual(
+      expect.arrayContaining([
+        expect.arrayContaining(["Template Version", TEMPLATE_VERSION_V2]),
+      ]),
+    );
+  });
+
   test("instructions are English-first bilingual and explain permanent IRIS IDs", async () => {
-    for (const dataType of ["building", "rate_card"] as const) {
+    for (const dataType of ["building", "package", "rate_card"] as const) {
       const text = rows(
         await generateImportTemplate(dataType, TEMPLATE_VERSION_V2),
         "Instructions",
@@ -103,6 +118,7 @@ describe("formal TMN-IMPORT-2 templates", () => {
   test("keeps protected templates out of the directly served public directory", async () => {
     for (const filename of [
       "02_Buildings_Template.xlsx",
+      "03_Sales_Packages_Template.xlsx",
       "04_Rate_Card_Template.xlsx",
     ]) {
       await expect(access(join(PUBLIC_TEMPLATE_ROOT, filename))).rejects.toMatchObject({
@@ -124,6 +140,17 @@ describe("formal TMN-IMPORT-2 templates", () => {
     })[0]).toEqual([...BUILDING_HEADERS]);
     expect(building.Sheets.Data.B2).toBeUndefined();
     expectNoFormulasOrErrors(building);
+
+    const packages = readWorkbook(
+      await readFile(join(SERVER_TEMPLATE_ROOT, "03_Sales_Packages_Template.xlsx")),
+    );
+    expect(packages.SheetNames).toEqual(["Instructions", "Sales Packages"]);
+    expect(XLSX.utils.sheet_to_json(packages.Sheets["Sales Packages"], {
+      header: 1,
+      raw: true,
+      defval: null,
+    })[0]).toEqual([...PACKAGE_HEADERS]);
+    expectNoFormulasOrErrors(packages);
 
     const rateCard = readWorkbook(
       await readFile(join(SERVER_TEMPLATE_ROOT, "04_Rate_Card_Template.xlsx")),

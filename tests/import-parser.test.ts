@@ -5,6 +5,7 @@ import { describe, expect, test } from "vitest";
 import * as XLSX from "xlsx";
 
 import { parseImportFiles } from "@/lib/imports/normalize";
+import { PACKAGE_HEADERS } from "@/lib/imports/template-v2";
 
 const FIXTURES = join(process.cwd(), "tests", "fixtures", "imports", "v2");
 
@@ -27,6 +28,39 @@ function workbookFile(filename: string, sheets: Record<string, unknown[][]>) {
 }
 
 describe("TMN-IMPORT-2 parser", () => {
+  test("defines the exact Sales Package Master headers", () => {
+    expect(PACKAGE_HEADERS).toEqual([
+      "Package Code",
+      "Package Name",
+      "Operational Status",
+    ]);
+  });
+
+  test.each([
+    ["XLSX", () => workbookFile("sales-packages.xlsx", {
+      Instructions: [["Template Version", "TMN-IMPORT-2"]],
+      "Sales Packages": [
+        ["Package Code", "Package Name", "Operational Status"],
+        [" PKG-A ", " Regional A ", "active"],
+        ["", " New Metro ", "inactive"],
+      ],
+    })],
+    ["CSV", () => ({
+      filename: "sales-packages.csv",
+      body: new TextEncoder().encode(
+        "Package Code,Package Name,Operational Status\n PKG-A , Regional A ,active\n, New Metro ,inactive\n",
+      ),
+    })],
+  ])("parses Sales Packages from %s", async (_format, createFile) => {
+    await expect(parseImportFiles("package", [createFile()])).resolves.toEqual({
+      templateVersion: "TMN-IMPORT-2",
+      rows: [
+        { rowNumber: 2, packageCode: "PKG-A", packageName: "Regional A", operationalStatus: "active" },
+        { rowNumber: 3, packageCode: null, packageName: "New Metro", operationalStatus: "inactive" },
+      ],
+    });
+  });
+
   test.each([undefined, "TMN-IMPORT-1"])(
     "rejects a Building workbook whose Instructions version cell is %s",
     async (version) => {

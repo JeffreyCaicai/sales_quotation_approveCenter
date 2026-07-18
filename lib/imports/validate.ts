@@ -3,7 +3,7 @@ import {
   sortImportValidationErrors,
   type ImportValidationError,
 } from "@/lib/imports/errors";
-import type { BuildingRow, RateCardImport } from "@/lib/imports/template-v2";
+import type { BuildingRow, PackageRow, RateCardImport } from "@/lib/imports/template-v2";
 
 export interface BuildingValidationSnapshotItem {
   id: string;
@@ -20,6 +20,16 @@ export interface BuildingValidationSnapshot {
 export interface BuildingControlledValuesSnapshot {
   buildingTypes: readonly string[];
   gradeResources: readonly string[];
+}
+
+export interface PackageValidationSnapshotItem {
+  packageCode: string;
+  packageName: string;
+  status: "active" | "inactive";
+}
+
+export interface PackageValidationSnapshot {
+  packages: PackageValidationSnapshotItem[];
 }
 
 export function validateBuildingRows(
@@ -120,6 +130,58 @@ export function validateBuildingRows(
   return sortImportValidationErrors(errors);
 }
 
+export function validatePackageRows(
+  rows: PackageRow[],
+  snapshot: PackageValidationSnapshot,
+): ImportValidationError[] {
+  const errors: ImportValidationError[] = [];
+  const rowsByCode = groupPackageRows(rows, (row) => row.packageCode?.trim() || null);
+  const rowsByName = groupPackageRows(rows, (row) => normalizePackageName(row.packageName));
+  const currentByCode = new Map(
+    snapshot.packages.map((item) => [item.packageCode.trim(), item]),
+  );
+
+  for (const row of rows) {
+    const packageCode = row.packageCode?.trim() || null;
+    const normalizedName = normalizePackageName(row.packageName);
+    const operationalStatus = row.operationalStatus as string;
+    if (normalizedName.length === 0) {
+      errors.push(packageError(row.rowNumber, "Package Name", "import.error.package_name_required"));
+    } else if ((rowsByName.get(normalizedName)?.length ?? 0) > 1) {
+      errors.push(packageError(
+        row.rowNumber,
+        "Package Name",
+        "import.error.package_name_duplicate",
+        { packageName: normalizedName },
+      ));
+    }
+    if (operationalStatus === "") {
+      errors.push(packageError(row.rowNumber, "Operational Status", "import.error.operational_status_required"));
+    } else if (operationalStatus !== "active" && operationalStatus !== "inactive") {
+      errors.push(packageError(row.rowNumber, "Operational Status", "import.error.operational_status_invalid"));
+    }
+    if (packageCode !== null && (rowsByCode.get(packageCode)?.length ?? 0) > 1) {
+      errors.push(packageError(
+        row.rowNumber,
+        "Package Code",
+        "import.error.package_code_duplicate",
+        { packageCode },
+      ));
+    }
+    const current = packageCode === null ? undefined : currentByCode.get(packageCode);
+    if (current && packageCode !== null && current.packageName.trim() !== row.packageName.trim()) {
+      errors.push(packageError(
+        row.rowNumber,
+        "Package Name",
+        "import.error.package_name_immutable",
+        { packageCode },
+      ));
+    }
+  }
+
+  return sortImportValidationErrors(errors);
+}
+
 export function validateRateCardBuildings(
   input: Pick<RateCardImport, "buildingPrices" | "packageBuildings">,
   snapshot: BuildingValidationSnapshot,
@@ -173,6 +235,25 @@ function groupRows(
   return grouped;
 }
 
+function normalizePackageName(value: string): string {
+  return value.trim().toLocaleLowerCase("en-US");
+}
+
+function groupPackageRows(
+  rows: PackageRow[],
+  keyFor: (row: PackageRow) => string | null,
+) {
+  const grouped = new Map<string, PackageRow[]>();
+  for (const row of rows) {
+    const key = keyFor(row);
+    if (key === null || key.length === 0) continue;
+    const matching = grouped.get(key) ?? [];
+    matching.push(row);
+    grouped.set(key, matching);
+  }
+  return grouped;
+}
+
 function error(
   rowNumber: number,
   column: string,
@@ -180,6 +261,15 @@ function error(
   params: Record<string, string | number> = {},
 ): ImportValidationError {
   return { sheet: "Data", rowNumber, column, key, params };
+}
+
+function packageError(
+  rowNumber: number,
+  column: string,
+  key: `import.error.${string}`,
+  params: Record<string, string | number> = {},
+): ImportValidationError {
+  return { sheet: "Sales Packages", rowNumber, column, key, params };
 }
 
 export type { ImportValidationError } from "@/lib/imports/errors";

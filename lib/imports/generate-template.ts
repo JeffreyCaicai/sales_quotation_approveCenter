@@ -5,11 +5,12 @@ import { TEMPLATE_VERSION_V2 } from "@/lib/imports/template-v2";
 
 const templateFilename = {
   building: "02_Buildings_Template.xlsx",
+  package: "03_Sales_Packages_Template.xlsx",
   rate_card: "04_Rate_Card_Template.xlsx",
 } as const;
 
 export async function generateImportTemplate(
-  dataType: "building" | "rate_card",
+  dataType: "building" | "package" | "rate_card",
   templateVersion: typeof TEMPLATE_VERSION_V2,
 ): Promise<Buffer> {
   if (templateVersion !== TEMPLATE_VERSION_V2) {

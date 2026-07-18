@@ -1,10 +1,13 @@
 import {
   BUILDING_HEADERS,
   ImportParseError,
+  PACKAGE_HEADERS,
   RATE_CARD_HEADERS,
   TEMPLATE_VERSION_V2,
   type BuildingImport,
   type BuildingRow,
+  type PackageImport,
+  type PackageRow,
   type RateCardImport,
   type SourceRow,
 } from "@/lib/imports/template-v2";
@@ -122,6 +125,29 @@ function normalizeBuildings(rows: SourceRow[]): BuildingImport {
   return { templateVersion: TEMPLATE_VERSION_V2, rows: normalized };
 }
 
+function normalizePackages(rows: SourceRow[]): PackageImport {
+  rows = nonBlankRows(rows);
+  assertRowLimit(rows);
+  const columns = assertHeaders("Sales Packages", rows, PACKAGE_HEADERS);
+  const normalized: PackageRow[] = rows.slice(1).map((row) => {
+    const operationalStatus = text(value(row, columns, "Operational Status"));
+    if (operationalStatus !== "active" && operationalStatus !== "inactive") {
+      throw new ImportParseError("import.error.value_invalid", {
+        sheet: "Sales Packages",
+        rowNumber: row.rowNumber,
+        column: "Operational Status",
+      });
+    }
+    return {
+      rowNumber: row.rowNumber,
+      packageCode: nullable(value(row, columns, "Package Code")),
+      packageName: text(value(row, columns, "Package Name")),
+      operationalStatus,
+    };
+  });
+  return { templateVersion: TEMPLATE_VERSION_V2, rows: normalized };
+}
+
 function requiredSheet(sheets: Map<string, ParsedSheet>, name: string): SourceRow[] {
   const sheet = sheets.get(name);
   if (!sheet) throw new ImportParseError("import.error.missing_sheet", { sheet: name });
@@ -191,8 +217,9 @@ function assertFiles(files: readonly ImportSourceFile[]): void {
 }
 
 export async function parseImportFiles(dataType: "building", files: readonly ImportSourceFile[]): Promise<BuildingImport>;
+export async function parseImportFiles(dataType: "package", files: readonly ImportSourceFile[]): Promise<PackageImport>;
 export async function parseImportFiles(dataType: "rate_card", files: readonly ImportSourceFile[]): Promise<RateCardImport>;
-export async function parseImportFiles(dataType: "building" | "rate_card", files: readonly ImportSourceFile[]): Promise<BuildingImport | RateCardImport> {
+export async function parseImportFiles(dataType: "building" | "package" | "rate_card", files: readonly ImportSourceFile[]): Promise<BuildingImport | PackageImport | RateCardImport> {
   assertFiles(files);
   if (dataType === "building") {
     if (files.length !== 1) throw new ImportParseError("import.error.file_set_invalid");
@@ -204,6 +231,19 @@ export async function parseImportFiles(dataType: "building" | "rate_card", files
       return normalizeBuildings(requiredSheet(sheets, "Data"));
     }
     if (extension(file.filename) === ".csv") return normalizeBuildings(parseCsv(file.body));
+    throw new ImportParseError("import.error.file_set_invalid");
+  }
+
+  if (dataType === "package") {
+    if (files.length !== 1) throw new ImportParseError("import.error.file_set_invalid");
+    const file = files[0];
+    if (extension(file.filename) === ".xlsx") {
+      const sheets = await parseWorkbook(file.body);
+      assertAllowedSheets(sheets, ["Instructions", "Sales Packages"]);
+      assertBuildingTemplateVersion(sheets);
+      return normalizePackages(requiredSheet(sheets, "Sales Packages"));
+    }
+    if (extension(file.filename) === ".csv") return normalizePackages(parseCsv(file.body));
     throw new ImportParseError("import.error.file_set_invalid");
   }
 
