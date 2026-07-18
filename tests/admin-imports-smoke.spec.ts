@@ -94,6 +94,7 @@ test.afterAll(async () => {
 test("operates the authenticated bilingual import workflow through the real UI", async ({ page }) => {
   await page.goto("/admin/imports");
   await expect(page.getByRole("heading", { name: "Import administration sign in" })).toBeVisible();
+  await expect(page.getByText("Your session has expired. Sign in again.")).toHaveCount(0);
   await expect(page.getByLabel("Email address")).toBeVisible();
   await page.getByLabel("Email address").fill(adminEmail!);
   await page.getByLabel("Password").fill(adminPassword!);
@@ -160,6 +161,13 @@ test("operates the authenticated bilingual import workflow through the real UI",
   const persistedRow = page.locator("tbody tr").filter({ hasText: jobId! });
   await expect(persistedRow).toContainText("楼宇");
   await expect(persistedRow).toContainText("已发布");
+
+  await page.getByRole("button", { name: "导入", exact: true }).click();
+  await page.getByLabel("源文件").setInputFiles(join(fixtureRoot, "buildings-valid.csv"));
+  await page.context().clearCookies();
+  await page.getByRole("button", { name: "上传并处理" }).click();
+  await expect(page.getByRole("heading", { name: "导入管理登录" })).toBeVisible();
+  await expect(page.getByText("会话已过期。请重新登录。", { exact: true })).toBeVisible();
 });
 
 async function emptyBucket(): Promise<void> {

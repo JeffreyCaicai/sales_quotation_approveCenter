@@ -5,7 +5,7 @@ import { describe, expect, test } from "vitest";
 import * as XLSX from "xlsx";
 
 import { parseImportFiles } from "@/lib/imports/normalize";
-import { PACKAGE_HEADERS, RATE_CARD_HEADERS } from "@/lib/imports/template-v2";
+import { PACKAGE_HEADERS } from "@/lib/imports/template-v2";
 
 const FIXTURES = join(process.cwd(), "tests", "fixtures", "imports", "v2");
 
@@ -33,15 +33,6 @@ describe("TMN-IMPORT-2 parser", () => {
       "Package Code",
       "Package Name",
       "Operational Status",
-    ]);
-  });
-
-  test("defines the exact single-file Rate Card CSV headers", () => {
-    expect(RATE_CARD_HEADERS).toEqual([
-      "Record Type",
-      "IRIS Building ID",
-      "Package Code",
-      "Price IDR",
     ]);
   });
 
@@ -130,7 +121,7 @@ describe("TMN-IMPORT-2 parser", () => {
     });
   });
 
-  test("parses the three Rate Card record types from one CSV", async () => {
+  test("rejects a structurally complete legacy single-CSV Rate Card", async () => {
     const body = new TextEncoder().encode([
       "Record Type,IRIS Building ID,Package Code,Price IDR",
       "BUILDING_PRICE,B003004,,0",
@@ -140,13 +131,7 @@ describe("TMN-IMPORT-2 parser", () => {
     ].join("\n"));
 
     await expect(parseImportFiles("rate_card", [{ filename: "rate-card.csv", body }]))
-      .resolves.toEqual({
-        templateVersion: "TMN-IMPORT-2",
-        currency: "IDR",
-        buildingPrices: [{ rowNumber: 2, irisBuildingId: "B003004", priceIdr: "0" }],
-        packagePrices: [{ rowNumber: 3, packageCode: "PKG-01", priceIdr: "1500000" }],
-        packageMemberships: [{ rowNumber: 4, packageCode: "PKG-01", irisBuildingId: "B003004" }],
-      });
+      .rejects.toMatchObject({ key: "import.error.file_set_invalid" });
   });
 
   test("parses the exact atomic four-CSV Rate Card set", async () => {
@@ -210,18 +195,6 @@ describe("TMN-IMPORT-2 parser", () => {
   ])("rejects a Rate Card workbook with a %s", async (_label, sheets, key) => {
     await expect(parseImportFiles("rate_card", [workbookFile("invalid-rate-card.xlsx", sheets)]))
       .rejects.toMatchObject({ key });
-  });
-
-  test.each([
-    "BUILDING_PRICE,B003004,PKG-01,100",
-    "PACKAGE_PRICE,B003004,PKG-01,100",
-    "PACKAGE_MEMBER,B003004,PKG-01,100",
-  ])("rejects a Rate Card CSV record with a nonblank inapplicable field: %s", async (record) => {
-    const body = new TextEncoder().encode(
-      `Record Type,IRIS Building ID,Package Code,Price IDR\n${record}\n`,
-    );
-    await expect(parseImportFiles("rate_card", [{ filename: "rate-card.csv", body }]))
-      .rejects.toMatchObject({ key: "import.error.value_invalid" });
   });
 
   test("retains duplicate IRIS IDs for the validation stage", async () => {

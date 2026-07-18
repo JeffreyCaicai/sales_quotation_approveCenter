@@ -63,7 +63,7 @@ function ImportAdminController() {
   const loadController = useRef<AbortController | null>(null);
   const refreshController = useRef<AbortController | null>(null);
 
-  const handleUnauthorized = useCallback(() => {
+  const handleUnauthorized = useCallback((showExpired = true) => {
     loadController.current?.abort();
     loadController.current = null;
     refreshController.current?.abort();
@@ -71,11 +71,14 @@ function ImportAdminController() {
     setData(emptyData);
     setSelectedJobId(null);
     setLoginBusy(false);
-    setErrorKey("error.unauthorized");
+    setErrorKey(showExpired ? "error.unauthorized" : null);
     setPhase("login");
   }, []);
 
-  const loadAuthorized = useCallback(async (signal: AbortSignal) => {
+  const loadAuthorized = useCallback(async (
+    signal: AbortSignal,
+    showExpiredOnUnauthorized = true,
+  ) => {
     const jobId = readJobIdFromSearch(window.location.search);
     try {
       const [summary, history, rateCardVersions, initialJob] = await Promise.all([
@@ -93,7 +96,7 @@ function ImportAdminController() {
     } catch (failure) {
       if (signal.aborted) return;
       if (failure instanceof ImportAdminApiError && failure.status === 401) {
-        handleUnauthorized();
+        handleUnauthorized(showExpiredOnUnauthorized);
         return;
       }
       setData(emptyData);
@@ -110,7 +113,7 @@ function ImportAdminController() {
   useEffect(() => {
     const controller = new AbortController();
     loadController.current = controller;
-    queueMicrotask(() => void loadAuthorized(controller.signal));
+    queueMicrotask(() => void loadAuthorized(controller.signal, false));
     return () => {
       controller.abort();
       if (loadController.current === controller) loadController.current = null;

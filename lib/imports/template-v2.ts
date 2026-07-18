@@ -21,13 +21,6 @@ export const PACKAGE_HEADERS = [
   "Operational Status",
 ] as const;
 
-export const RATE_CARD_HEADERS = [
-  "Record Type",
-  "IRIS Building ID",
-  "Package Code",
-  "Price IDR",
-] as const;
-
 export const RATE_CARD_BUILDING_PRICE_HEADERS = ["IRIS Building ID", "Price IDR"] as const;
 export const RATE_CARD_PACKAGE_PRICE_HEADERS = ["Package Code", "Price IDR"] as const;
 export const RATE_CARD_PACKAGE_MEMBERSHIP_HEADERS = ["Package Code", "IRIS Building ID"] as const;

@@ -55,6 +55,13 @@ const rateCardBody = workbook({
   "Package Membership": [["Package Code", "IRIS Building ID"], ["PKG-A", "B001"]],
 });
 
+const legacyRateCardCsvBody = new TextEncoder().encode([
+  "Record Type,IRIS Building ID,Package Code,Price IDR",
+  "BUILDING_PRICE,B001,,100",
+  "PACKAGE_PRICE,,PKG-A,250",
+  "PACKAGE_MEMBER,B001,PKG-A,",
+].join("\n"));
+
 class Repository implements ImportProcessingRepository {
   state: "uploaded" | "validating" | "ready_to_publish" | "draft" | "validation_failed" | "published" = "uploaded";
   errors: unknown[] = [];
@@ -66,6 +73,7 @@ class Repository implements ImportProcessingRepository {
   unsupported = false;
   stale = false;
   dataType: "building" | "package" | "rate_card" = "building";
+  originalFilename = "buildings.xlsx";
   packages: PackageSnapshot[] = [];
   rateCard: RateCardProcessingSnapshot = {
     buildings: [{ id: "building-1", irisBuildingId: "B001", erpBuildingId: null, status: "active" }],
@@ -85,7 +93,7 @@ class Repository implements ImportProcessingRepository {
       job: {
         id: "job-1", dataType: this.dataType, templateVersion: this.templateVersion,
         claimToken: this.claimToken,
-        files: [{ objectStorageKey: "key", originalFilename: "buildings.xlsx", checksum: "a".repeat(64) }],
+        files: [{ objectStorageKey: "key", originalFilename: this.originalFilename, checksum: "a".repeat(64) }],
       },
     };
   }
@@ -258,6 +266,22 @@ describe("production import processing", () => {
       expect.objectContaining({ entityKey: "package:PKG-A", changeType: "unchanged" }),
       expect.objectContaining({ entityKey: "membership:PKG-A:B001", changeType: "unchanged" }),
     ]));
+  });
+
+  test("rejects a legacy single-CSV Rate Card before staging a draft", async () => {
+    const repository = new Repository();
+    repository.dataType = "rate_card";
+    repository.originalFilename = "rate-card.csv";
+
+    await expect(processImport("job-1", actor, {
+      repository,
+      objectStore: { readImmutable: async () => legacyRateCardCsvBody },
+    })).resolves.toEqual({ jobId: "job-1", state: "validation_failed" });
+    expect(repository.normalized).toBeNull();
+    expect(repository.changes).toEqual([]);
+    expect(repository.errors).toEqual([
+      expect.objectContaining({ key: "import.error.file_set_invalid" }),
+    ]);
   });
 
   test("reclaims only claims older than the bounded stale interval", () => {

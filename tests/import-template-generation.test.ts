@@ -13,7 +13,6 @@ import {
   BUILDING_HEADERS,
   PACKAGE_HEADERS,
   RATE_CARD_BUILDING_PRICE_HEADERS,
-  RATE_CARD_HEADERS,
   RATE_CARD_PACKAGE_MEMBERSHIP_HEADERS,
   RATE_CARD_PACKAGE_PRICE_HEADERS,
   TEMPLATE_VERSION_V2,
@@ -128,12 +127,6 @@ describe("formal TMN-IMPORT-2 templates", () => {
         ["Currency", "IDR"],
       ],
     );
-    expect(RATE_CARD_HEADERS).toEqual([
-      "Record Type",
-      "IRIS Building ID",
-      "Package Code",
-      "Price IDR",
-    ]);
     expect(rows(buffer, "Building Prices")[0]).toEqual([...RATE_CARD_BUILDING_PRICE_HEADERS]);
     expect(rows(buffer, "Package Prices")[0]).toEqual([...RATE_CARD_PACKAGE_PRICE_HEADERS]);
     expect(rows(buffer, "Package Membership")[0]).toEqual([...RATE_CARD_PACKAGE_MEMBERSHIP_HEADERS]);

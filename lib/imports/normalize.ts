@@ -3,7 +3,6 @@ import {
   ImportParseError,
   PACKAGE_HEADERS,
   RATE_CARD_BUILDING_PRICE_HEADERS,
-  RATE_CARD_HEADERS,
   RATE_CARD_PACKAGE_MEMBERSHIP_HEADERS,
   RATE_CARD_PACKAGE_PRICE_HEADERS,
   TEMPLATE_VERSION_V2,
@@ -211,47 +210,6 @@ function normalizeRateCard(sheets: Map<string, ParsedSheet>): RateCardImport {
   };
 }
 
-function invalidRateCardCsvCell(row: SourceRow, column: string): never {
-  throw new ImportParseError("import.error.value_invalid", {
-    sheet: "Rate Card",
-    rowNumber: row.rowNumber,
-    column,
-  });
-}
-
-function normalizeRateCardCsv(rows: SourceRow[]): RateCardImport {
-  rows = nonBlankRows(rows);
-  assertRowLimit(rows);
-  const columns = assertHeaders("Rate Card", rows, RATE_CARD_HEADERS);
-  const result: RateCardImport = {
-    templateVersion: TEMPLATE_VERSION_V2,
-    currency: "IDR",
-    buildingPrices: [],
-    packagePrices: [],
-    packageMemberships: [],
-  };
-
-  for (const row of rows.slice(1)) {
-    const recordType = text(value(row, columns, "Record Type"));
-    const irisBuildingId = text(value(row, columns, "IRIS Building ID"));
-    const packageCode = text(value(row, columns, "Package Code"));
-    const priceIdr = exactText(value(row, columns, "Price IDR"));
-    if (recordType === "BUILDING_PRICE") {
-      if (packageCode !== "") invalidRateCardCsvCell(row, "Package Code");
-      result.buildingPrices.push({ rowNumber: row.rowNumber, irisBuildingId, priceIdr });
-    } else if (recordType === "PACKAGE_PRICE") {
-      if (irisBuildingId !== "") invalidRateCardCsvCell(row, "IRIS Building ID");
-      result.packagePrices.push({ rowNumber: row.rowNumber, packageCode, priceIdr });
-    } else if (recordType === "PACKAGE_MEMBER") {
-      if (priceIdr !== "") invalidRateCardCsvCell(row, "Price IDR");
-      result.packageMemberships.push({ rowNumber: row.rowNumber, packageCode, irisBuildingId });
-    } else {
-      invalidRateCardCsvCell(row, "Record Type");
-    }
-  }
-  return result;
-}
-
 function normalizeRateCardCsvSet(files: readonly ImportSourceFile[]): RateCardImport {
   const filenames = files.map((file) => file.filename).sort();
   const expected = [...RATE_CARD_CSV_FILE_TO_SHEET.keys()].sort();
@@ -319,9 +277,6 @@ export async function parseImportFiles(dataType: "building" | "package" | "rate_
 
   if (files.length === 1 && extension(files[0].filename) === ".xlsx") {
     return normalizeRateCard(await parseWorkbook(files[0].body));
-  }
-  if (files.length === 1 && extension(files[0].filename) === ".csv") {
-    return normalizeRateCardCsv(parseCsv(files[0].body));
   }
   if (files.length === RATE_CARD_CSV_FILE_TO_SHEET.size) {
     return normalizeRateCardCsvSet(files);

@@ -152,7 +152,8 @@ describe("mounted import administration authentication controller", () => {
 
     const renderer = await mountApp();
 
-    expect(output(renderer)).toContain("LOGIN:");
+    expect(output(renderer)).toContain("LOGIN:ready");
+    expect(output(renderer)).not.toContain(t("error.unauthorized"));
     expect(output(renderer)).not.toContain("SECRET-RC");
     expect(mocks.dashboardProps).toBeNull();
   });
@@ -186,7 +187,7 @@ describe("mounted import administration authentication controller", () => {
     });
 
     expect(refreshSignal?.aborted).toBe(true);
-    expect(output(renderer)).toContain("LOGIN:");
+    expect(output(renderer)).toContain(`LOGIN:${t("error.unauthorized")}`);
     expect(output(renderer)).not.toContain("DASHBOARD");
     expect(output(renderer)).not.toContain("SECRET-RC");
   });
