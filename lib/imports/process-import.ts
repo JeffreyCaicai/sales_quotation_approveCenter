@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+
 import type { SessionUser } from "@/lib/auth/session";
 import type { ImportDataType, ImportState } from "@/db/enums";
 import type { BuildingDiffSnapshot, ImportChange } from "@/lib/imports/diff";
@@ -6,13 +8,15 @@ import { calculatePackageDiff, type PackageChange, type PackageSnapshot } from "
 import { calculateRateCardDiff, type RateCardChange, type RateCardDiffSnapshot } from "@/lib/imports/rate-card-diff";
 import type { ImportValidationError } from "@/lib/imports/errors";
 import { sortImportValidationErrors } from "@/lib/imports/errors";
-import { parseImportFiles } from "@/lib/imports/normalize";
+import { parseImportFiles, toValidatedBuildingImport, toValidatedPackageImport } from "@/lib/imports/normalize";
 import { PostgresImportProcessingRepository } from "@/lib/imports/processing-repository";
-import { ImportParseError, type BuildingImport, type PackageImport, type RateCardImport, type StagedRateCardImport } from "@/lib/imports/template-v2";
+import { ImportParseError, type BuildingImport, type PackageCandidateImport, type PackageImport, type RateCardImport, type StagedRateCardImport } from "@/lib/imports/template-v2";
+import { isValidIdrPrice } from "@/lib/imports/idr-price";
 import { validateBuildingRows, validatePackageRows, validateRateCardBuildings, type BuildingValidationSnapshot, type PackageValidationSnapshot } from "@/lib/imports/validate";
 import { S3ObjectStore } from "@/lib/storage/s3-object-store";
 import { TEMPLATE_VERSION_V2 } from "@/lib/imports/template-v2";
 import { ImportProcessingError } from "@/lib/imports/processing-errors";
+import { ImportError } from "@/lib/imports/contracts";
 
 export { ImportProcessingError } from "@/lib/imports/processing-errors";
 
@@ -45,7 +49,28 @@ export interface ImportProcessingRepository {
   completePackage(jobId: string, claimToken: string, normalized: PackageImport, changes: PackageChange[]): Promise<void>;
   completeRateCard(jobId: string, claimToken: string, normalized: StagedRateCardImport, changes: RateCardChange[]): Promise<void>;
   fail(jobId: string, claimToken: string, errors: ImportValidationError[]): Promise<void>;
-  retry(jobId: string, claimToken: string, failureSummary: string): Promise<void>;
+  processingFailure(
+    jobId: string,
+    claimToken: string,
+    actorId: string,
+    failure: ProcessingFailure,
+  ): Promise<void>;
+}
+
+export interface ReprocessingImportRepository extends ImportProcessingRepository {
+  claimReprocess(jobId: string, actor: SessionUser, now: Date): ReturnType<ImportProcessingRepository["claim"]>;
+}
+
+export interface ProcessingFailure {
+  code: "IMPORT_PROCESSING_RETRYABLE" | "IMPORT_PROCESSING_TERMINAL";
+  incidentId: string;
+  retryable: boolean;
+}
+
+export interface ProcessingFailureLogEntry {
+  incidentId: string;
+  jobId: string;
+  error: unknown;
 }
 
 interface ProcessingObjectStore {
@@ -56,7 +81,17 @@ export interface ProcessImportDependencies {
   repository: ImportProcessingRepository;
   objectStore: ProcessingObjectStore;
   now?: () => Date;
+  randomUUID?: () => string;
+  logError?: (entry: ProcessingFailureLogEntry) => void;
 }
+
+export interface ReprocessImportDependencies extends Omit<ProcessImportDependencies, "repository"> {
+  repository: ReprocessingImportRepository;
+}
+
+export type ProcessImportResult =
+  | { jobId: string; state: "ready_to_publish" | "draft" | "validation_failed" }
+  | { jobId: string; state: "processing_failed"; failure: ProcessingFailure };
 
 export async function processImport(
   jobId: string,
@@ -65,8 +100,35 @@ export async function processImport(
     repository: new PostgresImportProcessingRepository(),
     objectStore: S3ObjectStore.fromEnv(),
   },
-): Promise<{ jobId: string; state: "uploaded" | "ready_to_publish" | "draft" | "validation_failed" }> {
+): Promise<ProcessImportResult> {
   const claimed = await dependencies.repository.claim(jobId, actor, dependencies.now?.() ?? new Date());
+  return processClaim(jobId, actor, claimed, dependencies);
+}
+
+export async function reprocessImport(
+  jobId: string,
+  actor: SessionUser,
+  dependencies: ReprocessImportDependencies = {
+    repository: new PostgresImportProcessingRepository(),
+    objectStore: S3ObjectStore.fromEnv(),
+  },
+): Promise<ProcessImportResult> {
+  const claimed = await dependencies.repository.claimReprocess(jobId, actor, dependencies.now?.() ?? new Date());
+  if (claimed.kind !== "claimed") {
+    if (claimed.kind === "terminal" && claimed.state === "validating") {
+      throw new ImportProcessingError("IMPORT_JOB_PROCESSING", 409);
+    }
+    throw new ImportProcessingError("IMPORT_JOB_NOT_PROCESSABLE", 409);
+  }
+  return processClaim(jobId, actor, claimed, dependencies);
+}
+
+async function processClaim(
+  jobId: string,
+  actor: SessionUser,
+  claimed: Awaited<ReturnType<ImportProcessingRepository["claim"]>>,
+  dependencies: ProcessImportDependencies,
+): Promise<ProcessImportResult> {
   if (claimed.kind === "unsupported") {
     throw new ImportProcessingError("IMPORT_PROCESSOR_NOT_IMPLEMENTED", 501);
   }
@@ -91,23 +153,25 @@ export async function processImport(
       body: await dependencies.objectStore.readImmutable(file.objectStorageKey, file.checksum),
     })));
     if (job.dataType === "building") {
-      const normalized = await parseImportFiles("building", files);
+      const candidate = await parseImportFiles("building", files);
       const snapshot = await dependencies.repository.buildingSnapshot();
-      const errors = validateBuildingRows(normalized.rows, snapshot);
+      const errors = validateBuildingRows(candidate.rows, snapshot);
       if (errors.length > 0) return fail(jobId, job.claimToken, errors, dependencies.repository);
+      const normalized = toValidatedBuildingImport(candidate);
       const changes = calculateBuildingDiff(normalized.rows, snapshot);
       await dependencies.repository.completeBuilding(jobId, job.claimToken, normalized, changes);
       return { jobId, state: "ready_to_publish" };
     }
 
     if (job.dataType === "package") {
-      const normalized = await parseImportFiles("package", files);
+      const candidate = await parseImportFiles("package", files);
       const snapshot = await dependencies.repository.packageSnapshot();
       const errors = [
-        ...validatePackageRows(normalized.rows, snapshot),
-        ...validatePackageMasterNameIdentity(normalized, snapshot),
+        ...validatePackageRows(candidate.rows, snapshot),
+        ...validatePackageMasterNameIdentity(candidate, snapshot),
       ];
       if (errors.length > 0) return fail(jobId, job.claimToken, errors, dependencies.repository);
+      const normalized = toValidatedPackageImport(candidate);
       const changes = calculatePackageDiff(normalized.rows, snapshot.packages);
       await dependencies.repository.completePackage(jobId, job.claimToken, normalized, changes);
       return { jobId, state: "ready_to_publish" };
@@ -124,17 +188,60 @@ export async function processImport(
   } catch (error) {
     const errors = processingErrors(error);
     if (errors) return fail(jobId, job.claimToken, errors, dependencies.repository);
-    await dependencies.repository.retry(
-      jobId,
-      job.claimToken,
-      error instanceof Error ? error.message.slice(0, 500) : "IMPORT_PROCESSING_TRANSIENT_FAILURE",
-    );
-    return { jobId, state: "uploaded" };
+    const retryable = isRetryableProcessingFailure(error);
+    const incidentId = (dependencies.randomUUID ?? randomUUID)();
+    const failure: ProcessingFailure = {
+      code: retryable ? "IMPORT_PROCESSING_RETRYABLE" : "IMPORT_PROCESSING_TERMINAL",
+      incidentId,
+      retryable,
+    };
+    (dependencies.logError ?? logProcessingFailure)({ incidentId, jobId, error });
+    await dependencies.repository.processingFailure(jobId, job.claimToken, actor.id, failure);
+    return { jobId, state: "processing_failed", failure };
   }
 }
 
+export function isRetryableProcessingFailure(error: unknown): boolean {
+  if (error instanceof ImportError) {
+    if (error.key !== "STORAGE_SYNC_FAILED") return false;
+    const cause = (error as ImportError & { cause?: unknown }).cause;
+    return cause !== undefined && isRetryableInfrastructureCause(cause, new Set(), 0);
+  }
+  return isRetryableInfrastructureCause(error, new Set(), 0);
+}
+
+function isRetryableInfrastructureCause(
+  error: unknown,
+  seen: Set<object>,
+  depth: number,
+): boolean {
+  if (typeof error !== "object" || error === null || depth > 5 || seen.has(error)) return false;
+  seen.add(error);
+  const candidate = error as {
+    code?: unknown;
+    name?: unknown;
+    $retryable?: unknown;
+    $metadata?: { httpStatusCode?: unknown };
+    cause?: unknown;
+  };
+  if (candidate.$retryable === true) return true;
+  const status = candidate.$metadata?.httpStatusCode;
+  if (typeof status === "number") return status === 429 || status >= 500;
+  if (typeof candidate.code === "string" && (
+    candidate.code.startsWith("08")
+    || ["40001", "40P01", "53300", "57P03", "ECONNRESET", "ETIMEDOUT", "EAI_AGAIN"].includes(candidate.code)
+  )) return true;
+  if (candidate.name === "TimeoutError") return true;
+  return candidate.cause !== undefined
+    && isRetryableInfrastructureCause(candidate.cause, seen, depth + 1);
+}
+
+function logProcessingFailure(entry: ProcessingFailureLogEntry): void {
+  console.error(`Import processing incident ${entry.incidentId} for job ${entry.jobId}`, entry.error);
+}
+
 function validatePackageMasterNameIdentity(
-  input: PackageImport,
+  input: PackageCandidateImport,
   snapshot: PackageProcessingSnapshot,
 ): ImportValidationError[] {
   const codesByName = new Map<string, Set<string>>();
@@ -175,13 +282,16 @@ async function fail(
 
 function processingErrors(error: unknown): ImportValidationError[] | null {
   if (error instanceof ImportParseError) {
+    const filename = typeof error.details.filename === "string" ? error.details.filename : undefined;
     return [{
+      ...(filename === undefined ? {} : { filename }),
       sheet: String(error.details.sheet ?? "File"),
       rowNumber: Number(error.details.rowNumber ?? 0),
       column: String(error.details.column ?? ""),
       key: error.key,
-      params: Object.fromEntries(Object.entries(error.details).filter(([, value]) =>
-        typeof value === "string" || typeof value === "number")) as Record<string, string | number>,
+      params: Object.fromEntries(Object.entries(error.details).filter(([key, value]) =>
+        key !== "filename" && key !== "sheet" && key !== "rowNumber" && key !== "column"
+        && (typeof value === "string" || typeof value === "number"))) as Record<string, string | number>,
     }];
   }
   return null;
@@ -215,7 +325,7 @@ export function validateRateCardForProcessing(
     if (!pricedPackages.has(row.packageCode.trim())) errors.push({ sheet: "Package Membership", rowNumber: row.rowNumber, column: "Package Code", key: "import.error.package_membership_missing_price", params: { packageCode: row.packageCode.trim() } });
   }
   for (const row of [...input.buildingPrices, ...input.packagePrices]) {
-    if (!/^(?:0|[1-9]\d*)$/u.test(row.priceIdr)) {
+    if (!isValidIdrPrice(row.priceIdr)) {
       errors.push({ sheet: "priceIdr" in row && "irisBuildingId" in row ? "Building Prices" : "Package Prices", rowNumber: row.rowNumber, column: "Price IDR", key: "import.error.value_invalid", params: {} });
     }
   }

@@ -202,8 +202,11 @@ describe("native PostgreSQL Sales Package Master publication", () => {
 
     await expect(publishImport(jobId, actor)).rejects.toMatchObject({ key: "IMPORT_CHANGE_STALE" });
     expect((await pool.query("select id from sales_packages where package_code = $1", [addedCode])).rowCount).toBe(0);
-    expect((await pool.query("select state from import_jobs where id = $1", [jobId])).rows[0].state).toBe("ready_to_publish");
-    expect((await pool.query("select id from audit_events where import_job_id = $1", [jobId])).rowCount).toBe(0);
+    expect((await pool.query("select state from import_jobs where id = $1", [jobId])).rows[0].state).toBe("reprocess_required");
+    expect((await pool.query<{ action: string }>(
+      "select action from audit_events where import_job_id = $1 order by action",
+      [jobId],
+    )).rows).toEqual([{ action: "import.job.reprocess_required" }]);
   });
 
   test("rechecks the package permission server-side and rejects non-V2 jobs", async () => {
@@ -235,7 +238,10 @@ describe("native PostgreSQL Sales Package Master publication", () => {
 
     await expect(publishImport(jobId, actor)).rejects.toMatchObject({ key: "IMPORT_CHANGE_STALE" });
     expect((await pool.query("select count(*)::int count from sales_packages where package_code = $1", [generatedCode])).rows[0].count).toBe(1);
-    expect((await pool.query("select id from audit_events where import_job_id = $1", [jobId])).rowCount).toBe(0);
-    expect((await pool.query("select state from import_jobs where id = $1", [jobId])).rows[0].state).toBe("ready_to_publish");
+    expect((await pool.query<{ action: string }>(
+      "select action from audit_events where import_job_id = $1 order by action",
+      [jobId],
+    )).rows).toEqual([{ action: "import.job.reprocess_required" }]);
+    expect((await pool.query("select state from import_jobs where id = $1", [jobId])).rows[0].state).toBe("reprocess_required");
   });
 });

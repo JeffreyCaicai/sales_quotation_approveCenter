@@ -89,16 +89,32 @@ describe("Sales Package Master publication preflight", () => {
     expect(publish).toThrowError(PublicationError);
   });
 
-  test("maps only a package-code unique race to a stale publication error", () => {
-    const collision = Object.assign(new Error("duplicate key"), {
-      code: "23505",
-      constraint: "sales_packages_package_code_unique",
-    });
+  test.each([
+    "sales_packages_package_code_unique",
+    "sales_packages_normalized_name_unique",
+  ])("maps a stable Package identity race on %s to stale", (constraint) => {
+    const collision = Object.assign(new Error("duplicate key"), { code: "23505", constraint });
     expect(() => rethrowPackageInsertError(collision)).toThrowError(expect.objectContaining({
       key: "IMPORT_CHANGE_STALE",
       status: 409,
     }));
     expect(() => rethrowPackageInsertError(collision)).toThrowError(PublicationError);
+  });
+
+  test("maps a Drizzle-wrapped Package identity race to stale", () => {
+    const databaseError = Object.assign(new Error("duplicate key"), {
+      code: "23505",
+      constraint: "sales_packages_normalized_name_unique",
+    });
+    const wrapped = Object.assign(new Error("Failed query"), { cause: databaseError });
+
+    expect(() => rethrowPackageInsertError(wrapped)).toThrowError(expect.objectContaining({
+      key: "IMPORT_CHANGE_STALE",
+      status: 409,
+    }));
+  });
+
+  test("does not recast unrelated database failures as stale", () => {
 
     const otherUnique = Object.assign(new Error("different unique constraint"), {
       code: "23505",

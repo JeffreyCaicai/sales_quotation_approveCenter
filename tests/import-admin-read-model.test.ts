@@ -147,6 +147,22 @@ describe("protected import administration read model", () => {
     expect(jobs[1].publishedAt).toBe("2026-07-17T09:00:00.000Z");
   });
 
+  test("redacts any legacy raw processing failure text from protected read payloads", async () => {
+    mocks.getDb.mockReturnValue(queuedDatabase(
+      authorizedRows("data.audit.read"),
+      [jobRow({
+        state: "processing_failed",
+        failureSummary: "IMPORT_PROCESSING_RETRYABLE:SELECT secret FROM /srv/private.ts",
+      })],
+    ));
+
+    const jobs = await listImportJobs(actor, { limit: 25, offset: 0 });
+
+    expect(jobs[0].failureSummary).toBe("IMPORT_FAILURE_REDACTED");
+    expect(JSON.stringify(jobs)).not.toContain("SELECT secret");
+    expect(JSON.stringify(jobs)).not.toContain("/srv/private.ts");
+  });
+
   test("summarizes entity states and deterministic job buckets", async () => {
     mocks.getDb.mockReturnValue(queuedDatabase(
       authorizedRows("data.audit.read"),
@@ -156,6 +172,7 @@ describe("protected import administration read model", () => {
       [
         { state: "uploading", count: 1 }, { state: "uploaded", count: 2 }, { state: "validating", count: 3 },
         { state: "ready_to_publish", count: 4 }, { state: "draft", count: 5 }, { state: "validation_failed", count: 6 },
+        { state: "processing_failed", count: 2 }, { state: "reprocess_required", count: 3 },
       ],
       [],
     ));
@@ -164,7 +181,7 @@ describe("protected import administration read model", () => {
       currentRateCard: { versionCode: "RC-2026-0002", publishedAt: "2026-07-18T10:00:00.000Z" },
       buildings: { active: 4, inactive: 2 },
       packages: { active: 3, inactive: 0 },
-      jobs: { validating: 6, ready: 9, failed: 6 },
+      jobs: { validating: 6, ready: 9, failed: 11 },
       recentPublications: [],
     });
   });

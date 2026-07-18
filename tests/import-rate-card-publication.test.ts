@@ -66,9 +66,10 @@ describe("Rate Card publication transaction preflight", () => {
     [[{ id: "building-uuid", irisBuildingId: "B1", status: "inactive" }], [{ id: "package-uuid", packageCode: "P1", status: "active" }], "IMPORT_RATE_CARD_BUILDING_REFERENCE_INVALID"],
     [[{ id: "building-uuid", irisBuildingId: "B1", status: "active" }], [], "IMPORT_RATE_CARD_PACKAGE_REFERENCE_INVALID"],
     [[{ id: "building-uuid", irisBuildingId: "B1", status: "active" }], [{ id: "package-uuid", packageCode: "P1", status: "inactive" }], "IMPORT_RATE_CARD_PACKAGE_REFERENCE_INVALID"],
-  ] as const)("rejects missing or inactive locked references", (buildings, packages, key) => {
+  ] as const)("treats missing or inactive locked references as stale master data", (buildings, packages, _legacyKey) => {
+    void _legacyKey;
     expect(() => assertRateCardPublicationSnapshot(input, [...buildings], [...packages]))
-      .toThrowError(expect.objectContaining({ key }));
+      .toThrowError(expect.objectContaining({ key: "IMPORT_CHANGE_STALE", status: 409 }));
   });
 
   test("rejects duplicate file-level references before inserts", () => {
@@ -76,7 +77,7 @@ describe("Rate Card publication transaction preflight", () => {
       ...input,
       buildingPrices: [...input.buildingPrices, { ...input.buildingPrices[0], rowNumber: 3 }],
     }, [{ id: "building-uuid", irisBuildingId: "B1", status: "active" }], [{ id: "package-uuid", packageCode: "P1", status: "active" }]))
-      .toThrowError(expect.objectContaining({ key: "IMPORT_RATE_CARD_BUILDING_REFERENCE_INVALID" }));
+      .toThrowError(expect.objectContaining({ key: "IMPORT_CHANGE_INVALID", status: 400 }));
   });
 
   test("rejects malformed staged identifiers at the stable publication boundary", () => {
@@ -86,6 +87,47 @@ describe("Rate Card publication transaction preflight", () => {
     }, [], []))
       .toThrowError(expect.objectContaining({ key: "IMPORT_CHANGE_INVALID" }));
   });
+
+  test.each([
+    ["building", "0"],
+    ["building", "999999999999999999"],
+    ["package", "0"],
+    ["package", "999999999999999999"],
+  ] as const)(
+    "accepts an in-range %s IDR price at publication: %s",
+    (dataset, priceIdr) => {
+      expect(() => assertRateCardPublicationSnapshot({
+        ...input,
+        buildingPrices: dataset === "building"
+          ? [{ ...input.buildingPrices[0], priceIdr }]
+          : input.buildingPrices,
+        packagePrices: dataset === "package"
+          ? [{ ...input.packagePrices[0], priceIdr }]
+          : input.packagePrices,
+      }, [{ id: "building-uuid", irisBuildingId: "B1", status: "active" }], [{ id: "package-uuid", packageCode: "P1", status: "active" }])).not.toThrow();
+    },
+  );
+
+  test.each([
+    ["building", "-1"],
+    ["building", "1000000000000000000"],
+    ["package", "-1"],
+    ["package", "1000000000000000000"],
+  ] as const)(
+    "rejects an out-of-range %s IDR price again at publication: %s",
+    (dataset, priceIdr) => {
+      expect(() => assertRateCardPublicationSnapshot({
+        ...input,
+        buildingPrices: dataset === "building"
+          ? [{ ...input.buildingPrices[0], priceIdr }]
+          : input.buildingPrices,
+        packagePrices: dataset === "package"
+          ? [{ ...input.packagePrices[0], priceIdr }]
+          : input.packagePrices,
+      }, [{ id: "building-uuid", irisBuildingId: "B1", status: "active" }], [{ id: "package-uuid", packageCode: "P1", status: "active" }]))
+        .toThrowError(expect.objectContaining({ key: "IMPORT_CHANGE_INVALID" }));
+    },
+  );
 
   test("rejects a completely empty Rate Card", () => {
     expect(() => assertRateCardPublicationSnapshot({

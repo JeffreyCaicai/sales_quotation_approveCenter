@@ -216,6 +216,36 @@ describe("native PostgreSQL Rate Card publication", () => {
     )).rows).toEqual([{ id: currentId, status: "current" }]);
   });
 
+  test.each(["building", "package"] as const)(
+    "marks a Rate Card reprocess-required when its live %s reference becomes inactive",
+    async (reference) => {
+      const context = await seedContext();
+      const jobId = await seedJob(context, payload(context, null));
+      if (reference === "building") {
+        await pool.query("update buildings set status = 'inactive' where id = $1", [context.buildingId]);
+      } else {
+        await pool.query("update sales_packages set status = 'inactive' where id = $1", [context.packageId]);
+      }
+
+      await expect(publishImport(jobId, context.actor)).rejects.toMatchObject({
+        key: "IMPORT_CHANGE_STALE",
+        status: 409,
+      });
+      expect((await pool.query<{ state: string }>(
+        "select state from import_jobs where id = $1",
+        [jobId],
+      )).rows).toEqual([{ state: "reprocess_required" }]);
+      expect((await pool.query<{ action: string }>(
+        "select action from audit_events where import_job_id = $1 order by action",
+        [jobId],
+      )).rows).toEqual([{ action: "import.job.reprocess_required" }]);
+      expect((await pool.query(
+        "select id from rate_card_versions where import_job_id = $1",
+        [jobId],
+      )).rowCount).toBe(0);
+    },
+  );
+
   test("demotes the former Current while preserving every Historical child row", async () => {
     const context = await seedContext();
     const formerId = await seedCurrent(context);
@@ -308,6 +338,10 @@ describe("native PostgreSQL Rate Card publication", () => {
       "select count(*)::int count from import_jobs where id = any($1::uuid[]) and state = 'published'",
       [[firstJobId, secondJobId]],
     )).rows[0].count).toBe(1);
+    expect((await pool.query<{ state: string }>(
+      "select state from import_jobs where id = any($1::uuid[]) order by state",
+      [[firstJobId, secondJobId]],
+    )).rows).toEqual([{ state: "published" }, { state: "reprocess_required" }]);
   });
 
   test("rejects a different published job with the exact checksum and replays the same job idempotently", async () => {

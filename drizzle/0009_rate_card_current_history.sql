@@ -1,16 +1,49 @@
 CREATE TYPE "public"."rate_card_version_status" AS ENUM('current', 'historical');--> statement-breakpoint
+DO $$
+DECLARE
+  active_count integer;
+BEGIN
+  SELECT count(*)::integer INTO active_count
+  FROM rate_card_versions
+  WHERE status = 'active';
+
+  IF active_count > 1 THEN
+    RAISE EXCEPTION 'ambiguous legacy active Rate Card data: % active versions', active_count;
+  END IF;
+
+  IF EXISTS (
+    SELECT 1
+    FROM rate_card_versions
+    WHERE status NOT IN ('active', 'published', 'superseded', 'rolled_back')
+       OR published_at IS NULL
+  ) THEN
+    RAISE EXCEPTION 'unpublished legacy Rate Card versions require reconciliation before migration';
+  END IF;
+
+  IF EXISTS (SELECT 1 FROM rate_card_versions)
+     AND NOT EXISTS (
+       SELECT 1 FROM rate_card_versions WHERE status IN ('active', 'published')
+     ) THEN
+    RAISE EXCEPTION 'no eligible legacy Current Rate Card exists';
+  END IF;
+END;
+$$;--> statement-breakpoint
 ALTER TABLE "rate_card_versions"
   ADD COLUMN "publication_status" "rate_card_version_status" NOT NULL DEFAULT 'historical';--> statement-breakpoint
-WITH newest AS (
+WITH selected_current AS (
   SELECT id
   FROM rate_card_versions
-  WHERE published_at IS NOT NULL
+  WHERE status = CASE
+    WHEN EXISTS (SELECT 1 FROM rate_card_versions WHERE status = 'active')
+      THEN 'active'::import_state
+    ELSE 'published'::import_state
+  END
   ORDER BY published_at DESC, id DESC
   LIMIT 1
 )
 UPDATE rate_card_versions
 SET publication_status = 'current'
-WHERE id IN (SELECT id FROM newest);--> statement-breakpoint
+WHERE id IN (SELECT id FROM selected_current);--> statement-breakpoint
 ALTER TABLE "rate_card_versions" DROP COLUMN "status";--> statement-breakpoint
 ALTER TABLE "rate_card_versions" DROP COLUMN "effective_at";--> statement-breakpoint
 ALTER TABLE "rate_card_versions" DROP COLUMN "activated_at";--> statement-breakpoint

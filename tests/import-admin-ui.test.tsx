@@ -11,6 +11,7 @@ import {
   getImportJobDetail,
   getImportSummary,
   listImportHistory,
+  publishImportJob,
   uploadImport,
   validateImportFiles,
 } from "@/lib/client/import-admin-api";
@@ -147,6 +148,25 @@ describe("import administration workflow", () => {
     );
   });
 
+  test("preserves only an explicit reprocess-required conflict on client API errors", async () => {
+    const staleFetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      error: "IMPORT_CHANGE_STALE",
+      reprocessRequired: true,
+    }), { status: 409 }));
+    const notReadyFetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      error: "IMPORT_JOB_NOT_READY",
+    }), { status: 409 }));
+
+    await expect(publishImportJob(job.id, undefined, staleFetcher)).rejects.toMatchObject({
+      key: "IMPORT_CHANGE_STALE",
+      reprocessRequired: true,
+    });
+    await expect(publishImportJob(job.id, undefined, notReadyFetcher)).rejects.toMatchObject({
+      key: "IMPORT_JOB_NOT_READY",
+      reprocessRequired: false,
+    });
+  });
+
   test("keeps client history requests inside the protected route bounds", async () => {
     const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify([])));
 
@@ -209,6 +229,79 @@ describe("import administration workflow", () => {
     expect(openHtml).toContain("Publish Buildings data?");
     buttonByText(open, "Publish now").props.onClick?.();
     expect(onPublish).toHaveBeenCalledTimes(1);
+  });
+
+  test("restores reprocess-required controls from the durable job state after refresh", () => {
+    const durableStaleJob: ImportJobDetailContract = {
+      ...job,
+      state: "reprocess_required",
+      failureSummary: "IMPORT_REPROCESS_REQUIRED",
+    };
+    const html = renderToStaticMarkup(<ImportJobDetail
+      locale="en"
+      t={t}
+      job={durableStaleJob}
+      stale={false}
+      publishing={false}
+      confirmationOpen={false}
+      generatedIdentifiers={[]}
+      onRequestPublish={() => undefined}
+      onCancelPublish={() => undefined}
+      onPublish={() => undefined}
+      onReprocess={() => undefined}
+    />);
+
+    expect(html).toContain("This preview is stale");
+    expect(html).toContain("Reprocess");
+    expect(html).not.toContain("Publish data");
+  });
+
+  test.each([
+    ["IMPORT_PROCESSING_RETRYABLE:00000000-0000-4000-8000-000000000901", true],
+    ["IMPORT_PROCESSING_TERMINAL:00000000-0000-4000-8000-000000000902", false],
+  ] as const)("renders safe processing recovery for %s", (failureSummary, retryable) => {
+    const onRetryProcessing = vi.fn();
+    const failedJob: ImportJobDetailContract = {
+      ...job,
+      state: "processing_failed",
+      failureSummary,
+      changes: [],
+    };
+    const view = ImportJobDetail({
+      locale: "en",
+      t,
+      job: failedJob,
+      stale: false,
+      publishing: false,
+      processing: false,
+      confirmationOpen: false,
+      generatedIdentifiers: [],
+      onRequestPublish: () => undefined,
+      onCancelPublish: () => undefined,
+      onPublish: () => undefined,
+      onReprocess: () => undefined,
+      onRetryProcessing,
+    });
+    const html = renderToStaticMarkup(view);
+
+    expect(html).toContain(failureSummary.split(":")[1]);
+    expect(html).not.toContain("SELECT");
+    expect(html.includes("Retry processing")).toBe(retryable);
+    if (retryable) {
+      buttonByText(view, "Retry processing").props.onClick?.();
+      expect(onRetryProcessing).toHaveBeenCalledTimes(1);
+    }
+  });
+
+  test("classifies stale UI state only from explicit stale conflict metadata", async () => {
+    const workspaceModule = await import("@/components/admin/import-workspace") as typeof import("@/components/admin/import-workspace") & {
+      isStaleConflict?: (error: unknown) => boolean;
+    };
+    expect(workspaceModule.isStaleConflict).toBeTypeOf("function");
+    if (!workspaceModule.isStaleConflict) return;
+    expect(workspaceModule.isStaleConflict(new ImportAdminApiError(409, "IMPORT_CHANGE_STALE", true))).toBe(true);
+    expect(workspaceModule.isStaleConflict(new ImportAdminApiError(409, "IMPORT_JOB_NOT_READY"))).toBe(false);
+    expect(workspaceModule.isStaleConflict(new ImportAdminApiError(409, "IMPORT_DUPLICATE_PUBLISHED"))).toBe(false);
   });
 
   test("selects durable history jobs from a semantic table", () => {

@@ -12,7 +12,7 @@ export interface BuildingDiffSnapshotItem {
   city: string | null;
   cbdArea: string | null;
   subDistrict: string | null;
-  address: string;
+  address: string | null;
   status: "active" | "inactive";
   dataSource: "building_team" | "erp";
 }
@@ -31,7 +31,7 @@ export interface NormalizedBuilding {
   city: string | null;
   cbdArea: string | null;
   subDistrict: string | null;
-  address: string;
+  address: string | null;
   operationalStatus: "active" | "inactive";
   dataSource: "building_team" | "erp";
 }

@@ -1,13 +1,13 @@
 import { describe, expect, test } from "vitest";
 
-import type { BuildingRow, RateCardImport } from "@/lib/imports/template-v2";
+import type { BuildingCandidateRow, RateCardImport } from "@/lib/imports/template-v2";
 import {
   validateBuildingRows,
   validateRateCardBuildings,
   type BuildingValidationSnapshot,
 } from "@/lib/imports/validate";
 
-function building(overrides: Partial<BuildingRow> = {}): BuildingRow {
+function building(overrides: Partial<BuildingCandidateRow> = {}): BuildingCandidateRow {
   return {
     rowNumber: 2,
     irisBuildingId: "B003004",
@@ -50,13 +50,12 @@ function rateCard(overrides: Partial<RateCardImport> = {}): RateCardImport {
 }
 
 describe("building identity validation", () => {
-  test("rejects blank required descriptors and unknown controlled values", () => {
+  test("rejects a blank required name and unknown optional controlled values", () => {
     const errors = validateBuildingRows([
       building({ buildingName: "  ", address: "\t", buildingType: "Mall", gradeResource: "Grade Z" }),
     ], snapshot());
 
     expect(errors.map((item) => item.key)).toEqual([
-      "import.error.address_required",
       "import.error.building_name_required",
       "import.error.building_type_invalid",
       "import.error.grade_resource_invalid",
@@ -90,6 +89,38 @@ describe("building identity validation", () => {
     ], snapshot([
       { id: "uuid-a", irisBuildingId: "B000006", erpBuildingId: "ERP-01", status: "active" },
     ]))).toEqual([]);
+  });
+
+  test("accepts a Building row containing only the three required business fields", () => {
+    expect(validateBuildingRows([building({
+      irisBuildingId: "B-MINIMAL",
+      buildingName: "Minimal Building",
+      buildingType: null,
+      gradeResource: null,
+      area: null,
+      city: null,
+      cbdArea: null,
+      subDistrict: null,
+      address: null,
+      operationalStatus: "active",
+      dataSource: null,
+    })], { buildings: [] })).toEqual([]);
+  });
+
+  test("validates optional controlled values and all raw enumerations only when supplied", () => {
+    const errors = validateBuildingRows([
+      building({ rowNumber: 3, irisBuildingId: "B-3", operationalStatus: "retired", dataSource: "legacy" }),
+      building({ rowNumber: 4, irisBuildingId: "B-4", buildingType: "Unknown", gradeResource: "Grade Z", operationalStatus: "paused", dataSource: "external" }),
+    ], snapshot());
+
+    expect(errors).toEqual(expect.arrayContaining([
+      expect.objectContaining({ rowNumber: 3, column: "Operational Status", key: "import.error.operational_status_invalid" }),
+      expect.objectContaining({ rowNumber: 3, column: "Data Source", key: "import.error.data_source_invalid" }),
+      expect.objectContaining({ rowNumber: 4, column: "Building Type", key: "import.error.building_type_invalid" }),
+      expect.objectContaining({ rowNumber: 4, column: "Grade Resource", key: "import.error.grade_resource_invalid" }),
+      expect.objectContaining({ rowNumber: 4, column: "Operational Status", key: "import.error.operational_status_invalid" }),
+      expect.objectContaining({ rowNumber: 4, column: "Data Source", key: "import.error.data_source_invalid" }),
+    ]));
   });
 
   test("accepts a manual-only active building", () => {

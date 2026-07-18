@@ -6,10 +6,12 @@ import {
   RATE_CARD_PACKAGE_MEMBERSHIP_HEADERS,
   RATE_CARD_PACKAGE_PRICE_HEADERS,
   TEMPLATE_VERSION_V2,
+  type BuildingCandidateImport,
+  type BuildingCandidateRow,
   type BuildingImport,
-  type BuildingRow,
+  type PackageCandidateImport,
+  type PackageCandidateRow,
   type PackageImport,
-  type PackageRow,
   type RateCardImport,
   type SourceRow,
 } from "@/lib/imports/template-v2";
@@ -91,19 +93,13 @@ function assertBuildingTemplateVersion(sheets: Map<string, ParsedSheet>): void {
   }
 }
 
-function normalizeBuildings(rows: SourceRow[]): BuildingImport {
+function normalizeBuildings(rows: SourceRow[]): BuildingCandidateImport {
   rows = nonBlankRows(rows);
   assertRowLimit(rows);
   const columns = assertHeaders("Data", rows, BUILDING_HEADERS);
-  const normalized: BuildingRow[] = rows.slice(1).map((row) => {
+  const normalized: BuildingCandidateRow[] = rows.slice(1).map((row) => {
     const operationalStatus = text(value(row, columns, "Operational Status"));
-    const dataSource = text(value(row, columns, "Data Source"));
-    if (operationalStatus !== "active" && operationalStatus !== "inactive") {
-      throw new ImportParseError("import.error.value_invalid", { sheet: "Data", rowNumber: row.rowNumber, column: "Operational Status" });
-    }
-    if (dataSource !== "building_team" && dataSource !== "erp") {
-      throw new ImportParseError("import.error.value_invalid", { sheet: "Data", rowNumber: row.rowNumber, column: "Data Source" });
-    }
+    const dataSource = nullable(value(row, columns, "Data Source"));
     return {
       rowNumber: row.rowNumber,
       irisBuildingId: text(value(row, columns, "IRIS Building ID")),
@@ -115,7 +111,7 @@ function normalizeBuildings(rows: SourceRow[]): BuildingImport {
       city: nullable(value(row, columns, "City")),
       cbdArea: nullable(value(row, columns, "CBD Area")),
       subDistrict: nullable(value(row, columns, "Sub-District")),
-      address: text(value(row, columns, "Address")),
+      address: nullable(value(row, columns, "Address")),
       operationalStatus,
       dataSource,
     };
@@ -123,19 +119,12 @@ function normalizeBuildings(rows: SourceRow[]): BuildingImport {
   return { templateVersion: TEMPLATE_VERSION_V2, rows: normalized };
 }
 
-function normalizePackages(rows: SourceRow[]): PackageImport {
+function normalizePackages(rows: SourceRow[]): PackageCandidateImport {
   rows = nonBlankRows(rows);
   assertRowLimit(rows);
   const columns = assertHeaders("Sales Packages", rows, PACKAGE_HEADERS);
-  const normalized: PackageRow[] = rows.slice(1).map((row) => {
+  const normalized: PackageCandidateRow[] = rows.slice(1).map((row) => {
     const operationalStatus = text(value(row, columns, "Operational Status"));
-    if (operationalStatus !== "active" && operationalStatus !== "inactive") {
-      throw new ImportParseError("import.error.value_invalid", {
-        sheet: "Sales Packages",
-        rowNumber: row.rowNumber,
-        column: "Operational Status",
-      });
-    }
     return {
       rowNumber: row.rowNumber,
       packageCode: nullable(value(row, columns, "Package Code")),
@@ -230,7 +219,18 @@ function normalizeRateCardCsvSet(files: readonly ImportSourceFile[]): RateCardIm
     const sheetName = (RATE_CARD_CSV_FILE_TO_SHEET as ReadonlyMap<string, string>)
       .get(file.filename);
     if (!sheetName) throw new ImportParseError("import.error.file_set_invalid");
-    sheets.set(sheetName, { name: sheetName, rows: parseCsv(file.body) });
+    try {
+      sheets.set(sheetName, { name: sheetName, rows: parseCsv(file.body) });
+    } catch (error) {
+      if (error instanceof ImportParseError) {
+        throw new ImportParseError(error.key, {
+          ...error.details,
+          filename: file.filename,
+          sheet: sheetName,
+        });
+      }
+      throw error;
+    }
   }
   return normalizeRateCard(sheets);
 }
@@ -244,10 +244,10 @@ function assertFiles(files: readonly ImportSourceFile[]): void {
   }
 }
 
-export async function parseImportFiles(dataType: "building", files: readonly ImportSourceFile[]): Promise<BuildingImport>;
-export async function parseImportFiles(dataType: "package", files: readonly ImportSourceFile[]): Promise<PackageImport>;
+export async function parseImportFiles(dataType: "building", files: readonly ImportSourceFile[]): Promise<BuildingCandidateImport>;
+export async function parseImportFiles(dataType: "package", files: readonly ImportSourceFile[]): Promise<PackageCandidateImport>;
 export async function parseImportFiles(dataType: "rate_card", files: readonly ImportSourceFile[]): Promise<RateCardImport>;
-export async function parseImportFiles(dataType: "building" | "package" | "rate_card", files: readonly ImportSourceFile[]): Promise<BuildingImport | PackageImport | RateCardImport> {
+export async function parseImportFiles(dataType: "building" | "package" | "rate_card", files: readonly ImportSourceFile[]): Promise<BuildingCandidateImport | PackageCandidateImport | RateCardImport> {
   assertFiles(files);
   if (dataType === "building") {
     if (files.length !== 1) throw new ImportParseError("import.error.file_set_invalid");
@@ -282,4 +282,35 @@ export async function parseImportFiles(dataType: "building" | "package" | "rate_
     return normalizeRateCardCsvSet(files);
   }
   throw new ImportParseError("import.error.file_set_invalid");
+}
+
+export function toValidatedBuildingImport(input: BuildingCandidateImport): BuildingImport {
+  return {
+    templateVersion: input.templateVersion,
+    rows: input.rows.map((row) => {
+      if (row.operationalStatus !== "active" && row.operationalStatus !== "inactive") {
+        throw new ImportParseError("import.error.value_invalid", { sheet: "Data", rowNumber: row.rowNumber, column: "Operational Status" });
+      }
+      if (row.dataSource !== null && row.dataSource !== "building_team" && row.dataSource !== "erp") {
+        throw new ImportParseError("import.error.value_invalid", { sheet: "Data", rowNumber: row.rowNumber, column: "Data Source" });
+      }
+      return {
+        ...row,
+        operationalStatus: row.operationalStatus,
+        dataSource: row.dataSource ?? "building_team",
+      };
+    }),
+  };
+}
+
+export function toValidatedPackageImport(input: PackageCandidateImport): PackageImport {
+  return {
+    templateVersion: input.templateVersion,
+    rows: input.rows.map((row) => {
+      if (row.operationalStatus !== "active" && row.operationalStatus !== "inactive") {
+        throw new ImportParseError("import.error.value_invalid", { sheet: "Sales Packages", rowNumber: row.rowNumber, column: "Operational Status" });
+      }
+      return { ...row, operationalStatus: row.operationalStatus };
+    }),
+  };
 }

@@ -187,7 +187,7 @@ export const buildings = pgTable(
     city: text("city"),
     cbdArea: text("cbd_area"),
     subDistrict: text("sub_district"),
-    address: text("address").notNull(),
+    address: text("address"),
     traffic: bigint("traffic", { mode: "number" }),
     impressions: bigint("impressions", { mode: "number" }),
     erpLinkStatus: text("erp_link_status").notNull().default("manual_only"),
@@ -201,7 +201,6 @@ export const buildings = pgTable(
   (table) => [
     check("buildings_iris_building_id_not_blank_check", sql`regexp_replace(${table.irisBuildingId}, '\\s', '', 'g') <> ''`),
     check("buildings_name_not_blank_check", sql`regexp_replace(${table.name}, '\\s', '', 'g') <> ''`),
-    check("buildings_address_not_blank_check", sql`regexp_replace(${table.address}, '\\s', '', 'g') <> ''`),
     uniqueIndex("buildings_erp_building_id_unique")
       .on(table.erpBuildingId)
       .where(sql`${table.erpBuildingId} is not null`),
@@ -237,15 +236,25 @@ export const buildingControlledValues = pgTable(
   ],
 );
 
-export const salesPackages = pgTable("sales_packages", {
-  id: id(),
-  packageCode: text("package_code").notNull().unique(),
-  name: text("name").notNull(),
-  status: entityStatusEnum("status").notNull().default("active"),
-  sourceImportJobId: uuid("source_import_job_id").references(() => importJobs.id),
-  createdAt: createdAt(),
-  updatedAt: updatedAt(),
-});
+export const salesPackages = pgTable(
+  "sales_packages",
+  {
+    id: id(),
+    packageCode: text("package_code").notNull().unique(),
+    name: text("name").notNull(),
+    status: entityStatusEnum("status").notNull().default("active"),
+    sourceImportJobId: uuid("source_import_job_id").references(() => importJobs.id),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (table) => [
+    check("sales_packages_package_code_not_blank_check", sql`regexp_replace(${table.packageCode}, '^\\s+|\\s+$', '', 'g') <> ''`),
+    check("sales_packages_package_code_trimmed_check", sql`${table.packageCode} = regexp_replace(${table.packageCode}, '^\\s+|\\s+$', '', 'g')`),
+    check("sales_packages_name_not_blank_check", sql`regexp_replace(${table.name}, '^\\s+|\\s+$', '', 'g') <> ''`),
+    check("sales_packages_name_trimmed_check", sql`${table.name} = regexp_replace(${table.name}, '^\\s+|\\s+$', '', 'g')`),
+    uniqueIndex("sales_packages_normalized_name_unique").on(sql`lower(regexp_replace(${table.name}, '^\\s+|\\s+$', '', 'g'))`),
+  ],
+);
 
 export const rateCardVersions = pgTable(
   "rate_card_versions",
@@ -292,6 +301,7 @@ export const rateCardBuildingPrices = pgTable(
     createdAt: createdAt(),
   },
   (table) => [
+    check("rate_card_building_prices_price_nonnegative_check", sql`${table.priceIdr} between 0 and 999999999999999999`),
     unique("rate_card_building_prices_version_building_unique").on(
       table.rateCardVersionId,
       table.buildingId,
@@ -313,6 +323,7 @@ export const rateCardPackageConfigs = pgTable(
     createdAt: createdAt(),
   },
   (table) => [
+    check("rate_card_package_configs_price_nonnegative_check", sql`${table.priceIdr} between 0 and 999999999999999999`),
     unique("rate_card_package_configs_version_package_unique").on(
       table.rateCardVersionId,
       table.packageId,

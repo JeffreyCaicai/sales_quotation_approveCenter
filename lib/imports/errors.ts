@@ -1,4 +1,5 @@
 export interface ImportValidationError {
+  filename?: string;
   sheet: string;
   rowNumber: number;
   column: string;
@@ -10,7 +11,8 @@ export function sortImportValidationErrors(
   errors: ImportValidationError[],
 ): ImportValidationError[] {
   return errors.sort((left, right) =>
-    compareText(left.sheet, right.sheet)
+    compareText(left.filename ?? "", right.filename ?? "")
+    || compareText(left.sheet, right.sheet)
     || left.rowNumber - right.rowNumber
     || compareText(left.column, right.column)
     || compareText(left.key, right.key));

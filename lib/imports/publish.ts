@@ -19,6 +19,13 @@ import type {
 import { publishRateCardImport } from "@/lib/imports/publish-rate-card";
 import { publishPackageImport } from "@/lib/imports/publish-package";
 import { publicationLockIdentities } from "@/lib/imports/publication-locks";
+import {
+  attachStalePublicationToken,
+  importPreviewRevisionSql,
+  markImportReprocessRequired,
+  stalePublicationToken,
+  type ImportPreviewToken,
+} from "@/lib/imports/reprocess-required";
 
 const BUILDING_IMPORT_PERMISSION = "data.import.building";
 
@@ -53,6 +60,17 @@ export class PublicationError extends Error {
   }
 }
 
+export function buildingPublicationDisposition(
+  state: string,
+): "publish" | "replay" {
+  if (state === "published") return "replay";
+  if (state === "ready_to_publish") return "publish";
+  if (state === "reprocess_required") {
+    throw new PublicationError("IMPORT_CHANGE_STALE", 409);
+  }
+  throw new PublicationError("IMPORT_JOB_NOT_READY", 409);
+}
+
 export async function publishImport(
   jobId: string,
   actor: SessionUser,
@@ -60,49 +78,55 @@ export async function publishImport(
   const [candidate] = await getDb().select({ dataType: importJobs.dataType })
     .from(importJobs).where(eq(importJobs.id, jobId)).limit(1);
   if (!candidate) throw new PublicationError("IMPORT_JOB_NOT_FOUND", 404);
-  return candidate.dataType === "rate_card"
-    ? publishRateCardImport(jobId, actor)
-    : candidate.dataType === "package"
-      ? publishPackageImport(jobId, actor)
-    : publishBuildingImport(jobId, actor);
+  try {
+    return await (candidate.dataType === "rate_card"
+      ? publishRateCardImport(jobId, actor)
+      : candidate.dataType === "package"
+        ? publishPackageImport(jobId, actor)
+        : publishBuildingImport(jobId, actor));
+  } catch (error) {
+    const previewToken = stalePublicationToken(error);
+    if (previewToken) {
+      await markImportReprocessRequired(jobId, actor.id, previewToken);
+    }
+    throw error;
+  }
 }
 
 async function publishBuildingImport(
   jobId: string,
   actor: SessionUser,
 ): Promise<PublicationResult> {
-  return getDb().transaction(async (tx) => {
+  let previewToken: ImportPreviewToken | null = null;
+  try {
+    return await getDb().transaction(async (tx) => {
     for (const identity of publicationLockIdentities("building")) {
       await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${identity}, 0))`);
     }
-    const [candidate] = await tx
-      .select({ dataType: importJobs.dataType })
-      .from(importJobs)
-      .where(eq(importJobs.id, jobId))
-      .limit(1);
-    if (!candidate) {
-      throw new PublicationError("IMPORT_JOB_NOT_FOUND", 404);
-    }
-    if (candidate.dataType !== "building") {
-      throw new PublicationError("IMPORT_DATA_TYPE_UNSUPPORTED", 400);
-    }
-
     const [job] = await tx
-      .select({ state: importJobs.state, dataType: importJobs.dataType })
+      .select({
+        state: importJobs.state,
+        dataType: importJobs.dataType,
+        previewRevision: importPreviewRevisionSql(),
+      })
       .from(importJobs)
       .where(eq(importJobs.id, jobId))
-      .limit(1);
+      .limit(1)
+      .for("update");
     if (!job) {
       throw new PublicationError("IMPORT_JOB_NOT_FOUND", 404);
     }
     if (job.dataType !== "building") {
       throw new PublicationError("IMPORT_DATA_TYPE_UNSUPPORTED", 400);
     }
-    if (job.state !== "ready_to_publish") {
-      throw new PublicationError("IMPORT_JOB_NOT_READY", 409);
-    }
 
     await assertCurrentPermission(tx, actor);
+    if (job.state === "ready_to_publish") {
+      previewToken = { state: job.state, revision: job.previewRevision };
+    }
+    if (buildingPublicationDisposition(job.state) === "replay") {
+      return { jobId, state: "published", publishedChanges: 0 };
+    }
 
     const stagedRows = await tx
       .select({
@@ -143,27 +167,35 @@ async function publishBuildingImport(
       let buildingId: string;
 
       if (change.type === "added") {
-        const [inserted] = await tx
-          .insert(buildings)
-          .values({ irisBuildingId: change.entityKey, ...values })
-          .returning({ id: buildings.id });
-        buildingId = inserted.id;
+        try {
+          const [inserted] = await tx
+            .insert(buildings)
+            .values({ irisBuildingId: change.entityKey, ...values })
+            .returning({ id: buildings.id });
+          buildingId = inserted.id;
+        } catch (error) {
+          rethrowBuildingWriteError(error);
+        }
       } else {
         if (!liveBefore) {
           throw new PublicationError("IMPORT_CHANGE_STALE", 409);
         }
-        const [updated] = await tx
-          .update(buildings)
-          .set(values)
-          .where(and(
-            eq(buildings.id, liveBefore.id),
-            eq(buildings.irisBuildingId, change.entityKey),
-          ))
-          .returning({ id: buildings.id });
-        if (!updated) {
-          throw new PublicationError("IMPORT_CHANGE_STALE", 409);
+        try {
+          const [updated] = await tx
+            .update(buildings)
+            .set(values)
+            .where(and(
+              eq(buildings.id, liveBefore.id),
+              eq(buildings.irisBuildingId, change.entityKey),
+            ))
+            .returning({ id: buildings.id });
+          if (!updated) {
+            throw new PublicationError("IMPORT_CHANGE_STALE", 409);
+          }
+          buildingId = updated.id;
+        } catch (error) {
+          rethrowBuildingWriteError(error);
         }
-        buildingId = updated.id;
       }
 
       await tx.insert(auditEvents).values({
@@ -198,7 +230,11 @@ async function publishBuildingImport(
     }
 
     return { jobId, state: "published", publishedChanges };
-  });
+    });
+  } catch (error) {
+    if (previewToken) attachStalePublicationToken(error, previewToken);
+    throw error;
+  }
 }
 
 type PublicationTransaction = Parameters<
@@ -403,8 +439,7 @@ function parseNormalizedBuilding(value: unknown): NormalizedBuilding {
     || !nullableString(value.city)
     || !nullableString(value.cbdArea)
     || !nullableString(value.subDistrict)
-    || typeof value.address !== "string"
-    || value.address.trim().length === 0
+    || !nullableString(value.address)
     || (value.operationalStatus !== "active" && value.operationalStatus !== "inactive")
     || (value.dataSource !== "building_team" && value.dataSource !== "erp")
   ) {
@@ -428,6 +463,25 @@ function parseNormalizedBuilding(value: unknown): NormalizedBuilding {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+export function rethrowBuildingWriteError(error: unknown): never {
+  const seen = new Set<object>();
+  let current = error;
+  for (let depth = 0; depth <= 5 && isRecord(current) && !seen.has(current); depth += 1) {
+    seen.add(current);
+    if (
+      current.code === "23505"
+      && (
+        current.constraint === "buildings_iris_building_id_unique"
+        || current.constraint === "buildings_erp_building_id_unique"
+      )
+    ) {
+      staleChange();
+    }
+    current = current.cause;
+  }
+  throw error;
 }
 
 function nullableString(value: unknown): value is string | null {

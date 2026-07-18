@@ -8,7 +8,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, test } from "vitest";
 
 import type { SessionUser } from "@/lib/auth/session";
 import { calculateBuildingDiff, type BuildingDiffSnapshot, type ImportChange } from "@/lib/imports/diff";
-import { parseImportFiles } from "@/lib/imports/normalize";
+import { parseImportFiles, toValidatedBuildingImport } from "@/lib/imports/normalize";
 import { publishImport } from "@/lib/imports/publish";
 import {
   RateCardBuildingResolutionError,
@@ -114,11 +114,12 @@ describe("IRIS identity lifecycle in executable PostgreSQL-compatible coverage",
     db = new PGlite();
     await applyMigrations(db);
 
-    const manual = await parseImportFiles("building", [buildingFile()]);
-    expect(validateBuildingRows(manual.rows, {
+    const manualCandidate = await parseImportFiles("building", [buildingFile()]);
+    expect(validateBuildingRows(manualCandidate.rows, {
       buildings: [],
       controlledValues: { buildingTypes: ["Apartment"], gradeResources: ["Grade A"] },
     })).toEqual([]);
+    const manual = toValidatedBuildingImport(manualCandidate);
     expect(calculateBuildingDiff(manual.rows, { buildings: [] })[0]).toMatchObject({ type: "added", entityKey: "B003004" });
 
     const user = await db.query<{ id: string }>(`insert into users (email, password_hash, display_name) values ('lifecycle@example.test', 'test-only-hash', 'Lifecycle') returning id`);
@@ -146,12 +147,14 @@ describe("IRIS identity lifecycle in executable PostgreSQL-compatible coverage",
       update rate_card_versions set published_by = '${user.rows[0].id}', published_at = now() where id = '${version.rows[0].id}';
     `);
 
-    const linked = await parseImportFiles("building", [buildingFile("B003004", "ERP-89321")]);
-    expect(validateBuildingRows(linked.rows, validationSnapshot(buildingId, null, "active"))).toEqual([]);
+    const linkedCandidate = await parseImportFiles("building", [buildingFile("B003004", "ERP-89321")]);
+    expect(validateBuildingRows(linkedCandidate.rows, validationSnapshot(buildingId, null, "active"))).toEqual([]);
+    const linked = toValidatedBuildingImport(linkedCandidate);
     expect(calculateBuildingDiff(linked.rows, diffSnapshot(buildingId, null, "active"))[0]).toMatchObject({ type: "modified", before: { id: buildingId }, after: { erpBuildingId: "ERP-89321" } });
     await db.exec(`update buildings set erp_building_id = 'ERP-89321' where id = '${buildingId}'`);
 
-    const inactive = await parseImportFiles("building", [buildingFile("B003004", "ERP-89321", "inactive")]);
+    const inactiveCandidate = await parseImportFiles("building", [buildingFile("B003004", "ERP-89321", "inactive")]);
+    const inactive = toValidatedBuildingImport(inactiveCandidate);
     expect(calculateBuildingDiff(inactive.rows, diffSnapshot(buildingId, "ERP-89321", "active"))[0]).toMatchObject({ type: "deactivated", before: { id: buildingId } });
     await db.exec(`update buildings set status = 'inactive' where id = '${buildingId}'`);
     const rejected = await parseImportFiles("rate_card", rateCardFiles());
@@ -178,7 +181,7 @@ describe("IRIS identity lifecycle in executable PostgreSQL-compatible coverage",
 });
 
 async function nativeBuildingSnapshot(irisBuildingId: string): Promise<{ validation: BuildingValidationSnapshot; diff: BuildingDiffSnapshot }> {
-  const result = await pool!.query<{ id: string; erp_building_id: string | null; name: string; building_type: string | null; grade_resource: string | null; area: string | null; city: string | null; cbd_area: string | null; sub_district: string | null; address: string; status: "active" | "inactive"; data_source: "building_team" | "erp" }>(`select id, erp_building_id, name, building_type, grade_resource, area, city, cbd_area, sub_district, address, status, data_source from buildings where iris_building_id = $1`, [irisBuildingId]);
+  const result = await pool!.query<{ id: string; erp_building_id: string | null; name: string; building_type: string | null; grade_resource: string | null; area: string | null; city: string | null; cbd_area: string | null; sub_district: string | null; address: string | null; status: "active" | "inactive"; data_source: "building_team" | "erp" }>(`select id, erp_building_id, name, building_type, grade_resource, area, city, cbd_area, sub_district, address, status, data_source from buildings where iris_building_id = $1`, [irisBuildingId]);
   const row = result.rows[0];
   if (!row) return {
     validation: {
@@ -228,9 +231,10 @@ describe("complete native PostgreSQL IRIS identity lifecycle", () => {
     const erpBuildingId = `ERP-NATIVE-${suffix}`;
     const packageCode = `PKG-${suffix}`;
 
-    const manual = await parseImportFiles("building", [buildingFile(irisBuildingId)]);
+    const manualCandidate = await parseImportFiles("building", [buildingFile(irisBuildingId)]);
     let snapshot = await nativeBuildingSnapshot(irisBuildingId);
-    expect(validateBuildingRows(manual.rows, snapshot.validation)).toEqual([]);
+    expect(validateBuildingRows(manualCandidate.rows, snapshot.validation)).toEqual([]);
+    const manual = toValidatedBuildingImport(manualCandidate);
     const initialChanges = calculateBuildingDiff(manual.rows, snapshot.diff);
     expect(initialChanges).toMatchObject([{
       type: "added",
@@ -253,20 +257,23 @@ describe("complete native PostgreSQL IRIS identity lifecycle", () => {
     });
     const rateCardJob = await pool!.query<{ id: string }>(`insert into import_jobs (data_type, template_version, checksum, state, uploaded_by, published_by, published_at) values ('rate_card', 'v2', $1, 'published', $2, $2, now()) returning id`, [randomUUID(), actor.id]);
     const packageRow = await pool!.query<{ id: string }>(`insert into sales_packages (package_code, name) values ($1, 'IRIS Package') returning id`, [packageCode]);
+    await pool!.query("update rate_card_versions set status = 'historical' where status = 'current'");
     const version = await pool!.query<{ id: string }>(`insert into rate_card_versions (version_code, status, import_job_id, uploaded_by) values ($1, 'current', $2, $3) returning id`, [`RC-${randomUUID()}`, rateCardJob.rows[0].id, actor.id]);
     await pool!.query(`insert into rate_card_building_prices (rate_card_version_id, building_id, price_idr) values ($1, $2, $3)`, [version.rows[0].id, resolvedRateCard.buildingPrices[0].buildingId, resolvedRateCard.buildingPrices[0].priceIdr]);
     await pool!.query(`insert into rate_card_package_configs (rate_card_version_id, package_id, price_idr) values ($1, $2, 1500000)`, [version.rows[0].id, packageRow.rows[0].id]);
     await pool!.query(`insert into rate_card_package_buildings (rate_card_version_id, package_id, building_id) values ($1, $2, $3)`, [version.rows[0].id, packageRow.rows[0].id, resolvedRateCard.packageMemberships[0].buildingId]);
     await pool!.query(`update rate_card_versions set published_by = $2, published_at = now() where id = $1`, [version.rows[0].id, actor.id]);
 
-    const linked = await parseImportFiles("building", [buildingFile(irisBuildingId, erpBuildingId)]);
+    const linkedCandidate = await parseImportFiles("building", [buildingFile(irisBuildingId, erpBuildingId)]);
     snapshot = await nativeBuildingSnapshot(irisBuildingId);
-    expect(validateBuildingRows(linked.rows, snapshot.validation)).toEqual([]);
+    expect(validateBuildingRows(linkedCandidate.rows, snapshot.validation)).toEqual([]);
+    const linked = toValidatedBuildingImport(linkedCandidate);
     const linkJobId = await publishNativeBuilding(actor, linked, calculateBuildingDiff(linked.rows, snapshot.diff));
     snapshot = await nativeBuildingSnapshot(irisBuildingId);
     expect(snapshot.validation.buildings[0]).toMatchObject({ id: buildingId, erpBuildingId });
 
-    const inactive = await parseImportFiles("building", [buildingFile(irisBuildingId, erpBuildingId, "inactive")]);
+    const inactiveCandidate = await parseImportFiles("building", [buildingFile(irisBuildingId, erpBuildingId, "inactive")]);
+    const inactive = toValidatedBuildingImport(inactiveCandidate);
     const deactivateJobId = await publishNativeBuilding(actor, inactive, calculateBuildingDiff(inactive.rows, snapshot.diff));
     snapshot = await nativeBuildingSnapshot(irisBuildingId);
     const rejected = await parseImportFiles("rate_card", rateCardFiles(irisBuildingId, packageCode));

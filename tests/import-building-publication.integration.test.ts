@@ -141,10 +141,13 @@ describe("IRIS-keyed building publication", () => {
        ) values ($1, 'rate_card', 'v1', $2, 'draft', $3)`,
       [rateCardImportId, randomUUID(), actor.id],
     );
+    await pool.query(
+      "update rate_card_versions set status = 'historical' where status = 'current'",
+    );
     const version = await pool.query<{ id: string }>(
       `insert into rate_card_versions (
-         version_code, effective_at, import_job_id, uploaded_by
-       ) values ($1, now() + interval '1 day', $2, $3)
+         version_code, status, import_job_id, uploaded_by
+       ) values ($1, 'current', $2, $3)
        returning id`,
       [`RC-${randomUUID()}`, rateCardImportId, actor.id],
     );
@@ -156,7 +159,7 @@ describe("IRIS-keyed building publication", () => {
     );
     await pool.query(
       `update rate_card_versions
-       set status = 'published', published_by = $2, published_at = now()
+       set published_by = $2, published_at = now()
        where id = $1`,
       [version.rows[0].id, actor.id],
     );
@@ -174,6 +177,11 @@ describe("IRIS-keyed building publication", () => {
       jobId,
       state: "published",
       publishedChanges: 1,
+    });
+    await expect(publishImport(jobId, actor)).resolves.toEqual({
+      jobId,
+      state: "published",
+      publishedChanges: 0,
     });
 
     const current = await pool.query<{
@@ -201,7 +209,7 @@ describe("IRIS-keyed building publication", () => {
     );
     expect(reference.rows).toEqual([{
       building_id: buildingId,
-      status: "published",
+      status: "current",
     }]);
 
     const audit = await pool.query<{
@@ -218,6 +226,72 @@ describe("IRIS-keyed building publication", () => {
       entity_id: buildingId,
       before_metadata: before,
       after_metadata: { ...after, erpBuildingId: "ERP-89321" },
+    }]);
+
+    await pool.query(
+      "delete from user_permissions where user_id = $1 and permission_key = 'data.import.building'",
+      [actor.id],
+    );
+    await expect(publishImport(jobId, actor)).rejects.toMatchObject({
+      key: "PERMISSION_DENIED",
+      status: 403,
+    });
+  });
+
+  test("publishes a Building row containing only IRIS ID, name, and status", async () => {
+    const actor = await seedPublisher();
+    const irisBuildingId = `MINIMAL-${randomUUID()}`;
+    const after = building(irisBuildingId, {
+      buildingName: "Minimal Building",
+      buildingType: null,
+      gradeResource: null,
+      area: null,
+      city: null,
+      cbdArea: null,
+      subDistrict: null,
+      address: null,
+      operationalStatus: "active",
+      dataSource: "building_team",
+    });
+    const jobId = await seedReadyBuildingJob(actor.id, [{
+      type: "added",
+      entityKey: irisBuildingId,
+      before: null,
+      after,
+    }]);
+
+    await expect(publishImport(jobId, actor)).resolves.toEqual({
+      jobId,
+      state: "published",
+      publishedChanges: 1,
+    });
+    const persisted = await pool.query<{
+      name: string;
+      building_type: string | null;
+      grade_resource: string | null;
+      area: string | null;
+      city: string | null;
+      cbd_area: string | null;
+      sub_district: string | null;
+      address: string | null;
+      status: string;
+      data_source: string;
+    }>(`
+      select name, building_type, grade_resource, area, city, cbd_area,
+        sub_district, address, status, data_source
+      from buildings where iris_building_id = $1
+    `, [irisBuildingId]);
+    expect(persisted.rows).toEqual([{
+      name: "Minimal Building",
+      building_type: null,
+      grade_resource: null,
+      area: null,
+      city: null,
+      cbd_area: null,
+      sub_district: null,
+      address: null,
+      status: "active",
+      data_source: "building_team",
     }]);
   });
 
@@ -266,8 +340,20 @@ describe("IRIS-keyed building publication", () => {
       },
     ];
     const jobId = await seedReadyBuildingJob(actor.id, changes);
+    await pool.query(
+      "update import_jobs set updated_at = '2026-07-19 00:00:00.123456+00' where id = $1",
+      [jobId],
+    );
+    expect((await pool.query<{ fractional: string }>(
+      `select to_char(updated_at at time zone 'UTC', 'US') fractional
+       from import_jobs where id = $1`,
+      [jobId],
+    )).rows).toEqual([{ fractional: "123456" }]);
 
-    await expect(publishImport(jobId, actor)).rejects.toThrow(/erp_building_id/i);
+    await expect(publishImport(jobId, actor)).rejects.toMatchObject({
+      key: "IMPORT_CHANGE_STALE",
+      status: 409,
+    });
 
     const rolledBackBuilding = await pool.query(
       "select id from buildings where iris_building_id = $1",
@@ -286,17 +372,17 @@ describe("IRIS-keyed building publication", () => {
       erp_building_id: null,
       erp_link_status: "manual_only",
     }]);
-    const audit = await pool.query(
-      "select id from audit_events where import_job_id = $1",
+    const audit = await pool.query<{ action: string }>(
+      "select action from audit_events where import_job_id = $1 order by action",
       [jobId],
     );
-    expect(audit.rowCount).toBe(0);
+    expect(audit.rows).toEqual([{ action: "import.job.reprocess_required" }]);
     const job = await pool.query<{ state: string; published_by: string | null }>(
       "select state, published_by from import_jobs where id = $1",
       [jobId],
     );
     expect(job.rows).toEqual([{
-      state: "ready_to_publish",
+      state: "reprocess_required",
       published_by: null,
     }]);
   });
@@ -357,17 +443,17 @@ describe("IRIS-keyed building publication", () => {
       [staleIrisId],
     );
     expect(live.rows).toEqual([{ name: "Live New Name", city: "Jakarta" }]);
-    const audit = await pool.query(
-      "select id from audit_events where import_job_id = $1",
+    const audit = await pool.query<{ action: string }>(
+      "select action from audit_events where import_job_id = $1 order by action",
       [jobId],
     );
-    expect(audit.rowCount).toBe(0);
+    expect(audit.rows).toEqual([{ action: "import.job.reprocess_required" }]);
     const job = await pool.query<{ state: string; published_by: string | null }>(
       "select state, published_by from import_jobs where id = $1",
       [jobId],
     );
     expect(job.rows).toEqual([{
-      state: "ready_to_publish",
+      state: "reprocess_required",
       published_by: null,
     }]);
   });

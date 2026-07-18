@@ -25,7 +25,12 @@ export interface ImportUploadResult {
 
 export interface ImportProcessResult {
   jobId: string;
-  state: "uploaded" | "ready_to_publish" | "draft" | "validation_failed";
+  state: "ready_to_publish" | "draft" | "validation_failed" | "processing_failed";
+  failure?: {
+    code: "IMPORT_PROCESSING_RETRYABLE" | "IMPORT_PROCESSING_TERMINAL";
+    incidentId: string;
+    retryable: boolean;
+  };
 }
 
 export interface ImportPublishResult {
@@ -39,6 +44,7 @@ export class ImportAdminApiError extends Error {
   constructor(
     public readonly status: number,
     public readonly key: string,
+    public readonly reprocessRequired = false,
   ) {
     super(key);
     this.name = "ImportAdminApiError";
@@ -51,12 +57,16 @@ async function requestJson<T>(
   fetcher: Fetcher,
 ): Promise<T> {
   const response = await fetcher(url, { credentials: "same-origin", ...init });
-  const body = await response.json().catch(() => null) as { error?: unknown } | T | null;
+  const body = await response.json().catch(() => null) as { error?: unknown; reprocessRequired?: unknown } | T | null;
   if (!response.ok) {
     const key = body && typeof body === "object" && "error" in body && typeof body.error === "string"
       ? body.error
       : "IMPORT_ADMIN_REQUEST_FAILED";
-    throw new ImportAdminApiError(response.status, key);
+    const reprocessRequired = Boolean(
+      body && typeof body === "object" && "reprocessRequired" in body
+        && body.reprocessRequired === true,
+    );
+    throw new ImportAdminApiError(response.status, key, reprocessRequired);
   }
   return body as T;
 }
@@ -166,6 +176,14 @@ export function processImportJob(
   fetcher: Fetcher = fetch,
 ): Promise<ImportProcessResult> {
   return requestJson(`/api/imports/${encodeURIComponent(jobId)}/process`, { method: "POST", signal }, fetcher);
+}
+
+export function reprocessImportJob(
+  jobId: string,
+  signal?: AbortSignal,
+  fetcher: Fetcher = fetch,
+): Promise<ImportJobDetail> {
+  return requestJson(`/api/imports/${encodeURIComponent(jobId)}/reprocess`, { method: "POST", signal }, fetcher);
 }
 
 export function publishImportJob(

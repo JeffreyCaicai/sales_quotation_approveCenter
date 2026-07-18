@@ -2,12 +2,13 @@ import { describe, expect, test } from "vitest";
 import * as XLSX from "xlsx";
 
 import type { SessionUser } from "@/lib/auth/session";
-import { processImport, validateRateCardForProcessing, type ImportProcessingRepository, type RateCardProcessingSnapshot } from "@/lib/imports/process-import";
+import { isRetryableProcessingFailure, processImport, validateRateCardForProcessing, type ImportProcessingRepository, type RateCardProcessingSnapshot } from "@/lib/imports/process-import";
 import type { PackageImport, RateCardImport } from "@/lib/imports/template-v2";
 import type { BuildingDiffSnapshot } from "@/lib/imports/diff";
 import type { PackageChange, PackageSnapshot } from "@/lib/imports/package-diff";
 import type { BuildingValidationSnapshot, PackageValidationSnapshot } from "@/lib/imports/validate";
 import { PROCESSING_STALE_AFTER_MS, assertPreliminaryDataType, processingClaimIsStale } from "@/lib/imports/processing-repository";
+import { ImportError } from "@/lib/imports/contracts";
 
 const actor: SessionUser = {
   id: "actor-1", email: "actor@example.test", displayName: "Actor", status: "active",
@@ -63,11 +64,12 @@ const legacyRateCardCsvBody = new TextEncoder().encode([
 ].join("\n"));
 
 class Repository implements ImportProcessingRepository {
-  state: "uploaded" | "validating" | "ready_to_publish" | "draft" | "validation_failed" | "published" = "uploaded";
+  state: "uploaded" | "validating" | "processing_failed" | "ready_to_publish" | "draft" | "reprocess_required" | "validation_failed" | "published" = "uploaded";
   errors: unknown[] = [];
   changes: unknown[] = [];
   normalized: unknown = null;
   retries = 0;
+  failureSummary: string | null = null;
   templateVersion = "TMN-IMPORT-2";
   claimToken = "2026-07-12T00:00:00.000Z";
   unsupported = false;
@@ -86,7 +88,22 @@ class Repository implements ImportProcessingRepository {
 
   async claim() {
     if (this.unsupported) return { kind: "unsupported" as const, dataType: "customer_brand" as const };
-    if (this.state !== "uploaded" && !(this.state === "validating" && this.stale)) return { kind: "terminal" as const, state: this.state };
+    const retrying = this.state === "processing_failed" && this.failureSummary?.startsWith("IMPORT_PROCESSING_RETRYABLE:");
+    if (this.state !== "uploaded" && !retrying && !(this.state === "validating" && this.stale)) return { kind: "terminal" as const, state: this.state };
+    this.state = "validating";
+    return {
+      kind: "claimed" as const,
+      job: {
+        id: "job-1", dataType: this.dataType, templateVersion: this.templateVersion,
+        claimToken: this.claimToken,
+        files: [{ objectStorageKey: "key", originalFilename: this.originalFilename, checksum: "a".repeat(64) }],
+      },
+    };
+  }
+  async claimReprocess() {
+    if (this.state !== "ready_to_publish" && this.state !== "draft" && this.state !== "reprocess_required") {
+      return { kind: "terminal" as const, state: this.state };
+    }
     this.state = "validating";
     return {
       kind: "claimed" as const,
@@ -118,9 +135,34 @@ class Repository implements ImportProcessingRepository {
     void _jobId; void _claimToken;
     this.retries += 1; this.state = "uploaded";
   }
+  async processingFailure(
+    _jobId: string,
+    _claimToken: string,
+    _actorId: string,
+    failure: { code: string; incidentId: string },
+  ) {
+    this.failureSummary = `${failure.code}:${failure.incidentId}`;
+    this.state = "processing_failed";
+  }
 }
 
 describe("production import processing", () => {
+  test.each([
+    [Object.assign(new Error("query failed"), {
+      cause: Object.assign(new Error("connection lost"), { code: "08006" }),
+    }), true, "wrapped PostgreSQL connection failure"],
+    [new ImportError(500, "STORAGE_SYNC_FAILED"), false, "storage integrity failure without a transient cause"],
+    [Object.assign(new ImportError(500, "STORAGE_SYNC_FAILED"), {
+      cause: { $metadata: { httpStatusCode: 404 } },
+    }), false, "permanent missing object"],
+    [Object.assign(new ImportError(500, "STORAGE_SYNC_FAILED"), {
+      cause: { $metadata: { httpStatusCode: 503 } },
+    }), true, "temporary object-storage outage"],
+  ] as const)("classifies %s as retryable=%s (%s)", (failure, retryable, _label) => {
+    void _label;
+    expect(isRetryableProcessingFailure(failure)).toBe(retryable);
+  });
+
   test("reads an immutable uploaded file and stages the complete building difference", async () => {
     const repository = new Repository();
     const result = await processImport("job-1", actor, {
@@ -220,19 +262,90 @@ describe("production import processing", () => {
     expect(repository.errors).toEqual([expect.objectContaining({ key: "import.error.template_version" })]);
   });
 
-  test("returns transient storage failures to uploaded so a retry can succeed", async () => {
+  test("persists a safe retryable storage incident and an explicit retry succeeds", async () => {
     const repository = new Repository();
     let attempts = 0;
     const objectStore = { readImmutable: async () => {
       attempts += 1;
-      if (attempts === 1) throw new Error("temporary S3 outage");
+      if (attempts === 1) {
+        throw Object.assign(new ImportError(500, "STORAGE_SYNC_FAILED"), {
+          cause: { $metadata: { httpStatusCode: 503 } },
+        });
+      }
       return buildingBody;
     } };
-    await expect(processImport("job-1", actor, { repository, objectStore }))
-      .resolves.toEqual({ jobId: "job-1", state: "uploaded" });
-    expect(repository.retries).toBe(1);
+    await expect(processImport("job-1", actor, {
+      repository,
+      objectStore,
+      randomUUID: () => "00000000-0000-4000-8000-000000000901",
+      logError: () => undefined,
+    })).resolves.toEqual({
+      jobId: "job-1",
+      state: "processing_failed",
+      failure: {
+        code: "IMPORT_PROCESSING_RETRYABLE",
+        incidentId: "00000000-0000-4000-8000-000000000901",
+        retryable: true,
+      },
+    });
+    expect(repository.failureSummary).toBe("IMPORT_PROCESSING_RETRYABLE:00000000-0000-4000-8000-000000000901");
     await expect(processImport("job-1", actor, { repository, objectStore }))
       .resolves.toEqual({ jobId: "job-1", state: "ready_to_publish" });
+  });
+
+  test("persists only a safe terminal incident while logging the raw processor fault server-side", async () => {
+    const repository = new Repository();
+    const logged: unknown[] = [];
+    const raw = new Error("SELECT password FROM secrets at /srv/private.ts");
+
+    await expect(processImport("job-1", actor, {
+      repository,
+      objectStore: { readImmutable: async () => { throw raw; } },
+      randomUUID: () => "00000000-0000-4000-8000-000000000902",
+      logError: (entry) => { logged.push(entry); },
+    })).resolves.toEqual({
+      jobId: "job-1",
+      state: "processing_failed",
+      failure: {
+        code: "IMPORT_PROCESSING_TERMINAL",
+        incidentId: "00000000-0000-4000-8000-000000000902",
+        retryable: false,
+      },
+    });
+    expect(repository.failureSummary).toBe("IMPORT_PROCESSING_TERMINAL:00000000-0000-4000-8000-000000000902");
+    expect(repository.failureSummary).not.toContain("SELECT");
+    expect(repository.failureSummary).not.toContain("/srv/");
+    expect(logged).toEqual([expect.objectContaining({
+      incidentId: "00000000-0000-4000-8000-000000000902",
+      jobId: "job-1",
+      error: raw,
+    })]);
+  });
+
+  test("guardedly reprocesses two competing stale previews against the fresh Rate Card baseline", async () => {
+    const processingModule = await import("@/lib/imports/process-import") as typeof import("@/lib/imports/process-import") & {
+      reprocessImport?: typeof processImport;
+    };
+    expect(processingModule.reprocessImport).toBeTypeOf("function");
+    if (!processingModule.reprocessImport) return;
+
+    const repositories = [new Repository(), new Repository()];
+    for (const repository of repositories) {
+      repository.state = "reprocess_required";
+      repository.dataType = "rate_card";
+      repository.rateCard.versionId = "00000000-0000-4000-8000-000000000099";
+    }
+    const results = await Promise.all(repositories.map((repository) => processingModule.reprocessImport!(
+      "job-1",
+      actor,
+      { repository, objectStore: { readImmutable: async () => rateCardBody } },
+    )));
+
+    expect(results.map((result) => result.state)).toEqual(["draft", "draft"]);
+    expect(repositories.map((repository) => repository.normalized)).toEqual([
+      expect.objectContaining({ basedOnVersionId: "00000000-0000-4000-8000-000000000099" }),
+      expect.objectContaining({ basedOnVersionId: "00000000-0000-4000-8000-000000000099" }),
+    ]);
   });
 
   test("returns a safe not-implemented error without processing unsupported jobs", async () => {
@@ -396,6 +509,44 @@ describe("production import processing", () => {
       expect(validateRateCardForProcessing(input("0"), snapshot)).toEqual([]);
     },
   );
+
+  test.each([
+    ["Building Prices", "0", true],
+    ["Building Prices", "999999999999999999", true],
+    ["Building Prices", "-1", false],
+    ["Building Prices", "1000000000000000000", false],
+    ["Package Prices", "0", true],
+    ["Package Prices", "999999999999999999", true],
+    ["Package Prices", "-1", false],
+    ["Package Prices", "1000000000000000000", false],
+  ] as const)("validates the numeric(18,0) IDR boundary for %s: %s", (sheet, priceIdr, valid) => {
+    const snapshot: RateCardProcessingSnapshot = {
+      buildings: [{ id: "b1", irisBuildingId: "B1", erpBuildingId: null, status: "active" }],
+      packages: [{ packageCode: "P1", status: "active" }], versionId: null,
+      buildingPrices: new Map(), packagePrices: new Map(), packageMemberships: [],
+    };
+    const input: RateCardImport = {
+      templateVersion: "TMN-IMPORT-2", currency: "IDR",
+      buildingPrices: sheet === "Building Prices"
+        ? [{ rowNumber: 2, irisBuildingId: "B1", priceIdr }]
+        : [],
+      packagePrices: sheet === "Package Prices"
+        ? [{ rowNumber: 2, packageCode: "P1", priceIdr }]
+        : [],
+      packageMemberships: sheet === "Package Prices"
+        ? [{ rowNumber: 2, packageCode: "P1", irisBuildingId: "B1" }]
+        : [],
+    };
+
+    const errors = validateRateCardForProcessing(input, snapshot);
+    if (valid) expect(errors).toEqual([]);
+    else expect(errors).toContainEqual(expect.objectContaining({
+      sheet,
+      rowNumber: 2,
+      column: "Price IDR",
+      key: "import.error.value_invalid",
+    }));
+  });
 
   test("rejects a locked job whose data type changed after preliminary authorization", () => {
     expect(() => assertPreliminaryDataType("building", "rate_card"))

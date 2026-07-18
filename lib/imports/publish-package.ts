@@ -8,6 +8,11 @@ import { createPackageCode } from "@/lib/imports/package-code";
 import type { PackageChange, PackageSnapshot } from "@/lib/imports/package-diff";
 import { publicationLockIdentities } from "@/lib/imports/publication-locks";
 import { PublicationError, type PublicationResult } from "@/lib/imports/publish";
+import {
+  attachStalePublicationToken,
+  importPreviewRevisionSql,
+  type ImportPreviewToken,
+} from "@/lib/imports/reprocess-required";
 import { TEMPLATE_VERSION_V2 } from "@/lib/imports/template-v2";
 
 interface LockedPackage extends PackageSnapshot {
@@ -79,7 +84,9 @@ export async function publishPackageImport(
   jobId: string,
   actor: SessionUser,
 ): Promise<PublicationResult> {
-  return getDb().transaction(async (tx) => {
+  let previewToken: ImportPreviewToken | null = null;
+  try {
+    return await getDb().transaction(async (tx) => {
     for (const identity of publicationLockIdentities("package")) {
       await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${identity}, 0))`);
     }
@@ -88,6 +95,7 @@ export async function publishPackageImport(
       state: importJobs.state,
       dataType: importJobs.dataType,
       templateVersion: importJobs.templateVersion,
+      previewRevision: importPreviewRevisionSql(),
     }).from(importJobs).where(eq(importJobs.id, jobId)).limit(1).for("update");
     if (!job) throw new PublicationError("IMPORT_JOB_NOT_FOUND", 404);
     if (job.dataType !== "package" || job.templateVersion !== TEMPLATE_VERSION_V2) {
@@ -102,6 +110,12 @@ export async function publishPackageImport(
         publishedChanges: 0,
         generatedIdentifiers: await generatedIdentifiersFromAudit(tx, jobId),
       };
+    }
+    if (job.state === "ready_to_publish") {
+      previewToken = { state: job.state, revision: job.previewRevision };
+    }
+    if (job.state === "reprocess_required") {
+      staleChange();
     }
     if (job.state !== "ready_to_publish") {
       throw new PublicationError("IMPORT_JOB_NOT_READY", 409);
@@ -143,7 +157,7 @@ export async function publishPackageImport(
         packageName: salesPackages.name,
         status: salesPackages.status,
       }).from(salesPackages)
-        .where(inArray(sql<string>`lower(btrim(${salesPackages.name}))`, normalizedNames))
+        .where(inArray(sql<string>`lower(regexp_replace(${salesPackages.name}, '^\\s+|\\s+$', '', 'g'))`, normalizedNames))
         .orderBy(asc(salesPackages.packageCode))
         .for("update");
       for (const row of nameRows) {
@@ -249,7 +263,11 @@ export async function publishPackageImport(
     if (!published) throw new PublicationError("IMPORT_JOB_NOT_READY", 409);
 
     return { jobId, state: "published", publishedChanges, generatedIdentifiers };
-  });
+    });
+  } catch (error) {
+    if (previewToken) attachStalePublicationToken(error, previewToken);
+    throw error;
+  }
 }
 
 type PublicationTransaction = Parameters<Parameters<ReturnType<typeof getDb>["transaction"]>[0]>[0];
@@ -384,12 +402,20 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 export function rethrowPackageInsertError(error: unknown): never {
-  if (
-    isRecord(error)
-    && error.code === "23505"
-    && error.constraint === "sales_packages_package_code_unique"
-  ) {
-    staleChange();
+  const seen = new Set<object>();
+  let current = error;
+  for (let depth = 0; depth <= 5 && isRecord(current) && !seen.has(current); depth += 1) {
+    seen.add(current);
+    if (
+      current.code === "23505"
+      && (
+        current.constraint === "sales_packages_package_code_unique"
+        || current.constraint === "sales_packages_normalized_name_unique"
+      )
+    ) {
+      staleChange();
+    }
+    current = current.cause;
   }
   throw error;
 }

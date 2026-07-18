@@ -9,6 +9,7 @@ import {
   getImportJobDetail,
   processImportJob,
   publishImportJob,
+  reprocessImportJob,
   templateDownloadUrl,
   uploadImport,
   validateImportFiles,
@@ -193,7 +194,7 @@ export function ImportWorkspace({
         onUnauthorized();
         return;
       }
-      if (failure instanceof ImportAdminApiError && failure.status === 409) setStale(true);
+      if (isStaleConflict(failure)) setStale(true);
       setError(apiMessage(failure, t, "error.upload"));
     } finally {
       if (actionSelection.current === selection) actionSelection.current = null;
@@ -211,6 +212,37 @@ export function ImportWorkspace({
     setActivity("processing");
     setError(null);
     try {
+      const [detail] = await Promise.all([
+        reprocessImportJob(job.id, controller.signal),
+        onRefresh(),
+      ]);
+      if (controller.signal.aborted) return;
+      setJob(detail);
+      if (detail.state === "ready_to_publish" || detail.state === "draft") setStale(false);
+    } catch (failure) {
+      if (controller.signal.aborted) return;
+      if (isUnauthorized(failure)) {
+        onUnauthorized();
+        return;
+      }
+      if (isStaleConflict(failure)) setStale(true);
+      setError(apiMessage(failure, t, "error.processing"));
+    } finally {
+      if (actionSelection.current === selection) actionSelection.current = null;
+      if (mounted.current && actionController.current === controller) setActivity("idle");
+    }
+  }, [activity, job, onRefresh, onUnauthorized, t]);
+
+  const retryProcessing = useCallback(async () => {
+    if (!job || job.state !== "processing_failed" || activity !== "idle") return;
+    actionController.current?.abort();
+    const controller = new AbortController();
+    actionController.current = controller;
+    const selection = { dataType: job.dataType as OperationalImportDataType, jobId: job.id, controller };
+    actionSelection.current = selection;
+    setActivity("processing");
+    setError(null);
+    try {
       await processImportJob(job.id, controller.signal);
       const [detail] = await Promise.all([
         getImportJobDetail(job.id, controller.signal),
@@ -218,14 +250,13 @@ export function ImportWorkspace({
       ]);
       if (controller.signal.aborted) return;
       setJob(detail);
-      setStale(false);
+      if (detail.state === "ready_to_publish" || detail.state === "draft") setStale(false);
     } catch (failure) {
       if (controller.signal.aborted) return;
       if (isUnauthorized(failure)) {
         onUnauthorized();
         return;
       }
-      if (failure instanceof ImportAdminApiError && failure.status === 409) setStale(true);
       setError(apiMessage(failure, t, "error.processing"));
     } finally {
       if (actionSelection.current === selection) actionSelection.current = null;
@@ -261,7 +292,7 @@ export function ImportWorkspace({
         return;
       }
       setConfirmationOpen(false);
-      if (failure instanceof ImportAdminApiError && failure.status === 409) setStale(true);
+      if (isStaleConflict(failure)) setStale(true);
       setError(apiMessage(failure, t, "error.publish"));
     } finally {
       if (actionSelection.current === selection) actionSelection.current = null;
@@ -323,8 +354,9 @@ export function ImportWorkspace({
           locale={locale}
           t={t}
           job={displayedJob}
-          stale={stale}
+          stale={stale || displayedJob.state === "reprocess_required"}
           publishing={activity === "publishing"}
+          processing={activity === "processing"}
           confirmationOpen={confirmationOpen}
           generatedIdentifiers={generatedIdentifiers}
           dialogRef={dialogRef}
@@ -333,6 +365,7 @@ export function ImportWorkspace({
           onCancelPublish={() => setConfirmationOpen(false)}
           onPublish={() => void publish()}
           onReprocess={() => void reprocess()}
+          onRetryProcessing={() => void retryProcessing()}
         />
       ) : null}
     </section>
@@ -342,7 +375,7 @@ export function ImportWorkspace({
 function stepClass(index: number, job: ImportJobDetail | null): string {
   if (!job) return index === 0 ? "admin-step admin-step--active" : "admin-step";
   if (transientStates.has(job.state)) return index <= 1 ? "admin-step admin-step--active" : "admin-step";
-  if (job.state === "ready_to_publish" || job.state === "draft") return index <= 2 ? "admin-step admin-step--active" : "admin-step";
+  if (job.state === "ready_to_publish" || job.state === "draft" || job.state === "reprocess_required") return index <= 2 ? "admin-step admin-step--active" : "admin-step";
   if (job.state === "published" || job.state === "active" || job.state === "superseded") return "admin-step admin-step--active";
   return index <= 1 ? "admin-step admin-step--active" : "admin-step";
 }
@@ -352,10 +385,17 @@ function apiMessage(failure: unknown, t: AdminTranslate, fallback: AdminTranslat
   if (failure.status === 401) return t("error.unauthorized");
   if (failure.status === 403) return t("error.permission");
   if (failure.status === 404) return t("error.notFound");
-  if (failure.status === 409) return failure.key === "IMPORT_JOB_PROCESSING"
-    ? t("error.processing")
-    : t("error.stalePreview");
+  if (failure.status === 409) {
+    if (failure.key === "IMPORT_JOB_PROCESSING") return t("error.processing");
+    if (isStaleConflict(failure)) return t("error.stalePreview");
+  }
   return t(fallback);
+}
+
+export function isStaleConflict(failure: unknown): boolean {
+  return failure instanceof ImportAdminApiError
+    && failure.status === 409
+    && (failure.key === "IMPORT_CHANGE_STALE" || failure.reprocessRequired);
 }
 
 function isUnauthorized(failure: unknown): boolean {

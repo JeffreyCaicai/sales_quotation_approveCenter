@@ -3,7 +3,7 @@ import {
   sortImportValidationErrors,
   type ImportValidationError,
 } from "@/lib/imports/errors";
-import type { BuildingRow, PackageRow, RateCardImport } from "@/lib/imports/template-v2";
+import type { BuildingCandidateRow, PackageCandidateRow, RateCardImport } from "@/lib/imports/template-v2";
 
 export interface BuildingValidationSnapshotItem {
   id: string;
@@ -33,29 +33,30 @@ export interface PackageValidationSnapshot {
 }
 
 export function validateBuildingRows(
-  rows: BuildingRow[],
+  rows: BuildingCandidateRow[],
   snapshot: BuildingValidationSnapshot,
 ): ImportValidationError[] {
+  const errors: ImportValidationError[] = [];
+  const buildingTypeSupplied = rows.some((row) => row.buildingType !== null);
+  const gradeResourceSupplied = rows.some((row) => row.gradeResource !== null);
   if (
-    !snapshot.controlledValues
-    || snapshot.controlledValues.buildingTypes.length === 0
-    || snapshot.controlledValues.gradeResources.length === 0
+    (buildingTypeSupplied && (!snapshot.controlledValues || snapshot.controlledValues.buildingTypes.length === 0))
+    || (gradeResourceSupplied && (!snapshot.controlledValues || snapshot.controlledValues.gradeResources.length === 0))
   ) {
-    return [error(
+    errors.push(error(
       0,
       "Building Type / Grade Resource",
       "import.error.building_controlled_values_unavailable",
-    )];
+    ));
   }
-  const errors: ImportValidationError[] = [];
   const rowsByIrisId = groupRows(rows, (row) => row.irisBuildingId.trim());
   const rowsByErpId = groupRows(rows, (row) => normalizeExternalId(row.erpBuildingId));
   const currentByErpId = new Map<string, BuildingValidationSnapshotItem>();
   const currentByIrisId = new Map(
     snapshot.buildings.map((item) => [item.irisBuildingId.trim(), item]),
   );
-  const buildingTypes = new Set(snapshot.controlledValues.buildingTypes);
-  const gradeResources = new Set(snapshot.controlledValues.gradeResources);
+  const buildingTypes = new Set(snapshot.controlledValues?.buildingTypes ?? []);
+  const gradeResources = new Set(snapshot.controlledValues?.gradeResources ?? []);
 
   for (const item of snapshot.buildings) {
     const erpBuildingId = normalizeExternalId(item.erpBuildingId);
@@ -69,14 +70,19 @@ export function validateBuildingRows(
     if (row.buildingName.trim().length === 0) {
       errors.push(error(row.rowNumber, "Building Name", "import.error.building_name_required"));
     }
-    if (row.address.trim().length === 0) {
-      errors.push(error(row.rowNumber, "Address", "import.error.address_required"));
-    }
-    if (!row.buildingType || !buildingTypes.has(row.buildingType.trim())) {
+    if (row.buildingType !== null && buildingTypes.size > 0 && !buildingTypes.has(row.buildingType.trim())) {
       errors.push(error(row.rowNumber, "Building Type", "import.error.building_type_invalid"));
     }
-    if (!row.gradeResource || !gradeResources.has(row.gradeResource.trim())) {
+    if (row.gradeResource !== null && gradeResources.size > 0 && !gradeResources.has(row.gradeResource.trim())) {
       errors.push(error(row.rowNumber, "Grade Resource", "import.error.grade_resource_invalid"));
+    }
+    if (row.operationalStatus.length === 0) {
+      errors.push(error(row.rowNumber, "Operational Status", "import.error.operational_status_required"));
+    } else if (row.operationalStatus !== "active" && row.operationalStatus !== "inactive") {
+      errors.push(error(row.rowNumber, "Operational Status", "import.error.operational_status_invalid"));
+    }
+    if (row.dataSource !== null && row.dataSource !== "building_team" && row.dataSource !== "erp") {
+      errors.push(error(row.rowNumber, "Data Source", "import.error.data_source_invalid"));
     }
 
     if (irisBuildingId.length === 0) {
@@ -131,7 +137,7 @@ export function validateBuildingRows(
 }
 
 export function validatePackageRows(
-  rows: PackageRow[],
+  rows: PackageCandidateRow[],
   snapshot: PackageValidationSnapshot,
 ): ImportValidationError[] {
   const errors: ImportValidationError[] = [];
@@ -221,10 +227,10 @@ export function validateRateCardBuildings(
 }
 
 function groupRows(
-  rows: BuildingRow[],
-  keyFor: (row: BuildingRow) => string | null,
+  rows: BuildingCandidateRow[],
+  keyFor: (row: BuildingCandidateRow) => string | null,
 ) {
-  const grouped = new Map<string, BuildingRow[]>();
+  const grouped = new Map<string, BuildingCandidateRow[]>();
   for (const row of rows) {
     const key = keyFor(row);
     if (key === null || key.length === 0) continue;
@@ -240,10 +246,10 @@ function normalizePackageName(value: string): string {
 }
 
 function groupPackageRows(
-  rows: PackageRow[],
-  keyFor: (row: PackageRow) => string | null,
+  rows: PackageCandidateRow[],
+  keyFor: (row: PackageCandidateRow) => string | null,
 ) {
-  const grouped = new Map<string, PackageRow[]>();
+  const grouped = new Map<string, PackageCandidateRow[]>();
   for (const row of rows) {
     const key = keyFor(row);
     if (key === null || key.length === 0) continue;

@@ -88,6 +88,7 @@ describe("import error CSV", () => {
     "import.error.building_not_found",
     "import.error.building_reactivation_requires_admin_workflow",
     "import.error.building_type_invalid",
+    "import.error.data_source_invalid",
     "import.error.erp_building_id_conflict",
     "import.error.erp_building_id_duplicate",
     "import.error.grade_resource_invalid",

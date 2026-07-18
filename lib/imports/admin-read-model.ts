@@ -124,7 +124,9 @@ export async function getImportAdminSummary(actor: SessionUser): Promise<ImportA
     jobs: {
       validating: sumStates(jobCount, validatingJobStates),
       ready: sumStates(jobCount, readyJobStates),
-      failed: jobCount.get("validation_failed") ?? 0,
+      failed: (jobCount.get("validation_failed") ?? 0)
+        + (jobCount.get("processing_failed") ?? 0)
+        + (jobCount.get("reprocess_required") ?? 0),
     },
     recentPublications: recentRows.map(mapJobRow).sort(comparePublishedJobs).slice(0, 5),
   };
@@ -373,13 +375,23 @@ function mapJobRow(row: JobRow): ImportJobListItem {
     validRows: row.validRows,
     invalidRows: row.invalidRows,
     sourceType: row.sourceType as ImportJobListItem["sourceType"],
-    failureSummary: row.failureSummary,
+    failureSummary: safeFailureSummary(row.failureSummary),
     uploadedBy: userItem(row.uploadedById, row.uploadedByEmail, row.uploadedByDisplayName),
     publishedBy: nullableUserItem(row.publishedById, row.publishedByEmail, row.publishedByDisplayName),
     createdAt: iso(row.createdAt),
     updatedAt: iso(row.updatedAt),
     publishedAt: nullableIso(row.publishedAt),
   };
+}
+
+function safeFailureSummary(value: string | null): string | null {
+  if (value === null) return null;
+  if (/^(?:import\.error\.[a-z0-9_.]+|file\.[a-z0-9_.]+)$/u.test(value)) return value;
+  if (/^IMPORT_[A-Z0-9_]+$/u.test(value)) return value;
+  if (/^IMPORT_PROCESSING_(?:RETRYABLE|TERMINAL):[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(value)) {
+    return value;
+  }
+  return "IMPORT_FAILURE_REDACTED";
 }
 
 function mapErrorRow(row: {

@@ -71,6 +71,13 @@
       "when": 1784378722486,
       "tag": "0009_rate_card_current_history",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1784430000000,
+      "tag": "0010_import_contract_guards",
+      "breakpoints": true
     }
   ]
 }

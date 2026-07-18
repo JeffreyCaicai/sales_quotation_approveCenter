@@ -1,12 +1,12 @@
 import { describe, expect, test } from "vitest";
 
-import type { PackageRow } from "@/lib/imports/template-v2";
+import type { PackageCandidateRow } from "@/lib/imports/template-v2";
 import {
   validatePackageRows,
   type PackageValidationSnapshot,
 } from "@/lib/imports/validate";
 
-function packageRow(overrides: Partial<PackageRow> = {}): PackageRow {
+function packageRow(overrides: Partial<PackageCandidateRow> = {}): PackageCandidateRow {
   return {
     rowNumber: 2,
     packageCode: "PKG-A",
@@ -25,12 +25,24 @@ function snapshot(
 describe("Sales Package Master validation", () => {
   test("requires Package Name and Operational Status", () => {
     const errors = validatePackageRows([
-      packageRow({ packageName: " ", operationalStatus: "" as "active" }),
+      packageRow({ packageName: " ", operationalStatus: "" }),
     ], snapshot());
 
     expect(errors).toEqual([
       { sheet: "Sales Packages", rowNumber: 2, column: "Operational Status", key: "import.error.operational_status_required", params: {} },
       { sheet: "Sales Packages", rowNumber: 2, column: "Package Name", key: "import.error.package_name_required", params: {} },
+    ]);
+  });
+
+  test("collects invalid status errors from every Package row", () => {
+    const errors = validatePackageRows([
+      packageRow({ rowNumber: 3, packageCode: "PKG-3", packageName: "Package Three", operationalStatus: "retired" }),
+      packageRow({ rowNumber: 7, packageCode: "PKG-7", packageName: "Package Seven", operationalStatus: "paused" }),
+    ], snapshot());
+
+    expect(errors).toEqual([
+      { sheet: "Sales Packages", rowNumber: 3, column: "Operational Status", key: "import.error.operational_status_invalid", params: {} },
+      { sheet: "Sales Packages", rowNumber: 7, column: "Operational Status", key: "import.error.operational_status_invalid", params: {} },
     ]);
   });
 

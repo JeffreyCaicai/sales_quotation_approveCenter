@@ -76,8 +76,15 @@ async function applyMigrations(
       resolve(migrationsDir, `${entry.tag}.sql`),
       "utf8",
     );
-    for (const statement of migration.split("--> statement-breakpoint")) {
-      if (statement.trim()) await db.exec(statement);
+    await db.exec("begin");
+    try {
+      for (const statement of migration.split("--> statement-breakpoint")) {
+        if (statement.trim()) await db.exec(statement);
+      }
+      await db.exec("commit");
+    } catch (error) {
+      await db.exec("rollback");
+      throw error;
     }
   }
 }
@@ -187,13 +194,16 @@ describe("generated PostgreSQL migration", () => {
     for (const values of [
       ["   ", "Tower", "Jakarta"],
       ["B000099", "  ", "Jakarta"],
-      ["B000098", "Tower", "\t"],
     ]) {
       await expect(db.query(`
         insert into buildings (iris_building_id, name, address)
         values ('${values[0]}', '${values[1]}', '${values[2]}')
       `)).rejects.toThrow(/buildings_.*_not_blank_check/i);
     }
+    await expect(db.query(`
+      insert into buildings (iris_building_id, name, address)
+      values ('B000098', 'Tower', null)
+    `)).resolves.toBeDefined();
 
     const blanks = await db.query<{
       erp_building_id: string | null;
@@ -321,7 +331,11 @@ describe("generated PostgreSQL migration", () => {
       select enumlabel from pg_enum join pg_type on pg_type.oid = pg_enum.enumtypid
       where pg_type.typname = 'import_state'
     `);
-    expect(states.rows.map((row) => row.enumlabel)).toContain("uploading");
+    expect(states.rows.map((row) => row.enumlabel)).toEqual(expect.arrayContaining([
+      "uploading",
+      "processing_failed",
+      "reprocess_required",
+    ]));
     const indexes = await db.query<{ indexdef: string }>(`
       select indexdef from pg_indexes where indexname = 'import_jobs_upload_attempt_id_unique'
     `);
@@ -735,7 +749,7 @@ describe("generated PostgreSQL migration", () => {
     ).rejects.toThrow(/rate_card_versions_currency_idr_check/);
   });
 
-  test("migrates the newest published Rate Card to current", async () => {
+  test("prefers the actual active Rate Card over newer ineligible legacy statuses", async () => {
     db = new PGlite();
     await applyMigrations(db, 8);
     const user = await db.query<{ id: string }>(`
@@ -752,9 +766,10 @@ describe("generated PostgreSQL migration", () => {
       insert into rate_card_versions (
         version_code, effective_at, status, import_job_id, uploaded_by, published_at
       ) values
-        ('RC-OLDER', '2026-07-01T00:00:00Z', 'published', '${job.rows[0].id}', '${user.rows[0].id}', '2026-07-01T00:00:00Z'),
-        ('RC-NEWEST', '2026-07-02T00:00:00Z', 'published', '${job.rows[0].id}', '${user.rows[0].id}', '2026-07-02T00:00:00Z'),
-        ('RC-UNPUBLISHED', '2026-07-03T00:00:00Z', 'draft', '${job.rows[0].id}', '${user.rows[0].id}', null)
+        ('RC-ACTIVE', '2026-07-01T00:00:00Z', 'active', '${job.rows[0].id}', '${user.rows[0].id}', '2026-07-01T00:00:00Z'),
+        ('RC-PUBLISHED', '2026-07-02T00:00:00Z', 'published', '${job.rows[0].id}', '${user.rows[0].id}', '2026-07-02T00:00:00Z'),
+        ('RC-SUPERSEDED', '2026-07-03T00:00:00Z', 'superseded', '${job.rows[0].id}', '${user.rows[0].id}', '2026-07-03T00:00:00Z'),
+        ('RC-ROLLED-BACK', '2026-07-04T00:00:00Z', 'rolled_back', '${job.rows[0].id}', '${user.rows[0].id}', '2026-07-04T00:00:00Z')
     `);
     await applyMigrations(db, 9, 9);
 
@@ -764,9 +779,245 @@ describe("generated PostgreSQL migration", () => {
       order by version_code
     `);
     expect(versions.rows).toEqual([
-      { version_code: "RC-NEWEST", status: "current" },
-      { version_code: "RC-OLDER", status: "historical" },
-      { version_code: "RC-UNPUBLISHED", status: "historical" },
+      { version_code: "RC-ACTIVE", status: "current" },
+      { version_code: "RC-PUBLISHED", status: "historical" },
+      { version_code: "RC-ROLLED-BACK", status: "historical" },
+      { version_code: "RC-SUPERSEDED", status: "historical" },
+    ]);
+  });
+
+  test("falls back only to the newest explicitly published Rate Card when no active version exists", async () => {
+    db = new PGlite();
+    await applyMigrations(db, 8);
+    const user = await db.query<{ id: string }>(`
+      insert into users (email, password_hash, display_name)
+      values ('rate-card-fallback@example.com', 'test-only-hash', 'Rate Card Fallback')
+      returning id
+    `);
+    const job = await db.query<{ id: string }>(`
+      insert into import_jobs (data_type, template_version, checksum, uploaded_by)
+      values ('rate_card', 'v1', '${"5".repeat(64)}', '${user.rows[0].id}')
+      returning id
+    `);
+    await db.exec(`
+      insert into rate_card_versions (
+        version_code, effective_at, status, import_job_id, uploaded_by, published_at
+      ) values
+        ('RC-PUBLISHED-OLD', '2026-07-01T00:00:00Z', 'published', '${job.rows[0].id}', '${user.rows[0].id}', '2026-07-01T00:00:00Z'),
+        ('RC-PUBLISHED-NEW', '2026-07-02T00:00:00Z', 'published', '${job.rows[0].id}', '${user.rows[0].id}', '2026-07-02T00:00:00Z'),
+        ('RC-SUPERSEDED-NEWER', '2026-07-03T00:00:00Z', 'superseded', '${job.rows[0].id}', '${user.rows[0].id}', '2026-07-03T00:00:00Z'),
+        ('RC-ROLLED-BACK-NEWEST', '2026-07-04T00:00:00Z', 'rolled_back', '${job.rows[0].id}', '${user.rows[0].id}', '2026-07-04T00:00:00Z')
+    `);
+
+    await applyMigrations(db, 9, 9);
+
+    const current = await db.query<{ version_code: string }>(`
+      select version_code from rate_card_versions where status = 'current'
+    `);
+    expect(current.rows).toEqual([{ version_code: "RC-PUBLISHED-NEW" }]);
+  });
+
+  test("fails safely when legacy active Rate Card data is ambiguous", async () => {
+    db = new PGlite();
+    await applyMigrations(db, 8);
+    const user = await db.query<{ id: string }>(`
+      insert into users (email, password_hash, display_name)
+      values ('rate-card-ambiguous@example.com', 'test-only-hash', 'Rate Card Ambiguous')
+      returning id
+    `);
+    const job = await db.query<{ id: string }>(`
+      insert into import_jobs (data_type, template_version, checksum, uploaded_by)
+      values ('rate_card', 'v1', '${"6".repeat(64)}', '${user.rows[0].id}')
+      returning id
+    `);
+    await db.exec(`
+      insert into rate_card_versions (
+        version_code, effective_at, status, import_job_id, uploaded_by, published_at
+      ) values
+        ('RC-ACTIVE-A', now(), 'active', '${job.rows[0].id}', '${user.rows[0].id}', now()),
+        ('RC-ACTIVE-B', now(), 'active', '${job.rows[0].id}', '${user.rows[0].id}', now())
+    `);
+
+    await expect(applyMigrations(db, 9, 9)).rejects.toThrow(/ambiguous legacy active rate card/i);
+    const legacy = await db.query<{ status: string }>(`
+      select status::text from rate_card_versions order by version_code
+    `);
+    expect(legacy.rows).toEqual([{ status: "active" }, { status: "active" }]);
+  });
+
+  test("fails safely instead of relabeling an unpublished draft as Historical", async () => {
+    db = new PGlite();
+    await applyMigrations(db, 8);
+    const user = await db.query<{ id: string }>(`
+      insert into users (email, password_hash, display_name)
+      values ('rate-card-draft@example.com', 'test-only-hash', 'Rate Card Draft')
+      returning id
+    `);
+    const job = await db.query<{ id: string }>(`
+      insert into import_jobs (data_type, template_version, checksum, uploaded_by)
+      values ('rate_card', 'v1', '${"7".repeat(64)}', '${user.rows[0].id}')
+      returning id
+    `);
+    await db.exec(`
+      insert into rate_card_versions (
+        version_code, effective_at, status, import_job_id, uploaded_by, published_at
+      ) values ('RC-DRAFT', now(), 'draft', '${job.rows[0].id}', '${user.rows[0].id}', null)
+    `);
+
+    await expect(applyMigrations(db, 9, 9)).rejects.toThrow(/unpublished legacy rate card/i);
+    const legacy = await db.query<{ status: string }>(`
+      select status::text from rate_card_versions where version_code = 'RC-DRAFT'
+    `);
+    expect(legacy.rows).toEqual([{ status: "draft" }]);
+  });
+
+  test("fails safely when legacy versions exist but none is eligible to become Current", async () => {
+    db = new PGlite();
+    await applyMigrations(db, 8);
+    const user = await db.query<{ id: string }>(`
+      insert into users (email, password_hash, display_name)
+      values ('rate-card-ineligible@example.com', 'test-only-hash', 'Rate Card Ineligible')
+      returning id
+    `);
+    const job = await db.query<{ id: string }>(`
+      insert into import_jobs (data_type, template_version, checksum, uploaded_by)
+      values ('rate_card', 'v1', '${"9".repeat(64)}', '${user.rows[0].id}')
+      returning id
+    `);
+    await db.exec(`
+      insert into rate_card_versions (
+        version_code, effective_at, status, import_job_id, uploaded_by, published_at
+      ) values
+        ('RC-SUPERSEDED-ONLY', now(), 'superseded', '${job.rows[0].id}', '${user.rows[0].id}', now()),
+        ('RC-ROLLED-BACK-ONLY', now(), 'rolled_back', '${job.rows[0].id}', '${user.rows[0].id}', now())
+    `);
+
+    await expect(applyMigrations(db, 9, 9)).rejects.toThrow(/no eligible legacy current rate card/i);
+    const legacy = await db.query<{ status: string }>(`
+      select status::text from rate_card_versions order by version_code
+    `);
+    expect(legacy.rows).toEqual([{ status: "rolled_back" }, { status: "superseded" }]);
+  });
+
+  test("enforces immutable, nondeletable Package identities and normalized unique names", async () => {
+    db = new PGlite();
+    await applyMigrations(db);
+    const inserted = await db.query<{ id: string }>(`
+      insert into sales_packages (package_code, name)
+      values ('PKG-STABLE', 'Stable Package') returning id
+    `);
+
+    await expect(db.exec(`update sales_packages set package_code = 'PKG-RENAMED' where id = '${inserted.rows[0].id}'`))
+      .rejects.toThrow(/package code is immutable/i);
+    await expect(db.exec(`update sales_packages set name = 'Renamed Package' where id = '${inserted.rows[0].id}'`))
+      .rejects.toThrow(/package name is immutable/i);
+    await expect(db.exec(`update sales_packages set status = 'inactive' where id = '${inserted.rows[0].id}'`))
+      .resolves.toBeDefined();
+    expect((await db.query<{ package_code: string; name: string; status: string }>(`
+      select package_code, name, status from sales_packages where id = '${inserted.rows[0].id}'
+    `)).rows).toEqual([{
+      package_code: "PKG-STABLE",
+      name: "Stable Package",
+      status: "inactive",
+    }]);
+    await expect(db.exec(`delete from sales_packages where id = '${inserted.rows[0].id}'`))
+      .rejects.toThrow(/packages cannot be deleted/i);
+    await expect(db.exec(`insert into sales_packages (package_code, name) values ('PKG-OTHER', 'STABLE PACKAGE')`))
+      .rejects.toThrow(/sales_packages_normalized_name_unique/i);
+    await expect(db.exec(`insert into sales_packages (package_code, name) values ('PKG-WHITESPACE', E'\tWhitespace Package\n')`))
+      .rejects.toThrow(/sales_packages_name_trimmed_check/i);
+    await expect(db.exec(`insert into sales_packages (package_code, name) values ('', 'Blank Code')`))
+      .rejects.toThrow(/sales_packages_package_code_not_blank_check/i);
+  });
+
+  test("fails migration before normalizing colliding Package names", async () => {
+    db = new PGlite();
+    await applyMigrations(db, 9);
+    await db.exec(`
+      insert into sales_packages (package_code, name) values
+        ('PKG-A', 'Metro Package'),
+        ('PKG-B', E'\tMETRO PACKAGE\n')
+    `);
+
+    await expect(applyMigrations(db, 10, 10)).rejects.toThrow(/package name normalization collision/i);
+  });
+
+  test("allows nullable optional Building fields and rejects out-of-range Rate Card prices", async () => {
+    db = new PGlite();
+    await applyMigrations(db);
+    const user = await db.query<{ id: string }>(`
+      insert into users (email, password_hash, display_name)
+      values ('price-boundary@example.com', 'test-only-hash', 'Price Boundary') returning id
+    `);
+    const job = await db.query<{ id: string }>(`
+      insert into import_jobs (data_type, template_version, checksum, uploaded_by)
+      values ('rate_card', 'v2', '${"8".repeat(64)}', '${user.rows[0].id}') returning id
+    `);
+    const priceBuildings = await db.query<{ id: string }>(`
+      insert into buildings (iris_building_id, name, address)
+      values
+        ('B-MINIMAL', 'Minimal Building', null),
+        ('B-MAX', 'Maximum Building', null),
+        ('B-NEGATIVE', 'Negative Building', null),
+        ('B-OVERFLOW', 'Overflow Building', null)
+      returning id
+    `);
+    const pricePackages = await db.query<{ id: string }>(`
+      insert into sales_packages (package_code, name)
+      values
+        ('PKG-ZERO', 'Zero Price Package'),
+        ('PKG-MAX', 'Maximum Price Package'),
+        ('PKG-NEGATIVE', 'Negative Price Package'),
+        ('PKG-OVERFLOW', 'Overflow Price Package')
+      returning id
+    `);
+    const version = await db.query<{ id: string }>(`
+      insert into rate_card_versions (version_code, status, import_job_id, uploaded_by)
+      values ('RC-PRICE-BOUNDARY', 'current', '${job.rows[0].id}', '${user.rows[0].id}') returning id
+    `);
+
+    await expect(db.exec(`
+      insert into rate_card_building_prices (rate_card_version_id, building_id, price_idr) values
+        ('${version.rows[0].id}', '${priceBuildings.rows[0].id}', 0),
+        ('${version.rows[0].id}', '${priceBuildings.rows[1].id}', 999999999999999999)
+    `)).resolves.toBeDefined();
+    await expect(db.exec(`
+      insert into rate_card_package_configs (rate_card_version_id, package_id, price_idr) values
+        ('${version.rows[0].id}', '${pricePackages.rows[0].id}', 0),
+        ('${version.rows[0].id}', '${pricePackages.rows[1].id}', 999999999999999999)
+    `)).resolves.toBeDefined();
+    await expect(db.exec(`
+      insert into rate_card_building_prices (rate_card_version_id, building_id, price_idr)
+      values ('${version.rows[0].id}', '${priceBuildings.rows[2].id}', -1)
+    `)).rejects.toThrow(/rate_card_building_prices_price_nonnegative_check/i);
+    await expect(db.exec(`
+      insert into rate_card_building_prices (rate_card_version_id, building_id, price_idr)
+      values ('${version.rows[0].id}', '${priceBuildings.rows[3].id}', 1000000000000000000)
+    `)).rejects.toThrow();
+    await expect(db.exec(`
+      insert into rate_card_package_configs (rate_card_version_id, package_id, price_idr)
+      values ('${version.rows[0].id}', '${pricePackages.rows[2].id}', -1)
+    `)).rejects.toThrow(/rate_card_package_configs_price_nonnegative_check/i);
+    await expect(db.exec(`
+      insert into rate_card_package_configs (rate_card_version_id, package_id, price_idr)
+      values ('${version.rows[0].id}', '${pricePackages.rows[3].id}', 1000000000000000000)
+    `)).rejects.toThrow();
+
+    const columnTypes = await db.query<{
+      table_name: string;
+      numeric_precision: number;
+      numeric_scale: number;
+    }>(`
+      select table_name, numeric_precision, numeric_scale
+      from information_schema.columns
+      where table_schema = 'public'
+        and table_name in ('rate_card_building_prices', 'rate_card_package_configs')
+        and column_name = 'price_idr'
+      order by table_name
+    `);
+    expect(columnTypes.rows).toEqual([
+      { table_name: "rate_card_building_prices", numeric_precision: 18, numeric_scale: 0 },
+      { table_name: "rate_card_package_configs", numeric_precision: 18, numeric_scale: 0 },
     ]);
   });
 });

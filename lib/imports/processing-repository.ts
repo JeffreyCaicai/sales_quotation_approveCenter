@@ -1,17 +1,26 @@
-import { and, eq, lte } from "drizzle-orm";
+import { and, eq, like, lte } from "drizzle-orm";
 
 import { getDb } from "@/db";
-import { buildingControlledValues, buildings, importChanges, importErrors, importFiles, importJobs, rateCardBuildingPrices, rateCardPackageBuildings, rateCardPackageConfigs, rateCardVersions, salesPackages, userPermissions, users } from "@/db/schema";
+import { auditEvents, buildingControlledValues, buildings, importChanges, importErrors, importFiles, importJobs, rateCardBuildingPrices, rateCardPackageBuildings, rateCardPackageConfigs, rateCardVersions, salesPackages, userPermissions, users } from "@/db/schema";
 import type { SessionUser } from "@/lib/auth/session";
 import type { ImportChange } from "@/lib/imports/diff";
 import type { PackageChange, PackageSnapshot } from "@/lib/imports/package-diff";
 import type { RateCardChange } from "@/lib/imports/rate-card-diff";
 import type { ImportValidationError } from "@/lib/imports/errors";
-import type { ImportProcessingRepository } from "@/lib/imports/process-import";
+import type { ImportProcessingRepository, ProcessingFailure } from "@/lib/imports/process-import";
 import type { BuildingImport, PackageImport, StagedRateCardImport } from "@/lib/imports/template-v2";
 import { ImportProcessingError } from "@/lib/imports/processing-errors";
 
 export const PROCESSING_STALE_AFTER_MS = 15 * 60 * 1000;
+export const PROCESSING_INSERT_CHUNK_SIZE = 1_000;
+
+export function processingInsertChunks<T>(values: readonly T[]): T[][] {
+  const chunks: T[][] = [];
+  for (let offset = 0; offset < values.length; offset += PROCESSING_INSERT_CHUNK_SIZE) {
+    chunks.push(values.slice(offset, offset + PROCESSING_INSERT_CHUNK_SIZE));
+  }
+  return chunks;
+}
 
 export function processingClaimIsStale(updatedAt: Date, now: Date): boolean {
   return updatedAt.getTime() <= now.getTime() - PROCESSING_STALE_AFTER_MS;
@@ -48,23 +57,105 @@ export class PostgresImportProcessingRepository implements ImportProcessingRepos
         return { kind: "unsupported" as const, dataType: candidate.dataType };
       }
 
-      const [job] = await tx.select({ id: importJobs.id, dataType: importJobs.dataType, templateVersion: importJobs.templateVersion, state: importJobs.state, updatedAt: importJobs.updatedAt })
+      const [job] = await tx.select({ id: importJobs.id, dataType: importJobs.dataType, templateVersion: importJobs.templateVersion, state: importJobs.state, failureSummary: importJobs.failureSummary, updatedAt: importJobs.updatedAt })
         .from(importJobs).where(eq(importJobs.id, jobId)).limit(1).for("update");
       if (!job) throw new ImportProcessingError("IMPORT_JOB_NOT_FOUND", 404);
       assertPreliminaryDataType(candidate.dataType, job.dataType);
       const reclaiming = job.state === "validating" && processingClaimIsStale(job.updatedAt, now);
-      if (job.state !== "uploaded" && !reclaiming) return { kind: "terminal" as const, state: job.state };
+      const retrying = job.state === "processing_failed"
+        && job.failureSummary?.startsWith("IMPORT_PROCESSING_RETRYABLE:") === true;
+      if (job.state !== "uploaded" && !reclaiming && !retrying) return { kind: "terminal" as const, state: job.state };
 
       const staleBefore = new Date(now.getTime() - PROCESSING_STALE_AFTER_MS);
       const stateCondition = reclaiming
         ? and(eq(importJobs.state, "validating"), lte(importJobs.updatedAt, staleBefore))
-        : eq(importJobs.state, "uploaded");
-      const [claimed] = await tx.update(importJobs).set({ state: "validating", updatedAt: now })
+        : retrying
+          ? and(eq(importJobs.state, "processing_failed"), like(importJobs.failureSummary, "IMPORT_PROCESSING_RETRYABLE:%"))
+          : eq(importJobs.state, "uploaded");
+      const [claimed] = await tx.update(importJobs).set({ state: "validating", failureSummary: null, updatedAt: now })
         .where(and(eq(importJobs.id, jobId), stateCondition)).returning({ id: importJobs.id });
       if (!claimed) throw new ImportProcessingError("IMPORT_JOB_PROCESSING", 409);
+      if (retrying) {
+        await tx.insert(auditEvents).values({
+          actorUserId: actor.id,
+          action: "import.job.processing_retry",
+          entityType: "import_job",
+          entityId: jobId,
+          importJobId: jobId,
+          source: "import",
+          beforeMetadata: { state: "processing_failed" },
+          afterMetadata: { state: "validating" },
+          createdAt: now,
+        });
+      }
       const files = await tx.select({ objectStorageKey: importFiles.objectStorageKey, originalFilename: importFiles.originalFilename, checksum: importFiles.checksum })
         .from(importFiles).where(eq(importFiles.importJobId, jobId));
       return { kind: "claimed" as const, job: { id: job.id, dataType: job.dataType as "building" | "package" | "rate_card", templateVersion: job.templateVersion, claimToken: now.toISOString(), files } };
+    });
+  }
+
+  async claimReprocess(jobId: string, actor: SessionUser, now: Date) {
+    return getDb().transaction(async (tx) => {
+      const [candidate] = await tx.select({ dataType: importJobs.dataType })
+        .from(importJobs).where(eq(importJobs.id, jobId)).limit(1);
+      if (!candidate) {
+        const [activeActor] = await tx.select({ id: users.id }).from(users)
+          .where(and(eq(users.id, actor.id), eq(users.status, "active"))).limit(1);
+        if (!activeActor) throw new ImportProcessingError("PERMISSION_DENIED", 403);
+        throw new ImportProcessingError("IMPORT_JOB_NOT_FOUND", 404);
+      }
+      const permission = processingPermission[candidate.dataType];
+      const [authorized] = await tx.select({ id: users.id }).from(users)
+        .innerJoin(userPermissions, and(eq(userPermissions.userId, users.id), eq(userPermissions.permissionKey, permission)))
+        .where(and(eq(users.id, actor.id), eq(users.status, "active"))).limit(1);
+      if (!authorized) throw new ImportProcessingError("PERMISSION_DENIED", 403);
+      if (candidate.dataType !== "building" && candidate.dataType !== "package" && candidate.dataType !== "rate_card") {
+        return { kind: "unsupported" as const, dataType: candidate.dataType };
+      }
+
+      const [job] = await tx.select({
+        id: importJobs.id,
+        dataType: importJobs.dataType,
+        templateVersion: importJobs.templateVersion,
+        state: importJobs.state,
+      }).from(importJobs).where(eq(importJobs.id, jobId)).limit(1).for("update");
+      if (!job) throw new ImportProcessingError("IMPORT_JOB_NOT_FOUND", 404);
+      assertPreliminaryDataType(candidate.dataType, job.dataType);
+      if (job.state !== "ready_to_publish" && job.state !== "draft" && job.state !== "reprocess_required") {
+        return { kind: "terminal" as const, state: job.state };
+      }
+      const [claimed] = await tx.update(importJobs).set({
+        state: "validating",
+        failureSummary: null,
+        updatedAt: now,
+      }).where(and(
+        eq(importJobs.id, jobId),
+        eq(importJobs.state, job.state),
+      )).returning({ id: importJobs.id });
+      if (!claimed) throw new ImportProcessingError("IMPORT_JOB_PROCESSING", 409);
+      await tx.insert(auditEvents).values({
+        actorUserId: actor.id,
+        action: "import.job.reprocess",
+        entityType: "import_job",
+        entityId: jobId,
+        importJobId: jobId,
+        source: "import",
+        beforeMetadata: { state: job.state },
+        afterMetadata: { state: "validating" },
+        createdAt: now,
+      });
+      const files = await tx.select({ objectStorageKey: importFiles.objectStorageKey, originalFilename: importFiles.originalFilename, checksum: importFiles.checksum })
+        .from(importFiles).where(eq(importFiles.importJobId, jobId));
+      return {
+        kind: "claimed" as const,
+        job: {
+          id: job.id,
+          dataType: job.dataType as "building" | "package" | "rate_card",
+          templateVersion: job.templateVersion,
+          claimToken: now.toISOString(),
+          files,
+        },
+      };
     });
   }
 
@@ -158,7 +249,10 @@ export class PostgresImportProcessingRepository implements ImportProcessingRepos
       if (!updated) throw new ImportProcessingError("IMPORT_JOB_PROCESSING", 409);
       await tx.delete(importErrors).where(eq(importErrors.importJobId, jobId));
       await tx.delete(importChanges).where(eq(importChanges.importJobId, jobId));
-      if (changes.length) await tx.insert(importChanges).values(changes.map((change) => ({ importJobId: jobId, entityType: "building", entityId: change.before?.id ?? null, changeType: change.type, beforeValue: change.before, afterValue: change.after })));
+      const storedChanges = changes.map((change) => ({ importJobId: jobId, entityType: "building", entityId: change.before?.id ?? null, changeType: change.type, beforeValue: change.before, afterValue: change.after }));
+      for (const chunk of processingInsertChunks(storedChanges)) {
+        await tx.insert(importChanges).values(chunk);
+      }
     });
   }
 
@@ -169,13 +263,16 @@ export class PostgresImportProcessingRepository implements ImportProcessingRepos
       if (!updated) throw new ImportProcessingError("IMPORT_JOB_PROCESSING", 409);
       await tx.delete(importErrors).where(eq(importErrors.importJobId, jobId));
       await tx.delete(importChanges).where(eq(importChanges.importJobId, jobId));
-      if (changes.length) await tx.insert(importChanges).values(changes.map((change) => ({
+      const storedChanges = changes.map((change) => ({
         importJobId: jobId,
         entityType: "package",
         changeType: change.changeType,
         beforeValue: change.before,
         afterValue: { rowNumber: change.rowNumber, ...change.after },
-      })));
+      }));
+      for (const chunk of processingInsertChunks(storedChanges)) {
+        await tx.insert(importChanges).values(chunk);
+      }
     });
   }
 
@@ -187,13 +284,16 @@ export class PostgresImportProcessingRepository implements ImportProcessingRepos
       if (!updated) throw new ImportProcessingError("IMPORT_JOB_PROCESSING", 409);
       await tx.delete(importErrors).where(eq(importErrors.importJobId, jobId));
       await tx.delete(importChanges).where(eq(importChanges.importJobId, jobId));
-      if (changes.length) await tx.insert(importChanges).values(changes.map((change) => ({
+      const storedChanges = changes.map((change) => ({
         importJobId: jobId,
         entityType: "rate_card",
         changeType: change.changeType,
         beforeValue: change.before === null ? null : { entityKey: change.entityKey, ...change.before },
         afterValue: change.after === null ? null : { entityKey: change.entityKey, ...change.after },
-      })));
+      }));
+      for (const chunk of processingInsertChunks(storedChanges)) {
+        await tx.insert(importChanges).values(chunk);
+      }
     });
   }
 
@@ -204,20 +304,43 @@ export class PostgresImportProcessingRepository implements ImportProcessingRepos
       if (!updated) throw new ImportProcessingError("IMPORT_JOB_PROCESSING", 409);
       await tx.delete(importChanges).where(eq(importChanges.importJobId, jobId));
       await tx.delete(importErrors).where(eq(importErrors.importJobId, jobId));
-      if (errors.length) await tx.insert(importErrors).values(errors.map((error) => ({ importJobId: jobId, sheetName: error.sheet, rowNumber: error.rowNumber, columnName: error.column, errorKey: error.key, localizedParameters: error.params })));
+      const storedErrors = errors.map((error) => ({ importJobId: jobId, filename: error.filename, sheetName: error.sheet, rowNumber: error.rowNumber, columnName: error.column, errorKey: error.key, localizedParameters: error.params }));
+      for (const chunk of processingInsertChunks(storedErrors)) {
+        await tx.insert(importErrors).values(chunk);
+      }
     });
   }
 
-  async retry(jobId: string, claimToken: string, failureSummary: string) {
-    const [updated] = await getDb().update(importJobs).set({
-      state: "uploaded",
-      failureSummary: `IMPORT_PROCESSING_RETRYABLE:${failureSummary}`,
-      updatedAt: new Date(),
-    }).where(and(
-      eq(importJobs.id, jobId),
-      eq(importJobs.state, "validating"),
-      eq(importJobs.updatedAt, new Date(claimToken)),
-    )).returning({ id: importJobs.id });
-    if (!updated) throw new ImportProcessingError("IMPORT_JOB_PROCESSING", 409);
+  async processingFailure(
+    jobId: string,
+    claimToken: string,
+    actorId: string,
+    failure: ProcessingFailure,
+  ) {
+    await getDb().transaction(async (tx) => {
+      const now = new Date();
+      const [updated] = await tx.update(importJobs).set({
+        state: "processing_failed",
+        failureSummary: `${failure.code}:${failure.incidentId}`,
+        updatedAt: now,
+      }).where(and(
+        eq(importJobs.id, jobId),
+        eq(importJobs.state, "validating"),
+        eq(importJobs.updatedAt, new Date(claimToken)),
+      )).returning({ id: importJobs.id });
+      if (!updated) throw new ImportProcessingError("IMPORT_JOB_PROCESSING", 409);
+      await tx.insert(auditEvents).values({
+        actorUserId: actorId,
+        action: "import.job.processing_failed",
+        entityType: "import_job",
+        entityId: jobId,
+        importJobId: jobId,
+        source: "import",
+        reason: failure.incidentId,
+        beforeMetadata: { state: "validating" },
+        afterMetadata: failure,
+        createdAt: now,
+      });
+    });
   }
 }

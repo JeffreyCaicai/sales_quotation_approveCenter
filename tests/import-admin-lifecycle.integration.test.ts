@@ -22,7 +22,7 @@ import {
 } from "@/lib/imports/admin-read-model";
 import type { ActiveImportDataType, PreparedUploadFile } from "@/lib/imports/contracts";
 import { createImportJob } from "@/lib/imports/create-job";
-import { processImport } from "@/lib/imports/process-import";
+import { processImport, reprocessImport } from "@/lib/imports/process-import";
 import { PostgresImportProcessingRepository } from "@/lib/imports/processing-repository";
 import { publishImport } from "@/lib/imports/publish";
 import { PostgresImportJobRepository } from "@/lib/imports/repository";
@@ -179,11 +179,6 @@ describe.skipIf(!servicesConfigured)("native PostgreSQL/MinIO import administrat
       "rate-card-valid/package-prices.csv",
     ].map(csvFixture));
     const firstRateCardJobId = await uploadProcess("rate_card", rateCardFiles, admin);
-    await expect(publishImport(firstRateCardJobId, admin)).resolves.toMatchObject({
-      state: "published",
-      publishedChanges: 4,
-    });
-
     const secondFiles = rateCardFiles.map((file) => ({
       ...file,
       body: new TextEncoder().encode(
@@ -193,6 +188,45 @@ describe.skipIf(!servicesConfigured)("native PostgreSQL/MinIO import administrat
       ),
     }));
     const secondRateCardJobId = await uploadProcess("rate_card", secondFiles, admin);
+    await expect(publishImport(firstRateCardJobId, admin)).resolves.toMatchObject({
+      state: "published",
+      publishedChanges: 4,
+    });
+    await expect(publishImport(secondRateCardJobId, admin)).rejects.toMatchObject({
+      key: "IMPORT_CHANGE_STALE",
+      status: 409,
+    });
+    await expect(database().query<{ state: string }>(
+      "select state from import_jobs where id = $1",
+      [secondRateCardJobId],
+    )).resolves.toMatchObject({ rows: [{ state: "reprocess_required" }] });
+
+    const firstCurrent = (await database().query<{ id: string }>(
+      "select id from rate_card_versions where status = 'current'",
+    )).rows[0];
+    await expect(reprocessImport(secondRateCardJobId, admin, {
+      repository: new PostgresImportProcessingRepository(),
+      objectStore: objectStore!,
+    })).resolves.toEqual({ jobId: secondRateCardJobId, state: "draft" });
+    const refreshed = await database().query<{
+      state: string;
+      based_on_version_id: string;
+      changes: number;
+      reprocess_audits: number;
+    }>(`
+      select job.state,
+        job.normalized_payload ->> 'basedOnVersionId' based_on_version_id,
+        (select count(*)::int from import_changes where import_job_id = job.id) changes,
+        (select count(*)::int from audit_events
+          where import_job_id = job.id and action = 'import.job.reprocess') reprocess_audits
+      from import_jobs job where job.id = $1
+    `, [secondRateCardJobId]);
+    expect(refreshed.rows).toEqual([{
+      state: "draft",
+      based_on_version_id: firstCurrent.id,
+      changes: 3,
+      reprocess_audits: 1,
+    }]);
     await expect(publishImport(secondRateCardJobId, admin)).resolves.toMatchObject({
       state: "published",
       publishedChanges: 4,

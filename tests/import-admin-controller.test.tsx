@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   bootstrapLogin: vi.fn(),
   uploadImport: vi.fn(),
   processImportJob: vi.fn(),
+  reprocessImportJob: vi.fn(),
   publishImportJob: vi.fn(),
   dashboardProps: null as Record<string, unknown> | null,
 }));
@@ -27,6 +28,7 @@ vi.mock("@/lib/client/import-admin-api", async (importActual) => ({
   bootstrapLogin: mocks.bootstrapLogin,
   uploadImport: mocks.uploadImport,
   processImportJob: mocks.processImportJob,
+  reprocessImportJob: mocks.reprocessImportJob,
   publishImportJob: mocks.publishImportJob,
 }));
 
@@ -144,6 +146,7 @@ describe("mounted import administration authentication controller", () => {
     mocks.bootstrapLogin.mockResolvedValue({ ok: true });
     mocks.uploadImport.mockResolvedValue({ jobId: job.id, state: "uploaded" });
     mocks.processImportJob.mockResolvedValue({ jobId: job.id, state: "ready_to_publish" });
+    mocks.reprocessImportJob.mockResolvedValue(job);
     mocks.publishImportJob.mockResolvedValue({ jobId: job.id, state: "published", publishedChanges: 1 });
   });
 
@@ -213,6 +216,7 @@ describe("mounted import workspace authentication and dialog behavior", () => {
     mocks.getImportJobDetail.mockResolvedValue(job);
     mocks.uploadImport.mockResolvedValue({ jobId: job.id, state: "uploaded" });
     mocks.processImportJob.mockResolvedValue({ jobId: job.id, state: "ready_to_publish" });
+    mocks.reprocessImportJob.mockResolvedValue(job);
     mocks.publishImportJob.mockResolvedValue({ jobId: job.id, state: "published", publishedChanges: 1 });
   });
 
@@ -317,5 +321,73 @@ describe("mounted import workspace authentication and dialog behavior", () => {
 
     expect(dialog.showModal).toHaveBeenCalledTimes(1);
     expect(cancel.focus).toHaveBeenCalledTimes(1);
+  });
+
+  test("uses the guarded reprocess endpoint and clears stale only after refreshed detail", async () => {
+    mocks.publishImportJob.mockRejectedValueOnce(new ImportAdminApiError(409, "IMPORT_CHANGE_STALE", true));
+    const refreshed = { ...job, updatedAt: "2026-07-18T00:02:00.000Z" };
+    mocks.reprocessImportJob.mockResolvedValueOnce(refreshed);
+    const renderer = await mountWorkspace(vi.fn(), undefined, job);
+    const publishData = renderer.root.findAllByType("button").find((element) => element.props.children === t("publish.data"));
+    await act(async () => publishData?.props.onClick());
+    const publishNow = renderer.root.findAllByType("button").find((element) => element.props.children === t("publish.now"));
+    await act(async () => publishNow?.props.onClick());
+    expect(output(renderer)).toContain(t("error.stalePreview"));
+
+    const reprocess = renderer.root.findAllByType("button").find((element) => element.props.children === t("process.reprocess"));
+    await act(async () => reprocess?.props.onClick());
+
+    expect(mocks.reprocessImportJob).toHaveBeenCalledWith(job.id, expect.any(AbortSignal));
+    expect(output(renderer)).not.toContain(t("error.stalePreview"));
+  });
+
+  test("restores durable stale state on a fresh mount and reprocesses through the guarded endpoint", async () => {
+    const durableStale: ImportJobDetail = {
+      ...job,
+      state: "reprocess_required",
+      failureSummary: "IMPORT_REPROCESS_REQUIRED",
+    };
+    const refreshed = { ...job, updatedAt: "2026-07-18T00:03:00.000Z" };
+    mocks.reprocessImportJob.mockResolvedValueOnce(refreshed);
+
+    const renderer = await mountWorkspace(vi.fn(), undefined, durableStale);
+
+    expect(output(renderer)).toContain(t("error.stalePreview"));
+    expect(renderer.root.findAllByType("button").some((element) => element.props.children === t("publish.data"))).toBe(false);
+    const reprocess = renderer.root.findAllByType("button").find((element) => element.props.children === t("process.reprocess"));
+    await act(async () => reprocess?.props.onClick());
+
+    expect(mocks.reprocessImportJob).toHaveBeenCalledWith(job.id, expect.any(AbortSignal));
+    expect(output(renderer)).toContain(t("status.ready_to_publish"));
+    expect(output(renderer)).not.toContain(t("error.stalePreview"));
+  });
+
+  test("does not offer stale reprocessing for a checksum or not-ready 409", async () => {
+    mocks.publishImportJob.mockRejectedValueOnce(new ImportAdminApiError(409, "IMPORT_JOB_NOT_READY"));
+    const renderer = await mountWorkspace(vi.fn(), undefined, job);
+    const publishData = renderer.root.findAllByType("button").find((element) => element.props.children === t("publish.data"));
+    await act(async () => publishData?.props.onClick());
+    const publishNow = renderer.root.findAllByType("button").find((element) => element.props.children === t("publish.now"));
+    await act(async () => publishNow?.props.onClick());
+
+    expect(output(renderer)).toContain(t("error.publish"));
+    expect(renderer.root.findAllByType("button").some((element) => element.props.children === t("process.reprocess"))).toBe(false);
+  });
+
+  test("offers an actual retry for a retryable processing failure", async () => {
+    const failed: ImportJobDetail = {
+      ...job,
+      state: "processing_failed",
+      failureSummary: "IMPORT_PROCESSING_RETRYABLE:00000000-0000-4000-8000-000000000901",
+    };
+    mocks.getImportJobDetail.mockResolvedValueOnce(job);
+    const renderer = await mountWorkspace(vi.fn(), undefined, failed);
+    const retry = renderer.root.findAllByType("button").find((element) => element.props.children === t("process.retry"));
+
+    await act(async () => retry?.props.onClick());
+
+    expect(mocks.processImportJob).toHaveBeenCalledWith(job.id, expect.any(AbortSignal));
+    expect(output(renderer)).toContain(t("status.ready_to_publish"));
+    expect(output(renderer)).not.toContain(t("process.retry"));
   });
 });

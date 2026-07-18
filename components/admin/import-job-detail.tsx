@@ -14,6 +14,7 @@ interface ImportJobDetailProps {
   job: ImportJobDetailContract;
   stale: boolean;
   publishing: boolean;
+  processing?: boolean;
   confirmationOpen: boolean;
   generatedIdentifiers: Array<{ rowNumber: number; identifier: string }>;
   dialogRef?: RefObject<HTMLDialogElement | null>;
@@ -22,6 +23,7 @@ interface ImportJobDetailProps {
   onCancelPublish(): void;
   onPublish(): void;
   onReprocess(): void;
+  onRetryProcessing?(): void;
 }
 
 export function ImportJobDetail({
@@ -30,6 +32,7 @@ export function ImportJobDetail({
   job,
   stale,
   publishing,
+  processing = false,
   generatedIdentifiers,
   dialogRef,
   cancelButtonRef,
@@ -37,22 +40,39 @@ export function ImportJobDetail({
   onCancelPublish,
   onPublish,
   onReprocess,
+  onRetryProcessing,
 }: ImportJobDetailProps) {
   const counts = new Map<string, number>();
   for (const change of job.changes) counts.set(change.changeType, (counts.get(change.changeType) ?? 0) + 1);
   const originals = job.files.filter((file) => file.purpose === "original");
   const originalFilenames = originals.map((file) => file.originalFilename).join(", ");
   const ready = job.state === "ready_to_publish" || job.state === "draft";
+  const reprocessRequired = stale || job.state === "reprocess_required";
+  const processingFailure = parseProcessingFailureSummary(job.failureSummary);
   const dataset = datasetLabel(job.dataType, t);
 
   return (
     <section className="admin-job" aria-labelledby="current-job-title">
-      {stale ? (
+      {reprocessRequired && (ready || job.state === "reprocess_required") ? (
         <div className="admin-alert admin-alert--warning" role="alert">
           <span>{t("error.stalePreview")}</span>
-          <button className="admin-button admin-button--secondary" type="button" onClick={onReprocess} disabled={publishing}>
+          <button className="admin-button admin-button--secondary" type="button" onClick={onReprocess} disabled={publishing || processing}>
             {t("process.reprocess")}
           </button>
+        </div>
+      ) : null}
+
+      {job.state === "processing_failed" ? (
+        <div className="admin-alert admin-alert--warning" role="alert">
+          <span>{t(
+            processingFailure?.retryable ? "process.failureRetryable" : "process.failureTerminal",
+            { incidentId: processingFailure?.incidentId ?? "—" },
+          )}</span>
+          {processingFailure?.retryable && onRetryProcessing ? (
+            <button className="admin-button admin-button--secondary" type="button" onClick={onRetryProcessing} disabled={processing || publishing}>
+              {processing ? t("process.retrying") : t("process.retry")}
+            </button>
+          ) : null}
         </div>
       ) : null}
 
@@ -121,7 +141,7 @@ export function ImportJobDetail({
             className="admin-button admin-button--primary"
             type="button"
             onClick={onRequestPublish}
-            disabled={publishing || stale}
+            disabled={publishing || reprocessRequired}
           >
             {publishing ? t("publish.publishing") : t("publish.data")}
           </button>
@@ -158,4 +178,12 @@ export function ImportJobDetail({
       </dialog>
     </section>
   );
+}
+
+export function parseProcessingFailureSummary(
+  value: string | null,
+): { incidentId: string; retryable: boolean } | null {
+  const match = value?.match(/^(IMPORT_PROCESSING_RETRYABLE|IMPORT_PROCESSING_TERMINAL):([0-9a-f-]{36})$/iu);
+  if (!match) return null;
+  return { incidentId: match[2], retryable: match[1] === "IMPORT_PROCESSING_RETRYABLE" };
 }

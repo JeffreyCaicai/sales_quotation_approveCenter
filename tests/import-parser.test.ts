@@ -6,6 +6,7 @@ import * as XLSX from "xlsx";
 
 import { parseImportFiles } from "@/lib/imports/normalize";
 import { PACKAGE_HEADERS } from "@/lib/imports/template-v2";
+import { validateBuildingRows } from "@/lib/imports/validate";
 
 const FIXTURES = join(process.cwd(), "tests", "fixtures", "imports", "v2");
 
@@ -98,6 +99,77 @@ describe("TMN-IMPORT-2 parser", () => {
         buildingName: "Apartment 19th Avenue",
         operationalStatus: "active",
       }],
+    });
+  });
+
+  test.each(["CSV", "XLSX"])(
+    "parses a minimal %s Building row with only ID, name, and status",
+    async (format) => {
+      const headers = ["IRIS Building ID", "ERP Building ID", "Building Name", "Building Type", "Grade Resource", "Area", "City", "CBD Area", "Sub-District", "Address", "Operational Status", "Data Source"];
+      const values = ["B-MINIMAL", "", "Minimal Building", "", "", "", "", "", "", "", "active", ""];
+      const file = format === "CSV"
+        ? {
+            filename: "minimal-building.csv",
+            body: new TextEncoder().encode(`${headers.join(",")}\n${values.join(",")}\n`),
+          }
+        : workbookFile("minimal-building.xlsx", {
+            Instructions: [["Template Version", "TMN-IMPORT-2"]],
+            Data: [headers, values],
+          });
+
+      await expect(parseImportFiles("building", [file])).resolves.toMatchObject({
+        rows: [{
+          irisBuildingId: "B-MINIMAL",
+          buildingName: "Minimal Building",
+          buildingType: null,
+          gradeResource: null,
+          address: null,
+          operationalStatus: "active",
+          dataSource: null,
+        }],
+      });
+    },
+  );
+
+  test("preserves every invalid Building and Package enumeration for batch validation", async () => {
+    const buildingHeaders = "IRIS Building ID,ERP Building ID,Building Name,Building Type,Grade Resource,Area,City,CBD Area,Sub-District,Address,Operational Status,Data Source";
+    const buildingResult = await parseImportFiles("building", [{
+      filename: "invalid-enums.csv",
+      body: new TextEncoder().encode([
+        buildingHeaders,
+        "B-1,,First,,,,,,,,retired,legacy",
+        "B-2,,Second,,,,,,,,paused,external",
+      ].join("\n")),
+    }]);
+    expect(buildingResult.rows).toEqual(expect.arrayContaining([
+      expect.objectContaining({ rowNumber: 2, operationalStatus: "retired", dataSource: "legacy" }),
+      expect.objectContaining({ rowNumber: 3, operationalStatus: "paused", dataSource: "external" }),
+    ]));
+
+    const packageResult = await parseImportFiles("package", [{
+      filename: "invalid-package-enums.csv",
+      body: new TextEncoder().encode([
+        "Package Code,Package Name,Operational Status",
+        "PKG-1,First Package,retired",
+        "PKG-2,Second Package,paused",
+      ].join("\n")),
+    }]);
+    expect(packageResult.rows).toEqual(expect.arrayContaining([
+      expect.objectContaining({ rowNumber: 2, operationalStatus: "retired" }),
+      expect.objectContaining({ rowNumber: 3, operationalStatus: "paused" }),
+    ]));
+  });
+
+  test("preserves the exact Rate Card CSV filename on parse errors", async () => {
+    const valid = (text: string) => new TextEncoder().encode(text);
+    await expect(parseImportFiles("rate_card", [
+      { filename: "metadata.csv", body: valid("Template Version,TMN-IMPORT-2\nCurrency,IDR\n") },
+      { filename: "building-prices.csv", body: valid("IRIS Building ID,Price IDR\nB-1,100\n") },
+      { filename: "package-prices.csv", body: new Uint8Array([0xff, 0xfe]) },
+      { filename: "package-buildings.csv", body: valid("Package Code,IRIS Building ID\nPKG-1,B-1\n") },
+    ])).rejects.toMatchObject({
+      key: "import.error.file_invalid",
+      details: { filename: "package-prices.csv", sheet: "Package Prices" },
     });
   });
 
@@ -296,17 +368,18 @@ describe("TMN-IMPORT-2 parser", () => {
     expect(result.rows.map((row) => row.rowNumber)).toEqual([4, 6]);
   });
 
-  test("retains physical CSV row numbers and reports invalid values at their source row", async () => {
+  test("retains physical CSV row numbers so validation reports every invalid source row", async () => {
     const headers = "IRIS Building ID,ERP Building ID,Building Name,Building Type,Grade Resource,Area,City,CBD Area,Sub-District,Address,Operational Status,Data Source";
     const valid = "B003004,,First,,,,,,,Address,active,building_team";
     const invalid = "B003005,,Second,,,,,,,Address,retired,erp";
     const body = new TextEncoder().encode(`\n\n${headers}\n${valid}\n\n${invalid}\n`);
 
-    await expect(parseImportFiles("building", [{ filename: "blank-rows.csv", body }]))
-      .rejects.toMatchObject({
-        key: "import.error.value_invalid",
-        details: { rowNumber: 6, column: "Operational Status" },
-      });
+    const parsed = await parseImportFiles("building", [{ filename: "blank-rows.csv", body }]);
+    expect(validateBuildingRows(parsed.rows, { buildings: [] })).toContainEqual(expect.objectContaining({
+      rowNumber: 6,
+      column: "Operational Status",
+      key: "import.error.operational_status_invalid",
+    }));
   });
 
   test("uses the starting row for a valid quoted multiline CSV record", async () => {
@@ -318,16 +391,17 @@ describe("TMN-IMPORT-2 parser", () => {
     expect(result.rows[0]).toMatchObject({ rowNumber: 3, buildingName: "First\nTower" });
   });
 
-  test("reports an invalid quoted multiline CSV record at its starting row", async () => {
+  test("preserves the starting row of an invalid quoted multiline CSV record for validation", async () => {
     const headers = "IRIS Building ID,ERP Building ID,Building Name,Building Type,Grade Resource,Area,City,CBD Area,Sub-District,Address,Operational Status,Data Source";
     const multiline = "B003005,,\"Retired\\nTower\",,,,,,,Address,retired,erp".replace("\\n", "\n");
     const body = new TextEncoder().encode(`\n${headers}\n\n${multiline}\n`);
 
-    await expect(parseImportFiles("building", [{ filename: "multiline-invalid.csv", body }]))
-      .rejects.toMatchObject({
-        key: "import.error.value_invalid",
-        details: { rowNumber: 4, column: "Operational Status" },
-      });
+    const parsed = await parseImportFiles("building", [{ filename: "multiline-invalid.csv", body }]);
+    expect(validateBuildingRows(parsed.rows, { buildings: [] })).toContainEqual(expect.objectContaining({
+      rowNumber: 4,
+      column: "Operational Status",
+      key: "import.error.operational_status_invalid",
+    }));
   });
 
   test("retains physical Rate Card section row numbers", async () => {

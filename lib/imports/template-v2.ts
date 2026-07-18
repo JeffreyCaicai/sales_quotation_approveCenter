@@ -41,14 +41,24 @@ export interface BuildingRow {
   city: string | null;
   cbdArea: string | null;
   subDistrict: string | null;
-  address: string;
+  address: string | null;
   operationalStatus: "active" | "inactive";
   dataSource: "building_team" | "erp";
+}
+
+export interface BuildingCandidateRow extends Omit<BuildingRow, "operationalStatus" | "dataSource"> {
+  operationalStatus: string;
+  dataSource: string | null;
 }
 
 export interface BuildingImport {
   templateVersion: typeof TEMPLATE_VERSION_V2;
   rows: BuildingRow[];
+}
+
+export interface BuildingCandidateImport {
+  templateVersion: typeof TEMPLATE_VERSION_V2;
+  rows: BuildingCandidateRow[];
 }
 
 export interface PackageRow {
@@ -58,9 +68,18 @@ export interface PackageRow {
   operationalStatus: "active" | "inactive";
 }
 
+export interface PackageCandidateRow extends Omit<PackageRow, "operationalStatus"> {
+  operationalStatus: string;
+}
+
 export interface PackageImport {
   templateVersion: typeof TEMPLATE_VERSION_V2;
   rows: PackageRow[];
+}
+
+export interface PackageCandidateImport {
+  templateVersion: typeof TEMPLATE_VERSION_V2;
+  rows: PackageCandidateRow[];
 }
 
 export interface RateCardImport {

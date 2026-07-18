@@ -16,7 +16,13 @@ import {
 import type { SessionUser } from "@/lib/auth/session";
 import { publicationLockIdentities } from "@/lib/imports/publication-locks";
 import type { PublicationResult } from "@/lib/imports/publish";
+import {
+  attachStalePublicationToken,
+  importPreviewRevisionSql,
+  type ImportPreviewToken,
+} from "@/lib/imports/reprocess-required";
 import { createRateCardVersionCode } from "@/lib/imports/rate-card-version-code";
+import { isValidIdrPrice } from "@/lib/imports/idr-price";
 import {
   TEMPLATE_VERSION_V2,
   type StagedRateCardImport,
@@ -100,14 +106,13 @@ export function assertRateCardPublicationSnapshot(
   if (
     new Set(buildingPriceKeys).size !== buildingPriceKeys.length
     || new Set(memberships).size !== memberships.length
-    || [...new Set(buildingReferences)].some(
-      (key) => !key || !buildingIdByIris.has(key) || buildingStatusByIris.get(key) !== "active",
-    )
   ) {
-    throw new RateCardPublicationError(
-      "IMPORT_RATE_CARD_BUILDING_REFERENCE_INVALID",
-      409,
-    );
+    invalidChange();
+  }
+  if ([...new Set(buildingReferences)].some(
+    (key) => !buildingIdByIris.has(key) || buildingStatusByIris.get(key) !== "active",
+  )) {
+    throw new RateCardPublicationError("IMPORT_CHANGE_STALE", 409);
   }
 
   const packageReferences = [
@@ -125,18 +130,22 @@ export function assertRateCardPublicationSnapshot(
   const packageStatusByCode = new Map(
     lockedPackages.map((row) => [row.packageCode, row.status]),
   );
+  if (new Set(packagePriceKeys).size !== packagePriceKeys.length) {
+    invalidChange();
+  }
   if (
-    new Set(packagePriceKeys).size !== packagePriceKeys.length
-    || [...pricedPackages].some((key) => !memberPackages.has(key))
+    [...pricedPackages].some((key) => !memberPackages.has(key))
     || [...memberPackages].some((key) => !pricedPackages.has(key))
-    || [...new Set(packageReferences)].some(
-      (key) => !key || !packageIdByCode.has(key) || packageStatusByCode.get(key) !== "active",
-    )
   ) {
     throw new RateCardPublicationError(
       "IMPORT_RATE_CARD_PACKAGE_REFERENCE_INVALID",
       409,
     );
+  }
+  if ([...new Set(packageReferences)].some(
+    (key) => !packageIdByCode.has(key) || packageStatusByCode.get(key) !== "active",
+  )) {
+    throw new RateCardPublicationError("IMPORT_CHANGE_STALE", 409);
   }
 
   return { buildingIdByIris, packageIdByCode };
@@ -174,7 +183,9 @@ export async function publishRateCardImport(
   jobId: string,
   actor: SessionUser,
 ): Promise<PublicationResult> {
-  return getDb().transaction(async (tx) => {
+  let previewToken: ImportPreviewToken | null = null;
+  try {
+    return await getDb().transaction(async (tx) => {
     for (const identity of publicationLockIdentities("rate_card")) {
       await tx.execute(
         sql`select pg_advisory_xact_lock(hashtextextended(${identity}, 0))`,
@@ -189,6 +200,7 @@ export async function publishRateCardImport(
       normalizedPayload: importJobs.normalizedPayload,
       uploadedBy: importJobs.uploadedBy,
       createdAt: importJobs.createdAt,
+      previewRevision: importPreviewRevisionSql(),
     }).from(importJobs)
       .where(eq(importJobs.id, jobId))
       .limit(1)
@@ -201,6 +213,12 @@ export async function publishRateCardImport(
 
     if (job.state === "published") {
       return { jobId, state: "published", publishedChanges: 0 };
+    }
+    if (job.state === "draft") {
+      previewToken = { state: job.state, revision: job.previewRevision };
+    }
+    if (job.state === "reprocess_required") {
+      throw new RateCardPublicationError("IMPORT_CHANGE_STALE", 409);
     }
     if (job.state !== "draft") {
       throw new RateCardPublicationError("IMPORT_JOB_NOT_READY", 409);
@@ -401,7 +419,11 @@ export async function publishRateCardImport(
         + input.packageMemberships.length
         + 1,
     };
-  });
+    });
+  } catch (error) {
+    if (previewToken) attachStalePublicationToken(error, previewToken);
+    throw error;
+  }
 }
 
 type PublicationTransaction = Parameters<
@@ -456,7 +478,6 @@ export function parseStagedRateCardImport(value: unknown): StagedRateCardImport 
 }
 
 function assertRateCardRows(input: StagedRateCardImport): void {
-  const canonicalIdr = /^(?:0|[1-9]\d*)$/u;
   if (
     input.buildingPrices.some((row) =>
       !isRecord(row)
@@ -465,7 +486,7 @@ function assertRateCardRows(input: StagedRateCardImport): void {
       || typeof row.irisBuildingId !== "string"
       || row.irisBuildingId.trim().length === 0
       || typeof row.priceIdr !== "string"
-      || !canonicalIdr.test(row.priceIdr))
+      || !isValidIdrPrice(row.priceIdr))
     || input.packagePrices.some((row) =>
       !isRecord(row)
       || !Number.isInteger(row.rowNumber)
@@ -473,7 +494,7 @@ function assertRateCardRows(input: StagedRateCardImport): void {
       || typeof row.packageCode !== "string"
       || row.packageCode.trim().length === 0
       || typeof row.priceIdr !== "string"
-      || !canonicalIdr.test(row.priceIdr))
+      || !isValidIdrPrice(row.priceIdr))
     || input.packageMemberships.some((row) =>
       !isRecord(row)
       || !Number.isInteger(row.rowNumber)
