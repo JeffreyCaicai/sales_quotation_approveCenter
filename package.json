@@ -14,7 +14,7 @@
     "test:localization": "node --experimental-strip-types --test tests/localization.test.ts",
     "test:integration": "vitest run --config vitest.integration.config.ts tests/*.integration.test.ts",
     "test:minio": "tsx scripts/smoke-test-minio.ts",
-    "test:e2e": "playwright test tests/smoke.spec.ts",
+    "test:e2e": "playwright test tests/smoke.spec.ts tests/admin-imports-smoke.spec.ts",
     "check:committed-secrets": "bash scripts/check-committed-secrets.sh",
     "lint": "eslint . --ignore-pattern .next",
     "db:generate": "drizzle-kit generate",

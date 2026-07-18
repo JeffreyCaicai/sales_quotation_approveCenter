@@ -16,6 +16,7 @@ export default defineConfig({
       "tests/localization.test.ts",
       "tests/rendered-html.test.mjs",
       "tests/smoke.spec.ts",
+      "tests/admin-imports-smoke.spec.ts",
     ],
   },
 });

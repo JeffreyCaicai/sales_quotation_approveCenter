@@ -36,6 +36,69 @@ Add application tables to `db/schema.ts`, then generate migrations with
 `npm run db:generate`. Database connections are pooled and the runtime requires
 `DATABASE_URL` rather than platform-specific bindings.
 
+Apply the checked-in migrations before starting the import administration
+surface:
+
+```bash
+export DATABASE_URL="postgresql://quotation:local-only@127.0.0.1:5432/quotation"
+npm run db:migrate
+```
+
+## Import Administration
+
+The controlled import UI is available at `/admin/imports`. It uses the native
+PostgreSQL database and S3-compatible object storage; configure `S3_ENDPOINT`,
+`S3_REGION`, `S3_BUCKET`, `S3_ACCESS_KEY_ID`, and `S3_SECRET_ACCESS_KEY` before
+uploading. For local MinIO, the endpoint must be reachable from the application
+process and the bucket must already exist.
+
+Create or rotate the local bootstrap administrator with explicit environment
+values. The password must contain at least 14 characters and `AUTH_SECRET` must
+contain at least 32 characters:
+
+```bash
+export BOOTSTRAP_ADMIN_EMAIL="admin@example.test"
+export BOOTSTRAP_ADMIN_PASSWORD="choose-a-local-password"
+export AUTH_SECRET="choose-a-local-session-secret-at-least-32-chars"
+npx tsx scripts/create-bootstrap-admin.ts
+```
+
+Do not commit those runtime values. The bootstrap script activates that account
+and grants the complete administration permission set.
+
+Publish datasets in dependency order:
+
+1. Building Master
+2. Sales Package Master
+3. Rate Card
+
+The formal downloads are named `02_Buildings_Template.xlsx`,
+`03_Sales_Packages_Template.xlsx`, and `04_Rate_Card_Template.xlsx`. Building
+and Package imports accept one XLSX or CSV source. A Rate Card upload is exactly
+one XLSX workbook or one atomic set containing all four CSV files named:
+
+- `building-prices.csv`
+- `metadata.csv`
+- `package-buildings.csv`
+- `package-prices.csv`
+
+Partial, extra, duplicate, or differently named Rate Card CSV sets are rejected.
+Rate Cards have no business-entered effective date or version value. Publishing
+generates the version identifier and publication timestamp, makes that version
+`Current`, and retains the prior `Current` version and all of its child rows as
+read-only `Historical` data.
+
+Server-side permissions are rechecked against the active database user. Building
+upload/process/publish requires `data.import.building`; Package requires
+`data.import.package`; Rate Card upload/process requires `rate_card.upload` and
+publication requires `rate_card.publish`. Administration summary, history,
+detail, and error reports require `data.audit.read`; original-file download also
+requires `data.file.download`. Authentication alone does not grant access.
+
+The quotation screens still use browser-local demo data. Publishing imports in
+`/admin/imports` does not replace the quotation prototype's demo customers,
+buildings, packages, prices, or approval state.
+
 ## Project Shape
 
 - `app/` contains the Next.js App Router entry points.

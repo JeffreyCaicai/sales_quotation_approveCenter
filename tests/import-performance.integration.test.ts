@@ -2,9 +2,12 @@ import { performance } from "node:perf_hooks";
 
 import { describe, expect, test } from "vitest";
 
-import { calculateBuildingDiff } from "@/lib/imports/diff";
-import { parseImportFiles } from "@/lib/imports/normalize";
-import { validateBuildingRows } from "@/lib/imports/validate";
+import type { SessionUser } from "@/lib/auth/session";
+import {
+  processImport,
+  type ImportProcessingRepository,
+  type ProcessImportDependencies,
+} from "@/lib/imports/process-import";
 
 const ROW_COUNT = 5_000;
 const DEADLINE_MS = 60_000;
@@ -17,41 +20,76 @@ function fixture() {
     const erpBuildingId = number % 3 === 0 ? "" : `ERP-${padded}`;
     return `B${padded},${erpBuildingId},Building ${padded},Office,Grade A,Jakarta,Jakarta,CBD,Setiabudi,Address ${padded},active,building_team`;
   });
-  return {
-    filename: "buildings-5000.csv",
-    body: new TextEncoder().encode([HEADER, ...rows].join("\n")),
-  };
+  return new TextEncoder().encode([HEADER, ...rows].join("\n"));
 }
 
 describe("representative building import performance", () => {
-  test("parses, validates, and diffs 5,000 deterministic rows within 60 seconds", async () => {
+  test("processes exactly 5,000 rows to ready-to-publish within 60 seconds", async () => {
+    const body = fixture();
+    let completedRows = 0;
+    let completedChanges = 0;
+    const repository: ImportProcessingRepository = {
+      claim: async () => ({
+        kind: "claimed",
+        job: {
+          id: "performance-job",
+          dataType: "building",
+          templateVersion: "TMN-IMPORT-2",
+          claimToken: new Date().toISOString(),
+          files: [{
+            objectStorageKey: "imports/performance/buildings.csv",
+            originalFilename: "buildings-5000.csv",
+            checksum: "performance-checksum",
+          }],
+        },
+      }),
+      buildingSnapshot: async () => ({
+        buildings: [],
+        controlledValues: { buildingTypes: ["Office"], gradeResources: ["Grade A"] },
+      }),
+      packageSnapshot: async () => ({ packages: [] }),
+      loadRateCardSnapshot: async () => ({
+        buildings: [],
+        controlledValues: { buildingTypes: [], gradeResources: [] },
+        packages: [],
+        versionId: null,
+        buildingPrices: new Map(),
+        packagePrices: new Map(),
+        packageMemberships: [],
+      }),
+      completeBuilding: async (_jobId, _claimToken, normalized, changes) => {
+        completedRows = normalized.rows.length;
+        completedChanges = changes.length;
+      },
+      completePackage: async () => { throw new Error("unexpected package completion"); },
+      completeRateCard: async () => { throw new Error("unexpected Rate Card completion"); },
+      fail: async () => { throw new Error("unexpected validation failure"); },
+      retry: async () => { throw new Error("unexpected retry"); },
+    };
+    const dependencies: ProcessImportDependencies = {
+      repository,
+      objectStore: { readImmutable: async () => body },
+    };
+    const actor: SessionUser = {
+      id: "performance-user",
+      email: "performance@example.test",
+      displayName: "Performance User",
+      status: "active",
+      permissions: ["data.import.building"],
+    };
+
     const startedAt = performance.now();
-    const parsed = await parseImportFiles("building", [fixture()]);
-    const parsedAt = performance.now();
-    const errors = validateBuildingRows(parsed.rows, {
-      buildings: [],
-      controlledValues: { buildingTypes: ["Office"], gradeResources: ["Grade A"] },
-    });
-    const validatedAt = performance.now();
-    const changes = calculateBuildingDiff(parsed.rows, { buildings: [] });
-    const finishedAt = performance.now();
+    const result = await processImport("performance-job", actor, dependencies);
+    const elapsedMs = performance.now() - startedAt;
 
-    expect(parsed.rows).toHaveLength(ROW_COUNT);
-    expect(parsed.rows[0]).toMatchObject({ irisBuildingId: "B000001", erpBuildingId: "ERP-000001" });
-    expect(parsed.rows[2]).toMatchObject({ irisBuildingId: "B000003", erpBuildingId: null });
-    expect(parsed.rows[4_999]).toMatchObject({ irisBuildingId: "B005000", erpBuildingId: "ERP-005000" });
-    expect(parsed.rows.filter((row) => row.erpBuildingId === null)).toHaveLength(Math.floor(ROW_COUNT / 3));
-    expect(errors).toEqual([]);
-    expect(changes).toHaveLength(ROW_COUNT);
-    expect(changes.every((change) => change.type === "added")).toBe(true);
-    expect(finishedAt - startedAt).toBeLessThan(DEADLINE_MS);
-
+    expect(result).toEqual({ jobId: "performance-job", state: "ready_to_publish" });
+    expect(completedRows).toBe(ROW_COUNT);
+    expect(completedChanges).toBe(ROW_COUNT);
+    expect(elapsedMs).toBeLessThan(DEADLINE_MS);
     console.info(JSON.stringify({
-      rows: ROW_COUNT,
-      parseMs: Number((parsedAt - startedAt).toFixed(2)),
-      validateMs: Number((validatedAt - parsedAt).toFixed(2)),
-      diffMs: Number((finishedAt - validatedAt).toFixed(2)),
-      totalMs: Number((finishedAt - startedAt).toFixed(2)),
+      rows: completedRows,
+      state: result.state,
+      totalMs: Number(elapsedMs.toFixed(2)),
     }));
   }, 70_000);
 });

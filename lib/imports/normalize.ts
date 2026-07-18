@@ -24,6 +24,12 @@ export interface ImportSourceFile {
 
 const MAX_TOTAL_BYTES = 25 * 1024 * 1024;
 const MAX_ROWS = 10_000;
+const RATE_CARD_CSV_FILE_TO_SHEET = new Map([
+  ["building-prices.csv", "Building Prices"],
+  ["metadata.csv", "Metadata"],
+  ["package-buildings.csv", "Package Membership"],
+  ["package-prices.csv", "Package Prices"],
+] as const);
 function extension(filename: string): string {
   const dot = filename.lastIndexOf(".");
   return dot === -1 ? "" : filename.slice(dot).toLowerCase();
@@ -246,6 +252,31 @@ function normalizeRateCardCsv(rows: SourceRow[]): RateCardImport {
   return result;
 }
 
+function normalizeRateCardCsvSet(files: readonly ImportSourceFile[]): RateCardImport {
+  const filenames = files.map((file) => file.filename).sort();
+  const expected = [...RATE_CARD_CSV_FILE_TO_SHEET.keys()].sort();
+  if (
+    filenames.length !== expected.length
+    || filenames.some((filename, index) => filename !== expected[index])
+  ) {
+    throw new ImportParseError("import.error.file_set_invalid");
+  }
+
+  const sheets = new Map<string, ParsedSheet>([
+    ["Instructions", {
+      name: "Instructions",
+      rows: [{ rowNumber: 1, cells: ["Rate Card CSV set"] }],
+    }],
+  ]);
+  for (const file of files) {
+    const sheetName = (RATE_CARD_CSV_FILE_TO_SHEET as ReadonlyMap<string, string>)
+      .get(file.filename);
+    if (!sheetName) throw new ImportParseError("import.error.file_set_invalid");
+    sheets.set(sheetName, { name: sheetName, rows: parseCsv(file.body) });
+  }
+  return normalizeRateCard(sheets);
+}
+
 function assertFiles(files: readonly ImportSourceFile[]): void {
   if (files.length === 0 || files.some((file) => file.body.byteLength === 0)) {
     throw new ImportParseError("import.error.file_set_invalid");
@@ -291,6 +322,9 @@ export async function parseImportFiles(dataType: "building" | "package" | "rate_
   }
   if (files.length === 1 && extension(files[0].filename) === ".csv") {
     return normalizeRateCardCsv(parseCsv(files[0].body));
+  }
+  if (files.length === RATE_CARD_CSV_FILE_TO_SHEET.size) {
+    return normalizeRateCardCsvSet(files);
   }
   throw new ImportParseError("import.error.file_set_invalid");
 }

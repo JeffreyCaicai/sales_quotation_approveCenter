@@ -149,6 +149,28 @@ describe("TMN-IMPORT-2 parser", () => {
       });
   });
 
+  test("parses the exact atomic four-CSV Rate Card set", async () => {
+    const directory = join(FIXTURES, "rate-card-valid");
+    const filenames = [
+      "building-prices.csv",
+      "metadata.csv",
+      "package-buildings.csv",
+      "package-prices.csv",
+    ];
+    const files = await Promise.all(filenames.map(async (filename) => ({
+      filename,
+      body: new Uint8Array(await readFile(join(directory, filename))),
+    })));
+
+    await expect(parseImportFiles("rate_card", files)).resolves.toEqual({
+      templateVersion: "TMN-IMPORT-2",
+      currency: "IDR",
+      buildingPrices: [{ rowNumber: 2, irisBuildingId: "B003004", priceIdr: "1000000" }],
+      packagePrices: [{ rowNumber: 2, packageCode: "PKG-ACCEPTANCE", priceIdr: "1500000" }],
+      packageMemberships: [{ rowNumber: 2, packageCode: "PKG-ACCEPTANCE", irisBuildingId: "B003004" }],
+    });
+  });
+
   test("parses the three exact Rate Card data sheets and minimal metadata", async () => {
     const file = workbookFile("rate-card.xlsx", {
       Instructions: [["English"], ["Bahasa Indonesia"]],
