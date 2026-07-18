@@ -15,6 +15,12 @@ export const BUILDING_HEADERS = [
   "Data Source",
 ] as const;
 
+export const BUILDING_REQUIRED_HEADERS = [
+  "IRIS Building ID",
+  "Building Name",
+  "Operational Status",
+] as const;
+
 export const PACKAGE_HEADERS = [
   "Package Code",
   "Package Name",

@@ -116,3 +116,33 @@ No production test backdoor, secret, deployment action, push, merge, or prior-co
 `npm run test:integration` was invoked against the final tree. This machine has no `DATABASE_URL`, MinIO endpoint/credentials, S3 variables, bucket, or auth secret. Four native suites therefore stopped at their explicit `DATABASE_URL is required` guard; the service-gated suites skipped. Result: 1 file passed, 2 skipped, 4 environment-blocked; 2 tests passed and 6 skipped. This is not reported as a native pass.
 
 The PostgreSQL/MinIO acceptance and browser paths remain wired into CI with real service containers and no production route/backdoor. Browser execution was also unavailable locally for the same missing database/object-storage/bootstrap environment.
+
+## Re-review follow-up — 2026-07-19
+
+### Additional fixes
+
+- Migration `0009` now stops for reconciliation if any legacy Rate Card row has status `rolled_back`. The active/published/superseded success matrix remains intact, and the active-plus-rolled-back regression proves the failed migration rolls the transaction back without relabeling either row.
+- Building source ingestion now requires only the three contractual headers `IRIS Building ID`, `Building Name`, and `Operational Status`; the other nine canonical headers may be absent and normalize to nullable values, with missing Data Source defaulting to `building_team` only after validation. Both CSV and XLSX are covered through parsing, processing, and native publication. Template generation remains the full 12-column workbook.
+- Retry classification now preserves `ECONNRESET` and also recognizes `ECONNREFUSED`, `ENETUNREACH`, `EHOSTUNREACH`, `ECONNABORTED`, and `EPIPE`. Direct errors, wrapped object-store causes, and wrapped database causes are covered; validation failures and permanent object-storage 404s remain terminal.
+- Rate Card version codes now include the full dashless uppercase job UUID, preventing same-second collisions between jobs that share the first UUID segment.
+- Publication dispatch now loads the active actor's current database publication permissions before the protected job lookup, requires the exact permission for Building, Package, or Rate Card before dispatch, rejects unsupported data types explicitly, and retains every publisher's locked transactional permission recheck.
+- Admin-detail limiting was deliberately deferred: the current UI derives exact totals from the complete change array and the complete error CSV reuses the detail model, so a blunt limit would silently truncate both contracts. A safe future change needs explicit totals/page metadata plus a separate authorized complete-report query.
+
+### Additional RED → GREEN evidence
+
+- Required migration, true three-column Building, transient-network, and collision regressions: **RED**, 4 files failed with 17 failed / 90 passed tests. After the production changes: **GREEN**, 4 files / 107 tests.
+- Authorization-before-dispatch regressions: **RED**, 1 file / 3 failed tests (missing-job disclosure, unsupported fallthrough, and wrong-type permission dispatch). After the live preflight and explicit dispatcher: **GREEN**, the dispatcher plus all three publisher unit suites passed 4 files / 46 tests.
+- Final focused re-review suite, including the unchanged 12-column template contract and wrapped database cases: **PASS**, 6 files / 124 tests.
+- Independent read-only review found no Critical or Important issues and assessed the implementation ready. Its one Minor recommendation was applied: the rolled-back migration test now proves DDL rollback by asserting the newly created enum type is absent after rejection. The affected migration suite then **PASSED**, 1 file / 26 tests.
+
+### Additional verification
+
+- `npm run test:unit`: **PASS**, 45 files / 627 tests.
+- `npx tsc --noEmit`: **PASS**.
+- `npm run lint`: **PASS**.
+- `npm run test:logic`: **PASS**, 32 tests.
+- `npm run test:localization`: **PASS**, 22 tests.
+- `npm run build`: the sandboxed attempt stopped only because Google Fonts network access was unavailable; the approved network-enabled rerun **PASSED**, including compilation, TypeScript, all 9 static pages, and route generation.
+- `git diff --check`: **PASS** before final staging.
+- `npm run check:committed-secrets`: **PASS** against the 14 explicitly staged follow-up files; controller-owned Task 1 and Task 4 reports remained unstaged.
+- `npm run test:integration`: invoked and not reported as a native pass. Without `DATABASE_URL`, 4 native suites stopped at their explicit environment guard; result was 1 file passed, 2 skipped, 4 environment-blocked, with 2 tests passed and 6 skipped.

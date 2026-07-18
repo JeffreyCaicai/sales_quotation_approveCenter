@@ -103,10 +103,10 @@ describe("TMN-IMPORT-2 parser", () => {
   });
 
   test.each(["CSV", "XLSX"])(
-    "parses a minimal %s Building row with only ID, name, and status",
+    "parses a genuine three-column %s Building source",
     async (format) => {
-      const headers = ["IRIS Building ID", "ERP Building ID", "Building Name", "Building Type", "Grade Resource", "Area", "City", "CBD Area", "Sub-District", "Address", "Operational Status", "Data Source"];
-      const values = ["B-MINIMAL", "", "Minimal Building", "", "", "", "", "", "", "", "active", ""];
+      const headers = ["IRIS Building ID", "Building Name", "Operational Status"];
+      const values = ["B-MINIMAL", "Minimal Building", "active"];
       const file = format === "CSV"
         ? {
             filename: "minimal-building.csv",

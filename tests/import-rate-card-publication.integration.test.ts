@@ -162,7 +162,7 @@ describe("native PostgreSQL Rate Card publication", () => {
       state: "published",
       publishedChanges: 4,
     });
-    const suffix = jobId.replace(/-/gu, "").slice(0, 8).toUpperCase();
+    const suffix = jobId.replace(/-/gu, "").toUpperCase();
     const rows = await pool.query<{
       version_code: string;
       status: string;

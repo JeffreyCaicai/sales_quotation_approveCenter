@@ -12,9 +12,15 @@ BEGIN
   END IF;
 
   IF EXISTS (
+    SELECT 1 FROM rate_card_versions WHERE status = 'rolled_back'
+  ) THEN
+    RAISE EXCEPTION 'rolled-back legacy Rate Card versions require reconciliation before migration';
+  END IF;
+
+  IF EXISTS (
     SELECT 1
     FROM rate_card_versions
-    WHERE status NOT IN ('active', 'published', 'superseded', 'rolled_back')
+    WHERE status NOT IN ('active', 'published', 'superseded')
        OR published_at IS NULL
   ) THEN
     RAISE EXCEPTION 'unpublished legacy Rate Card versions require reconciliation before migration';

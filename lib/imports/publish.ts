@@ -1,4 +1,4 @@
-import { and, asc, eq, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, sql } from "drizzle-orm";
 
 import { getDb } from "@/db";
 import {
@@ -28,6 +28,13 @@ import {
 } from "@/lib/imports/reprocess-required";
 
 const BUILDING_IMPORT_PERMISSION = "data.import.building";
+const PACKAGE_IMPORT_PERMISSION = "data.import.package";
+const RATE_CARD_PUBLISH_PERMISSION = "rate_card.publish";
+const PUBLICATION_PERMISSIONS = [
+  BUILDING_IMPORT_PERMISSION,
+  PACKAGE_IMPORT_PERMISSION,
+  RATE_CARD_PUBLISH_PERMISSION,
+] as const;
 
 export interface PublicationResult {
   jobId: string;
@@ -75,21 +82,53 @@ export async function publishImport(
   jobId: string,
   actor: SessionUser,
 ): Promise<PublicationResult> {
+  const currentPermissions = await loadCurrentPublicationPermissions(actor);
+  if (currentPermissions.size === 0) {
+    throw new PublicationError("PERMISSION_DENIED", 403);
+  }
   const [candidate] = await getDb().select({ dataType: importJobs.dataType })
     .from(importJobs).where(eq(importJobs.id, jobId)).limit(1);
   if (!candidate) throw new PublicationError("IMPORT_JOB_NOT_FOUND", 404);
   try {
-    return await (candidate.dataType === "rate_card"
-      ? publishRateCardImport(jobId, actor)
-      : candidate.dataType === "package"
-        ? publishPackageImport(jobId, actor)
-        : publishBuildingImport(jobId, actor));
+    if (candidate.dataType === "building") {
+      assertPublicationDispatchPermission(currentPermissions, BUILDING_IMPORT_PERMISSION);
+      return await publishBuildingImport(jobId, actor);
+    }
+    if (candidate.dataType === "package") {
+      assertPublicationDispatchPermission(currentPermissions, PACKAGE_IMPORT_PERMISSION);
+      return await publishPackageImport(jobId, actor);
+    }
+    if (candidate.dataType === "rate_card") {
+      assertPublicationDispatchPermission(currentPermissions, RATE_CARD_PUBLISH_PERMISSION);
+      return await publishRateCardImport(jobId, actor);
+    }
+    throw new PublicationError("IMPORT_DATA_TYPE_UNSUPPORTED", 400);
   } catch (error) {
     const previewToken = stalePublicationToken(error);
     if (previewToken) {
       await markImportReprocessRequired(jobId, actor.id, previewToken);
     }
     throw error;
+  }
+}
+
+async function loadCurrentPublicationPermissions(actor: SessionUser): Promise<Set<string>> {
+  const rows = await getDb().select({ permissionKey: userPermissions.permissionKey })
+    .from(users)
+    .innerJoin(userPermissions, and(
+      eq(userPermissions.userId, users.id),
+      inArray(userPermissions.permissionKey, PUBLICATION_PERMISSIONS),
+    ))
+    .where(and(eq(users.id, actor.id), eq(users.status, "active")));
+  return new Set(rows.map((row) => row.permissionKey));
+}
+
+function assertPublicationDispatchPermission(
+  currentPermissions: ReadonlySet<string>,
+  requiredPermission: (typeof PUBLICATION_PERMISSIONS)[number],
+): void {
+  if (!currentPermissions.has(requiredPermission)) {
+    throw new PublicationError("PERMISSION_DENIED", 403);
   }
 }
 

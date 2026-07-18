@@ -229,7 +229,20 @@ function isRetryableInfrastructureCause(
   if (typeof status === "number") return status === 429 || status >= 500;
   if (typeof candidate.code === "string" && (
     candidate.code.startsWith("08")
-    || ["40001", "40P01", "53300", "57P03", "ECONNRESET", "ETIMEDOUT", "EAI_AGAIN"].includes(candidate.code)
+    || [
+      "40001",
+      "40P01",
+      "53300",
+      "57P03",
+      "ECONNRESET",
+      "ECONNREFUSED",
+      "ENETUNREACH",
+      "EHOSTUNREACH",
+      "ECONNABORTED",
+      "EPIPE",
+      "ETIMEDOUT",
+      "EAI_AGAIN",
+    ].includes(candidate.code)
   )) return true;
   if (candidate.name === "TimeoutError") return true;
   return candidate.cause !== undefined

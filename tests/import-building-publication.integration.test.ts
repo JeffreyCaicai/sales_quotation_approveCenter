@@ -2,9 +2,12 @@ import { randomUUID } from "node:crypto";
 
 import { Pool } from "pg";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
+import * as XLSX from "xlsx";
 
-import type { ImportChange, NormalizedBuilding } from "@/lib/imports/diff";
+import { calculateBuildingDiff, type ImportChange, type NormalizedBuilding } from "@/lib/imports/diff";
+import { parseImportFiles, toValidatedBuildingImport } from "@/lib/imports/normalize";
 import { publishImport } from "@/lib/imports/publish";
+import { validateBuildingRows } from "@/lib/imports/validate";
 
 const connectionString = process.env.DATABASE_URL;
 if (!connectionString) throw new Error("DATABASE_URL is required");
@@ -294,6 +297,65 @@ describe("IRIS-keyed building publication", () => {
       data_source: "building_team",
     }]);
   });
+
+  test.each(["CSV", "XLSX"] as const)(
+    "publishes a genuine three-column %s Building source",
+    async (format) => {
+      const actor = await seedPublisher();
+      const irisBuildingId = `MINIMAL-SOURCE-${randomUUID()}`;
+      const headers = ["IRIS Building ID", "Building Name", "Operational Status"];
+      const values = [irisBuildingId, "Minimal Source Building", "active"];
+      let file: { filename: string; body: Uint8Array };
+      if (format === "CSV") {
+        file = {
+          filename: "minimal-source.csv",
+          body: new TextEncoder().encode(`${headers.join(",")}\n${values.join(",")}\n`),
+        };
+      } else {
+        const workbook = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(
+          workbook,
+          XLSX.utils.aoa_to_sheet([["Template Version", "TMN-IMPORT-2"]]),
+          "Instructions",
+        );
+        XLSX.utils.book_append_sheet(
+          workbook,
+          XLSX.utils.aoa_to_sheet([headers, values]),
+          "Data",
+        );
+        file = {
+          filename: "minimal-source.xlsx",
+          body: new Uint8Array(XLSX.write(workbook, { type: "buffer", bookType: "xlsx" })),
+        };
+      }
+
+      const candidate = await parseImportFiles("building", [file]);
+      expect(validateBuildingRows(candidate.rows, { buildings: [] })).toEqual([]);
+      const normalized = toValidatedBuildingImport(candidate);
+      const changes = calculateBuildingDiff(normalized.rows, { buildings: [] });
+      const jobId = await seedReadyBuildingJob(actor.id, changes);
+
+      await expect(publishImport(jobId, actor)).resolves.toMatchObject({
+        jobId,
+        state: "published",
+        publishedChanges: 1,
+      });
+      expect((await pool.query<{
+        iris_building_id: string;
+        name: string;
+        address: string | null;
+        data_source: string;
+      }>(`
+        select iris_building_id, name, address, data_source
+        from buildings where iris_building_id = $1
+      `, [irisBuildingId])).rows).toEqual([{
+        iris_building_id: irisBuildingId,
+        name: "Minimal Source Building",
+        address: null,
+        data_source: "building_team",
+      }]);
+    },
+  );
 
   test("rolls back every building and audit write when an ERP mapping conflicts", async () => {
     const actor = await seedPublisher();

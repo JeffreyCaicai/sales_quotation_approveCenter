@@ -749,7 +749,7 @@ describe("generated PostgreSQL migration", () => {
     ).rejects.toThrow(/rate_card_versions_currency_idr_check/);
   });
 
-  test("prefers the actual active Rate Card over newer ineligible legacy statuses", async () => {
+  test("prefers the actual active Rate Card over newer published and superseded legacy statuses", async () => {
     db = new PGlite();
     await applyMigrations(db, 8);
     const user = await db.query<{ id: string }>(`
@@ -768,8 +768,7 @@ describe("generated PostgreSQL migration", () => {
       ) values
         ('RC-ACTIVE', '2026-07-01T00:00:00Z', 'active', '${job.rows[0].id}', '${user.rows[0].id}', '2026-07-01T00:00:00Z'),
         ('RC-PUBLISHED', '2026-07-02T00:00:00Z', 'published', '${job.rows[0].id}', '${user.rows[0].id}', '2026-07-02T00:00:00Z'),
-        ('RC-SUPERSEDED', '2026-07-03T00:00:00Z', 'superseded', '${job.rows[0].id}', '${user.rows[0].id}', '2026-07-03T00:00:00Z'),
-        ('RC-ROLLED-BACK', '2026-07-04T00:00:00Z', 'rolled_back', '${job.rows[0].id}', '${user.rows[0].id}', '2026-07-04T00:00:00Z')
+        ('RC-SUPERSEDED', '2026-07-03T00:00:00Z', 'superseded', '${job.rows[0].id}', '${user.rows[0].id}', '2026-07-03T00:00:00Z')
     `);
     await applyMigrations(db, 9, 9);
 
@@ -781,9 +780,43 @@ describe("generated PostgreSQL migration", () => {
     expect(versions.rows).toEqual([
       { version_code: "RC-ACTIVE", status: "current" },
       { version_code: "RC-PUBLISHED", status: "historical" },
-      { version_code: "RC-ROLLED-BACK", status: "historical" },
       { version_code: "RC-SUPERSEDED", status: "historical" },
     ]);
+  });
+
+  test("fails reconciliation when an active legacy Rate Card coexists with a rolled-back row", async () => {
+    db = new PGlite();
+    await applyMigrations(db, 8);
+    const user = await db.query<{ id: string }>(`
+      insert into users (email, password_hash, display_name)
+      values ('rate-card-rolled-back@example.com', 'test-only-hash', 'Rate Card Rolled Back')
+      returning id
+    `);
+    const job = await db.query<{ id: string }>(`
+      insert into import_jobs (data_type, template_version, checksum, uploaded_by)
+      values ('rate_card', 'v1', '${"4".repeat(64)}', '${user.rows[0].id}')
+      returning id
+    `);
+    await db.exec(`
+      insert into rate_card_versions (
+        version_code, effective_at, status, import_job_id, uploaded_by, published_at
+      ) values
+        ('RC-ACTIVE', '2026-07-01T00:00:00Z', 'active', '${job.rows[0].id}', '${user.rows[0].id}', '2026-07-01T00:00:00Z'),
+        ('RC-ROLLED-BACK', '2026-07-02T00:00:00Z', 'rolled_back', '${job.rows[0].id}', '${user.rows[0].id}', '2026-07-02T00:00:00Z')
+    `);
+
+    await expect(applyMigrations(db, 9, 9)).rejects.toThrow(
+      /rolled.back legacy rate card.*reconciliation/i,
+    );
+    expect((await db.query<{ version_code: string; status: string }>(`
+      select version_code, status::text from rate_card_versions order by version_code
+    `)).rows).toEqual([
+      { version_code: "RC-ACTIVE", status: "active" },
+      { version_code: "RC-ROLLED-BACK", status: "rolled_back" },
+    ]);
+    expect((await db.query<{ status_type: string | null }>(`
+      select to_regtype('public.rate_card_version_status')::text as status_type
+    `)).rows).toEqual([{ status_type: null }]);
   });
 
   test("falls back only to the newest explicitly published Rate Card when no active version exists", async () => {
@@ -805,8 +838,7 @@ describe("generated PostgreSQL migration", () => {
       ) values
         ('RC-PUBLISHED-OLD', '2026-07-01T00:00:00Z', 'published', '${job.rows[0].id}', '${user.rows[0].id}', '2026-07-01T00:00:00Z'),
         ('RC-PUBLISHED-NEW', '2026-07-02T00:00:00Z', 'published', '${job.rows[0].id}', '${user.rows[0].id}', '2026-07-02T00:00:00Z'),
-        ('RC-SUPERSEDED-NEWER', '2026-07-03T00:00:00Z', 'superseded', '${job.rows[0].id}', '${user.rows[0].id}', '2026-07-03T00:00:00Z'),
-        ('RC-ROLLED-BACK-NEWEST', '2026-07-04T00:00:00Z', 'rolled_back', '${job.rows[0].id}', '${user.rows[0].id}', '2026-07-04T00:00:00Z')
+        ('RC-SUPERSEDED-NEWER', '2026-07-03T00:00:00Z', 'superseded', '${job.rows[0].id}', '${user.rows[0].id}', '2026-07-03T00:00:00Z')
     `);
 
     await applyMigrations(db, 9, 9);
@@ -887,16 +919,14 @@ describe("generated PostgreSQL migration", () => {
     await db.exec(`
       insert into rate_card_versions (
         version_code, effective_at, status, import_job_id, uploaded_by, published_at
-      ) values
-        ('RC-SUPERSEDED-ONLY', now(), 'superseded', '${job.rows[0].id}', '${user.rows[0].id}', now()),
-        ('RC-ROLLED-BACK-ONLY', now(), 'rolled_back', '${job.rows[0].id}', '${user.rows[0].id}', now())
+      ) values ('RC-SUPERSEDED-ONLY', now(), 'superseded', '${job.rows[0].id}', '${user.rows[0].id}', now())
     `);
 
     await expect(applyMigrations(db, 9, 9)).rejects.toThrow(/no eligible legacy current rate card/i);
     const legacy = await db.query<{ status: string }>(`
       select status::text from rate_card_versions order by version_code
     `);
-    expect(legacy.rows).toEqual([{ status: "rolled_back" }, { status: "superseded" }]);
+    expect(legacy.rows).toEqual([{ status: "superseded" }]);
   });
 
   test("enforces immutable, nondeletable Package identities and normalized unique names", async () => {

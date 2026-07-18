@@ -31,6 +31,19 @@ const buildingBody = workbook({
   ],
 });
 
+const minimalBuildingCsvBody = new TextEncoder().encode([
+  "IRIS Building ID,Building Name,Operational Status",
+  "B-MINIMAL,Minimal Building,active",
+].join("\n"));
+
+const minimalBuildingWorkbookBody = workbook({
+  Instructions: [["Template Version", "TMN-IMPORT-2"]],
+  Data: [
+    ["IRIS Building ID", "Building Name", "Operational Status"],
+    ["B-MINIMAL", "Minimal Building", "active"],
+  ],
+});
+
 const packageBody = workbook({
   Instructions: [["Template Version", "TMN-IMPORT-2"]],
   "Sales Packages": [
@@ -175,6 +188,88 @@ describe("production import processing", () => {
 
     expect(result).toEqual({ jobId: "job-1", state: "ready_to_publish" });
     expect(repository.changes).toEqual([expect.objectContaining({ type: "added", entityKey: "B001" })]);
+  });
+
+  test.each([
+    ["CSV", "minimal-building.csv", minimalBuildingCsvBody],
+    ["XLSX", "minimal-building.xlsx", minimalBuildingWorkbookBody],
+  ] as const)("processes a genuine three-column %s Building source", async (_format, filename, body) => {
+    const repository = new Repository();
+    repository.originalFilename = filename;
+
+    await expect(processImport("job-1", actor, {
+      repository,
+      objectStore: { readImmutable: async () => body },
+    })).resolves.toEqual({ jobId: "job-1", state: "ready_to_publish" });
+
+    expect(repository.normalized).toEqual({
+      templateVersion: "TMN-IMPORT-2",
+      rows: [{
+        rowNumber: 2,
+        irisBuildingId: "B-MINIMAL",
+        erpBuildingId: null,
+        buildingName: "Minimal Building",
+        buildingType: null,
+        gradeResource: null,
+        area: null,
+        city: null,
+        cbdArea: null,
+        subDistrict: null,
+        address: null,
+        operationalStatus: "active",
+        dataSource: "building_team",
+      }],
+    });
+    expect(repository.changes).toEqual([
+      expect.objectContaining({ type: "added", entityKey: "B-MINIMAL" }),
+    ]);
+  });
+
+  test.each([
+    "ECONNRESET",
+    "ECONNREFUSED",
+    "ENETUNREACH",
+    "EHOSTUNREACH",
+    "ECONNABORTED",
+    "EPIPE",
+  ])("classifies direct transient network code %s as retryable", (code) => {
+    expect(isRetryableProcessingFailure({ code })).toBe(true);
+  });
+
+  test.each([
+    "ECONNRESET",
+    "ECONNREFUSED",
+    "ENETUNREACH",
+    "EHOSTUNREACH",
+    "ECONNABORTED",
+    "EPIPE",
+  ])("classifies wrapped object-store network code %s as retryable", (code) => {
+    expect(isRetryableProcessingFailure(Object.assign(
+      new ImportError(500, "STORAGE_SYNC_FAILED"),
+      { cause: { cause: { code } } },
+    ))).toBe(true);
+  });
+
+  test.each([
+    "ECONNRESET",
+    "ECONNREFUSED",
+    "ENETUNREACH",
+    "EHOSTUNREACH",
+    "ECONNABORTED",
+    "EPIPE",
+  ])("classifies wrapped database network code %s as retryable", (code) => {
+    expect(isRetryableProcessingFailure(Object.assign(
+      new Error("database query failed"),
+      { cause: { cause: { code } } },
+    ))).toBe(true);
+  });
+
+  test("keeps validation and permanent object-not-found faults terminal", () => {
+    expect(isRetryableProcessingFailure(new ImportError(400, "IMPORT_FILES_INVALID"))).toBe(false);
+    expect(isRetryableProcessingFailure(Object.assign(
+      new ImportError(500, "STORAGE_SYNC_FAILED"),
+      { cause: { $metadata: { httpStatusCode: 404 } } },
+    ))).toBe(false);
   });
 
   test("persists stable errors and no staged changes for a rejected full batch", async () => {

@@ -1,5 +1,6 @@
 import {
   BUILDING_HEADERS,
+  BUILDING_REQUIRED_HEADERS,
   ImportParseError,
   PACKAGE_HEADERS,
   RATE_CARD_BUILDING_PRICE_HEADERS,
@@ -59,26 +60,32 @@ function nonBlankRows(rows: SourceRow[]): SourceRow[] {
   return rows.filter((row) => row.cells.some((value) => text(value) !== ""));
 }
 
-function assertHeaders(sheet: string, rows: SourceRow[], expected: readonly string[]): Map<string, number> {
+function assertHeaders(
+  sheet: string,
+  rows: SourceRow[],
+  expected: readonly string[],
+  required: readonly string[] = expected,
+): Map<string, number> {
   const actual = (rows[0]?.cells ?? []).map(headerText);
   for (const header of actual) {
     if (!expected.includes(header)) {
       throw new ImportParseError("import.error.unknown_column", { sheet, column: header });
     }
   }
-  for (const header of expected) {
+  for (const header of required) {
     if (!actual.includes(header)) {
       throw new ImportParseError("import.error.missing_column", { sheet, column: header });
     }
   }
-  if (actual.length !== expected.length || new Set(actual).size !== actual.length) {
+  if (new Set(actual).size !== actual.length) {
     throw new ImportParseError("import.error.unknown_column", { sheet });
   }
   return new Map(actual.map((header, index) => [header, index]));
 }
 
 function value(row: SourceRow, columns: Map<string, number>, header: string): unknown {
-  return row.cells[columns.get(header)!];
+  const index = columns.get(header);
+  return index === undefined ? undefined : row.cells[index];
 }
 
 function assertRowLimit(rows: SourceRow[]): void {
@@ -96,7 +103,7 @@ function assertBuildingTemplateVersion(sheets: Map<string, ParsedSheet>): void {
 function normalizeBuildings(rows: SourceRow[]): BuildingCandidateImport {
   rows = nonBlankRows(rows);
   assertRowLimit(rows);
-  const columns = assertHeaders("Data", rows, BUILDING_HEADERS);
+  const columns = assertHeaders("Data", rows, BUILDING_HEADERS, BUILDING_REQUIRED_HEADERS);
   const normalized: BuildingCandidateRow[] = rows.slice(1).map((row) => {
     const operationalStatus = text(value(row, columns, "Operational Status"));
     const dataSource = nullable(value(row, columns, "Data Source"));

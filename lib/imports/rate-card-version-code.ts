@@ -6,6 +6,6 @@ export function createRateCardVersionCode(
     .toISOString()
     .replace(/[-:]/gu, "")
     .replace(/\.\d{3}Z$/u, "Z");
-  const suffix = jobId.replace(/-/gu, "").slice(0, 8).toUpperCase();
+  const suffix = jobId.replace(/-/gu, "").toUpperCase();
   return `RC-${timestamp}-${suffix}`;
 }
