@@ -2,6 +2,30 @@ import { cp } from "node:fs/promises";
 import { resolve, join } from "node:path";
 import { pathToFileURL } from "node:url";
 
+type PlaywrightServerAddress = {
+  hostname: string;
+  port: string;
+};
+
+type MutableEnvironment = Record<string, string | undefined>;
+
+export function configurePlaywrightServerEnvironment(
+  rawBaseUrl: string,
+  environment: MutableEnvironment = process.env,
+): PlaywrightServerAddress {
+  const baseUrl = new URL(rawBaseUrl);
+  if (baseUrl.protocol !== "http:") {
+    throw new Error("PLAYWRIGHT_BASE_URL must use http:");
+  }
+
+  const hostname = baseUrl.hostname.replace(/^\[|\]$/g, "");
+  const port = baseUrl.port || "80";
+  environment.HOSTNAME = hostname;
+  environment.PORT = port;
+
+  return { hostname, port };
+}
+
 export async function prepareStandaloneAssets(root: string): Promise<void> {
   const standaloneRoot = join(root, ".next", "standalone");
 
@@ -18,13 +42,11 @@ export async function prepareStandaloneAssets(root: string): Promise<void> {
 
 async function main(): Promise<void> {
   const root = process.cwd();
-  const baseUrl = new URL(
+  configurePlaywrightServerEnvironment(
     process.env.PLAYWRIGHT_BASE_URL ?? "http://127.0.0.1:3000",
   );
 
   await prepareStandaloneAssets(root);
-  process.env.HOSTNAME ??= baseUrl.hostname;
-  process.env.PORT ??= baseUrl.port || (baseUrl.protocol === "https:" ? "443" : "80");
 
   await import(
     pathToFileURL(join(root, ".next", "standalone", "server.js")).href

@@ -3,7 +3,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
-import { prepareStandaloneAssets } from "../scripts/start-playwright-server.mts";
+import {
+  configurePlaywrightServerEnvironment,
+  prepareStandaloneAssets,
+} from "../scripts/start-playwright-server.mts";
 
 describe("Playwright standalone server preparation", () => {
   it("copies public and Next static assets into the standalone bundle", async () => {
@@ -25,5 +28,40 @@ describe("Playwright standalone server preparation", () => {
         "utf8",
       ),
     ).resolves.toBe("chunk");
+  });
+
+  it("uses the Playwright URL as the sole listen address source", () => {
+    const environment = {
+      HOSTNAME: "ambient-host.invalid",
+      PORT: "3999",
+    };
+
+    const address = configurePlaywrightServerEnvironment(
+      "http://127.0.0.1:3105",
+      environment,
+    );
+
+    expect(address).toEqual({ hostname: "127.0.0.1", port: "3105" });
+    expect(environment.HOSTNAME).toBe("127.0.0.1");
+    expect(environment.PORT).toBe("3105");
+  });
+
+  it("normalizes IPv6 hosts and defaults plain HTTP to port 80", () => {
+    const environment: Record<string, string | undefined> = {};
+
+    const address = configurePlaywrightServerEnvironment(
+      "http://[::1]",
+      environment,
+    );
+
+    expect(address).toEqual({ hostname: "::1", port: "80" });
+    expect(environment.HOSTNAME).toBe("::1");
+    expect(environment.PORT).toBe("80");
+  });
+
+  it("rejects HTTPS because the standalone test server is plain HTTP", () => {
+    expect(() =>
+      configurePlaywrightServerEnvironment("https://127.0.0.1", {}),
+    ).toThrow(/http:/i);
   });
 });
