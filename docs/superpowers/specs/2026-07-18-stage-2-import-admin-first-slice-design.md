@@ -1,6 +1,6 @@
 # Stage 2 Import Administration — First Vertical Slice
 
-**Status:** Approved design, pending written-spec review  
+**Status:** Approved design and written specification
 **Date:** 2026-07-18  
 **Scope:** Bilingual import administration for Buildings, Sales Package Master, and Rate Card publication
 
