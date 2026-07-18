@@ -17,6 +17,7 @@ interface ImportJobDetailProps {
   confirmationOpen: boolean;
   generatedIdentifiers: Array<{ rowNumber: number; identifier: string }>;
   dialogRef?: RefObject<HTMLDialogElement | null>;
+  cancelButtonRef?: RefObject<HTMLButtonElement | null>;
   onRequestPublish(): void;
   onCancelPublish(): void;
   onPublish(): void;
@@ -31,6 +32,7 @@ export function ImportJobDetail({
   publishing,
   generatedIdentifiers,
   dialogRef,
+  cancelButtonRef,
   onRequestPublish,
   onCancelPublish,
   onPublish,
@@ -146,7 +148,7 @@ export function ImportJobDetail({
           <div><dt>{t("publish.validRecords", { count: job.validRows })}</dt><dd>{job.validRows}</dd></div>
         </dl>
         <div className="admin-dialog__actions">
-          <button className="admin-button admin-button--secondary" type="button" autoFocus onClick={onCancelPublish} disabled={publishing}>
+          <button ref={cancelButtonRef} className="admin-button admin-button--secondary" type="button" autoFocus onClick={onCancelPublish} disabled={publishing}>
             {t("publish.cancel")}
           </button>
           <button className="admin-button admin-button--primary" type="button" onClick={onPublish} disabled={publishing}>

@@ -60,7 +60,20 @@ function ImportAdminController() {
   const [view, setView] = useState<AdminView>("imports");
   const [loginBusy, setLoginBusy] = useState(false);
   const [errorKey, setErrorKey] = useState<AdminTranslationKey | null>(null);
+  const loadController = useRef<AbortController | null>(null);
   const refreshController = useRef<AbortController | null>(null);
+
+  const handleUnauthorized = useCallback(() => {
+    loadController.current?.abort();
+    loadController.current = null;
+    refreshController.current?.abort();
+    refreshController.current = null;
+    setData(emptyData);
+    setSelectedJobId(null);
+    setLoginBusy(false);
+    setErrorKey("error.unauthorized");
+    setPhase("login");
+  }, []);
 
   const loadAuthorized = useCallback(async (signal: AbortSignal) => {
     const jobId = readJobIdFromSearch(window.location.search);
@@ -80,19 +93,28 @@ function ImportAdminController() {
     } catch (failure) {
       if (signal.aborted) return;
       if (failure instanceof ImportAdminApiError && failure.status === 401) {
-        setPhase("login");
-        setErrorKey(null);
+        handleUnauthorized();
         return;
       }
-      setErrorKey("error.load");
+      setData(emptyData);
+      setSelectedJobId(null);
+      setErrorKey(failure instanceof ImportAdminApiError && failure.status === 403
+        ? "error.permission"
+        : "error.load");
       setPhase("error");
+    } finally {
+      if (loadController.current?.signal === signal) loadController.current = null;
     }
-  }, []);
+  }, [handleUnauthorized]);
 
   useEffect(() => {
     const controller = new AbortController();
+    loadController.current = controller;
     queueMicrotask(() => void loadAuthorized(controller.signal));
-    return () => controller.abort();
+    return () => {
+      controller.abort();
+      if (loadController.current === controller) loadController.current = null;
+    };
   }, [loadAuthorized]);
 
   useEffect(() => {
@@ -121,11 +143,17 @@ function ImportAdminController() {
       setErrorKey(null);
     } catch (failure) {
       if (controller.signal.aborted) return;
-      setErrorKey(failure instanceof ImportAdminApiError && failure.status === 401
-        ? "error.unauthorized"
+      if (failure instanceof ImportAdminApiError && failure.status === 401) {
+        handleUnauthorized();
+        return;
+      }
+      setErrorKey(failure instanceof ImportAdminApiError && failure.status === 403
+        ? "error.permission"
         : "error.load");
+    } finally {
+      if (refreshController.current === controller) refreshController.current = null;
     }
-  }, []);
+  }, [handleUnauthorized]);
 
   useEffect(() => () => refreshController.current?.abort(), []);
 
@@ -134,6 +162,8 @@ function ImportAdminController() {
     setLoginBusy(true);
     setErrorKey(null);
     const controller = new AbortController();
+    loadController.current?.abort();
+    loadController.current = controller;
     try {
       await bootstrapLogin(email, password, controller.signal);
       await loadAuthorized(controller.signal);
@@ -141,6 +171,7 @@ function ImportAdminController() {
       if (!controller.signal.aborted) setErrorKey("error.login");
     } finally {
       if (!controller.signal.aborted) setLoginBusy(false);
+      if (loadController.current === controller) loadController.current = null;
     }
   };
 
@@ -181,6 +212,8 @@ function ImportAdminController() {
         <button className="admin-button admin-button--primary" type="button" onClick={() => {
           setPhase("loading");
           const controller = new AbortController();
+          loadController.current?.abort();
+          loadController.current = controller;
           void loadAuthorized(controller.signal);
         }}>{t("action.retry")}</button>
       </main>
@@ -205,6 +238,7 @@ function ImportAdminController() {
         onResolveDataType={setSelectedDataType}
         onSelectView={setView}
         onRefresh={refresh}
+        onUnauthorized={handleUnauthorized}
       />
     </div>
   );

@@ -31,6 +31,7 @@ function dashboard(locale: "en" | "zh-CN") {
       onSelectJob={() => undefined}
       onSelectView={() => undefined}
       onRefresh={() => undefined}
+      onUnauthorized={() => undefined}
     />,
   );
 }

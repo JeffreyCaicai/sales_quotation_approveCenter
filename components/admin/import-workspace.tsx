@@ -29,6 +29,7 @@ interface ImportWorkspaceProps {
   onSelectJob(jobId: string, dataType: OperationalImportDataType): void;
   onResolveDataType(dataType: OperationalImportDataType): void;
   onRefresh(): Promise<void>;
+  onUnauthorized(): void;
 }
 
 type Activity = "idle" | "uploading" | "processing" | "publishing";
@@ -42,6 +43,7 @@ export function ImportWorkspace({
   onSelectJob,
   onResolveDataType,
   onRefresh,
+  onUnauthorized,
 }: ImportWorkspaceProps) {
   const [files, setFiles] = useState<File[]>([]);
   const [fileError, setFileError] = useState<AdminTranslationKey | null>(null);
@@ -53,6 +55,7 @@ export function ImportWorkspace({
   const [confirmationOpen, setConfirmationOpen] = useState(false);
   const [generatedIdentifiers, setGeneratedIdentifiers] = useState<Array<{ rowNumber: number; identifier: string }>>([]);
   const dialogRef = useRef<HTMLDialogElement>(null);
+  const cancelButtonRef = useRef<HTMLButtonElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const actionController = useRef<AbortController | null>(null);
   const actionSelection = useRef<{ dataType: OperationalImportDataType; jobId: string | null; controller: AbortController } | null>(null);
@@ -91,6 +94,7 @@ export function ImportWorkspace({
     if (confirmationOpen) {
       if (dialog.open) dialog.close();
       dialog.showModal();
+      cancelButtonRef.current?.focus();
     } else if (dialog.open) {
       dialog.close();
     }
@@ -128,6 +132,10 @@ export function ImportWorkspace({
         }
       } catch (failure) {
         if (!active || controller.signal.aborted) return;
+        if (isUnauthorized(failure)) {
+          onUnauthorized();
+          return;
+        }
         setError(apiMessage(failure, tRef.current, "error.load"));
       }
     };
@@ -138,7 +146,7 @@ export function ImportWorkspace({
       controller?.abort();
       if (timer !== undefined) window.clearTimeout(timer);
     };
-  }, [initialJob, onResolveDataType, selectedJobId]);
+  }, [initialJob, onResolveDataType, onUnauthorized, selectedJobId]);
 
   const selectFile = (event: ChangeEvent<HTMLInputElement>) => {
     const selected = event.currentTarget.files;
@@ -181,6 +189,10 @@ export function ImportWorkspace({
       setNotice("");
     } catch (failure) {
       if (controller.signal.aborted) return;
+      if (isUnauthorized(failure)) {
+        onUnauthorized();
+        return;
+      }
       if (failure instanceof ImportAdminApiError && failure.status === 409) setStale(true);
       setError(apiMessage(failure, t, "error.upload"));
     } finally {
@@ -209,13 +221,17 @@ export function ImportWorkspace({
       setStale(false);
     } catch (failure) {
       if (controller.signal.aborted) return;
+      if (isUnauthorized(failure)) {
+        onUnauthorized();
+        return;
+      }
       if (failure instanceof ImportAdminApiError && failure.status === 409) setStale(true);
       setError(apiMessage(failure, t, "error.processing"));
     } finally {
       if (actionSelection.current === selection) actionSelection.current = null;
       if (mounted.current && actionController.current === controller) setActivity("idle");
     }
-  }, [activity, job, onRefresh, t]);
+  }, [activity, job, onRefresh, onUnauthorized, t]);
 
   const publish = useCallback(async () => {
     if (!job || activity !== "idle") return;
@@ -240,6 +256,10 @@ export function ImportWorkspace({
       setStale(false);
     } catch (failure) {
       if (controller.signal.aborted) return;
+      if (isUnauthorized(failure)) {
+        onUnauthorized();
+        return;
+      }
       setConfirmationOpen(false);
       if (failure instanceof ImportAdminApiError && failure.status === 409) setStale(true);
       setError(apiMessage(failure, t, "error.publish"));
@@ -247,7 +267,7 @@ export function ImportWorkspace({
       if (actionSelection.current === selection) actionSelection.current = null;
       if (mounted.current && actionController.current === controller) setActivity("idle");
     }
-  }, [activity, job, onRefresh, t]);
+  }, [activity, job, onRefresh, onUnauthorized, t]);
 
   const dataset = datasetLabel(dataType, t);
   const busy = activity !== "idle";
@@ -308,6 +328,7 @@ export function ImportWorkspace({
           confirmationOpen={confirmationOpen}
           generatedIdentifiers={generatedIdentifiers}
           dialogRef={dialogRef}
+          cancelButtonRef={cancelButtonRef}
           onRequestPublish={() => setConfirmationOpen(true)}
           onCancelPublish={() => setConfirmationOpen(false)}
           onPublish={() => void publish()}
@@ -335,6 +356,10 @@ function apiMessage(failure: unknown, t: AdminTranslate, fallback: AdminTranslat
     ? t("error.processing")
     : t("error.stalePreview");
   return t(fallback);
+}
+
+function isUnauthorized(failure: unknown): boolean {
+  return failure instanceof ImportAdminApiError && failure.status === 401;
 }
 
 function DownloadIcon() {

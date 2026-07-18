@@ -24,6 +24,7 @@ interface ImportAdminDashboardProps {
   onResolveDataType?(dataType: OperationalImportDataType): void;
   onSelectView(view: AdminView): void;
   onRefresh(): void | Promise<void>;
+  onUnauthorized(): void;
 }
 
 const datasets: Array<{ dataType: OperationalImportDataType; key: "nav.buildings" | "nav.packages" | "nav.rateCards" }> = [
@@ -47,6 +48,7 @@ export function ImportAdminDashboard({
   onResolveDataType = () => undefined,
   onSelectView,
   onRefresh,
+  onUnauthorized,
 }: ImportAdminDashboardProps) {
   const t = (key: Parameters<typeof translateAdmin>[1], params?: Record<string, string | number>) =>
     translateAdmin(locale, key, params);
@@ -134,6 +136,7 @@ export function ImportAdminDashboard({
                 onSelectJob={onSelectJob}
                 onResolveDataType={onResolveDataType}
                 onRefresh={async () => { await onRefresh(); }}
+                onUnauthorized={onUnauthorized}
               />
               <ImportHistory locale={locale} t={t} jobs={history.slice(0, 5)} rateCardVersions={rateCardVersions} onSelectJob={onSelectJob} />
               <button className="admin-history-link" type="button" onClick={() => onSelectView("history")}>
