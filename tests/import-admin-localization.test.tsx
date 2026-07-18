@@ -39,6 +39,9 @@ describe("import administration localization", () => {
   test("uses complete English workflow copy by default", () => {
     expect(translateAdmin(undefined, "page.title")).toBe("Data import administration");
     expect(translateAdmin(undefined, "upload.acceptedTypes")).toContain(".xlsx or .csv");
+    expect(translateAdmin(undefined, "upload.rateCardAcceptedTypes")).toContain("building-prices.csv");
+    expect(translateAdmin(undefined, "upload.rateCardDropPrompt")).toContain("four-file CSV batch");
+    expect(translateAdmin(undefined, "upload.rateCardFileSet")).toContain("exactly four");
     expect(translateAdmin(undefined, "job.current")).toBe("Current job");
     expect(translateAdmin(undefined, "rateCard.current")).toBe("Current");
     expect(translateAdmin(undefined, "rateCard.historical")).toBe("Historical");
@@ -65,6 +68,9 @@ describe("import administration localization", () => {
     expect(html).toContain("下载模板");
     expect(html).toContain("最近导入历史");
     expect(translateAdmin("zh-CN", "error.stalePreview")).toContain("重新处理");
+    expect(translateAdmin("zh-CN", "upload.rateCardAcceptedTypes")).toContain("metadata.csv");
+    expect(translateAdmin("zh-CN", "upload.rateCardDropPrompt")).toContain("四文件 CSV 批次");
+    expect(translateAdmin("zh-CN", "upload.rateCardFileSet")).toContain("恰好四个");
     expect(translateAdmin("zh-CN", "publish.generatedCodes", { count: 1 })).toContain("1");
   });
 

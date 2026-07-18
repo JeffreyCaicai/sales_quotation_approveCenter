@@ -38,7 +38,8 @@ export function ImportJobDetail({
 }: ImportJobDetailProps) {
   const counts = new Map<string, number>();
   for (const change of job.changes) counts.set(change.changeType, (counts.get(change.changeType) ?? 0) + 1);
-  const original = job.files.find((file) => file.purpose === "original");
+  const originals = job.files.filter((file) => file.purpose === "original");
+  const originalFilenames = originals.map((file) => file.originalFilename).join(", ");
   const ready = job.state === "ready_to_publish" || job.state === "draft";
   const dataset = datasetLabel(job.dataType, t);
 
@@ -59,7 +60,7 @@ export function ImportJobDetail({
             <span id="current-job-title">{t("job.current")}</span>
             <Status state={job.state} t={t} />
           </div>
-          <strong>{original?.originalFilename ?? dataset}</strong>
+          <strong>{originalFilenames || dataset}</strong>
           <code>{t("job.id")}: {job.id}</code>
           <span>{t("job.uploaded", { date: formatDate(job.createdAt, locale) })}</span>
           <span>{t("job.uploadedBy", { name: job.uploadedBy.displayName })}</span>
@@ -107,7 +108,11 @@ export function ImportJobDetail({
               {t("job.errorReport", { count: job.errors.length })}
             </a>
           ) : null}
-          {original ? <a href={originalFileDownloadUrl(job.id, original.id)}>{t("job.originalFile")}</a> : null}
+          {originals.map((original) => (
+            <a key={original.id} href={originalFileDownloadUrl(job.id, original.id)}>
+              {originals.length === 1 ? t("job.originalFile") : t("job.originalFileNamed", { filename: original.originalFilename })}
+            </a>
+          ))}
         </div>
         {ready ? (
           <button
@@ -137,7 +142,7 @@ export function ImportJobDetail({
         </div>
         <p id="publish-dialog-description">{t("publish.description")}</p>
         <dl>
-          <div><dt>{t("job.file")}</dt><dd>{original?.originalFilename ?? "—"}</dd></div>
+          <div><dt>{t("job.file")}</dt><dd>{originalFilenames || "—"}</dd></div>
           <div><dt>{t("publish.validRecords", { count: job.validRows })}</dt><dd>{job.validRows}</dd></div>
         </dl>
         <div className="admin-dialog__actions">

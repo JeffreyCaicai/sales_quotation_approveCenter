@@ -11,7 +11,7 @@ import {
   publishImportJob,
   templateDownloadUrl,
   uploadImport,
-  validateImportFile,
+  validateImportFiles,
   type OperationalImportDataType,
 } from "@/lib/client/import-admin-api";
 
@@ -43,7 +43,7 @@ export function ImportWorkspace({
   onResolveDataType,
   onRefresh,
 }: ImportWorkspaceProps) {
-  const [file, setFile] = useState<File | null>(null);
+  const [files, setFiles] = useState<File[]>([]);
   const [fileError, setFileError] = useState<AdminTranslationKey | null>(null);
   const [job, setJob] = useState<ImportJobDetail | null>(initialJob?.id === selectedJobId ? initialJob : null);
   const [activity, setActivity] = useState<Activity>("idle");
@@ -53,6 +53,7 @@ export function ImportWorkspace({
   const [confirmationOpen, setConfirmationOpen] = useState(false);
   const [generatedIdentifiers, setGeneratedIdentifiers] = useState<Array<{ rowNumber: number; identifier: string }>>([]);
   const dialogRef = useRef<HTMLDialogElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const actionController = useRef<AbortController | null>(null);
   const actionSelection = useRef<{ dataType: OperationalImportDataType; jobId: string | null; controller: AbortController } | null>(null);
   const loadedJobId = useRef<string | null>(initialJob?.id ?? null);
@@ -74,7 +75,12 @@ export function ImportWorkspace({
     }
     let active = true;
     queueMicrotask(() => {
-      if (active) setConfirmationOpen(false);
+      if (active) {
+        setConfirmationOpen(false);
+        setFiles([]);
+        setFileError(null);
+        if (fileInputRef.current) fileInputRef.current.value = "";
+      }
     });
     return () => { active = false; };
   }, [dataType, selectedJobId]);
@@ -136,21 +142,17 @@ export function ImportWorkspace({
 
   const selectFile = (event: ChangeEvent<HTMLInputElement>) => {
     const selected = event.currentTarget.files;
-    if (!selected || selected.length !== 1) {
-      setFile(null);
-      setFileError("upload.singleFile");
-      return;
-    }
-    const nextFile = selected[0];
-    const validationError = validateImportFile(nextFile);
-    setFile(validationError ? null : nextFile);
+    const nextFiles = selected ? Array.from(selected) : [];
+    const validationError = validateImportFiles(dataType, nextFiles);
+    setFiles(validationError ? [] : nextFiles);
     setFileError(validationError);
     setError(null);
+    if (validationError) event.currentTarget.value = "";
   };
 
   const upload = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!file || activity !== "idle") return;
+    if (files.length === 0 || activity !== "idle") return;
     actionController.current?.abort();
     const controller = new AbortController();
     actionController.current = controller;
@@ -161,7 +163,7 @@ export function ImportWorkspace({
     setStale(false);
     setGeneratedIdentifiers([]);
     try {
-      const uploaded = await uploadImport(dataType, file, controller.signal);
+      const uploaded = await uploadImport(dataType, files, controller.signal);
       if (controller.signal.aborted) return;
       selection.jobId = uploaded.jobId;
       onSelectJob(uploaded.jobId, dataType);
@@ -174,7 +176,8 @@ export function ImportWorkspace({
       ]);
       if (controller.signal.aborted) return;
       setJob(detail);
-      setFile(null);
+      setFiles([]);
+      if (fileInputRef.current) fileInputRef.current.value = "";
       setNotice("");
     } catch (failure) {
       if (controller.signal.aborted) return;
@@ -249,6 +252,11 @@ export function ImportWorkspace({
   const dataset = datasetLabel(dataType, t);
   const busy = activity !== "idle";
   const displayedJob = selectedJobId && job?.id === selectedJobId ? job : null;
+  const selectedFileLabel = files.length === 1
+    ? t("upload.selected", { filename: files[0].name })
+    : files.length > 1
+      ? t("upload.selectedFiles", { count: files.length, filenames: files.map((file) => file.name).join(", ") })
+      : dataType === "rate_card" ? t("upload.rateCardDropPrompt") : t("upload.dropPrompt");
 
   return (
     <section className="admin-workspace" aria-labelledby="import-workspace-title">
@@ -269,15 +277,15 @@ export function ImportWorkspace({
         <div className="admin-upload__prompt">
           <UploadIcon />
           <div>
-            <strong>{file ? t("upload.selected", { filename: file.name }) : t("upload.dropPrompt")}</strong>
-            <span>{t("upload.acceptedTypes")}</span>
+            <strong>{selectedFileLabel}</strong>
+            <span>{dataType === "rate_card" ? t("upload.rateCardAcceptedTypes") : t("upload.acceptedTypes")}</span>
           </div>
         </div>
         <label className="admin-file-picker">
-          <span>{file ? t("upload.replace") : t("upload.choose")}</span>
-          <input aria-label={t("upload.label")} type="file" accept=".xlsx,.csv" onChange={selectFile} disabled={busy} />
+          <span>{files.length > 0 ? t("upload.replace") : t("upload.choose")}</span>
+          <input ref={fileInputRef} aria-label={t("upload.label")} type="file" accept=".xlsx,.csv" multiple={dataType === "rate_card"} onChange={selectFile} disabled={busy} />
         </label>
-        <button className="admin-button admin-button--primary" type="submit" disabled={!file || busy}>
+        <button className="admin-button admin-button--primary" type="submit" disabled={files.length === 0 || busy}>
           {activity === "uploading" ? t("upload.uploading") : activity === "processing" ? t("upload.processing") : t("upload.submit")}
         </button>
       </form>

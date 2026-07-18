@@ -12,7 +12,7 @@ import {
   getImportSummary,
   listImportHistory,
   uploadImport,
-  validateImportFile,
+  validateImportFiles,
 } from "@/lib/client/import-admin-api";
 import { jobUrl, readJobIdFromSearch } from "@/components/admin/import-admin-app";
 import { translateAdmin } from "@/lib/admin-i18n";
@@ -77,24 +77,57 @@ describe("import administration workflow", () => {
     expect(onSubmit).toHaveBeenCalledWith("admin@example.com", "secret");
   });
 
-  test("rejects unsupported files before upload and creates the real multipart request for valid files", async () => {
-    expect(validateImportFile(new File(["x"], "data.pdf"))).toBe("upload.invalidType");
-    expect(validateImportFile(new File(["x"], "data.xlsx"))).toBeNull();
+  test("keeps Building and Sales Package uploads to exactly one xlsx or csv", () => {
+    const xlsx = new File(["x"], "data.xlsx");
+    const csv = new File(["x"], "data.csv");
+
+    expect(validateImportFiles("building", [xlsx])).toBeNull();
+    expect(validateImportFiles("package", [csv])).toBeNull();
+    expect(validateImportFiles("building", [new File(["x"], "data.pdf")])).toBe("upload.invalidType");
+    expect(validateImportFiles("package", [xlsx, csv])).toBe("upload.singleFile");
+  });
+
+  test("accepts one Rate Card xlsx or the exact four-file CSV batch", () => {
+    const csvBatch = [
+      "building-prices.csv",
+      "metadata.csv",
+      "package-buildings.csv",
+      "package-prices.csv",
+    ].map((name) => new File(["x"], name, { type: "text/csv" }));
+
+    expect(validateImportFiles("rate_card", [new File(["x"], "rate-card.xlsx")])).toBeNull();
+    expect(validateImportFiles("rate_card", csvBatch)).toBeNull();
+    expect(validateImportFiles("rate_card", csvBatch.slice(0, 3))).toBe("upload.rateCardFileSet");
+    expect(validateImportFiles("rate_card", [...csvBatch, new File(["x"], "extra.csv")])).toBe("upload.rateCardFileSet");
+    expect(validateImportFiles("rate_card", [csvBatch[0], new File(["x"], "rate-card.xlsx")])).toBe("upload.rateCardFileSet");
+    expect(validateImportFiles("rate_card", csvBatch.map((file, index) => index === 3 ? new File(["x"], "prices.csv") : file))).toBe("upload.rateCardFileSet");
+  });
+
+  test("creates one multipart request containing the complete selected batch", async () => {
     const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({ jobId: job.id, state: "uploaded" }), {
       status: 201,
       headers: { "content-type": "application/json" },
     }));
 
-    await expect(uploadImport("building", new File(["a,b"], "data.csv", { type: "text/csv" }), undefined, fetcher)).resolves.toEqual({
+    const csvBatch = [
+      "building-prices.csv",
+      "metadata.csv",
+      "package-buildings.csv",
+      "package-prices.csv",
+    ].map((name) => new File(["a,b"], name, { type: "text/csv" }));
+
+    await expect(uploadImport("rate_card", csvBatch, undefined, fetcher)).resolves.toEqual({
       jobId: job.id,
       state: "uploaded",
     });
     expect(fetcher).toHaveBeenCalledTimes(1);
     const [url, init] = fetcher.mock.calls[0] as [string, RequestInit];
-    expect(url).toBe("/api/imports?dataType=building");
+    expect(url).toBe("/api/imports?dataType=rate_card");
     expect(init.method).toBe("POST");
     expect(init.body).toBeInstanceOf(FormData);
     expect((init.body as FormData).get("templateVersion")).toBe("TMN-IMPORT-2");
+    expect((init.body as FormData).getAll("files")).toHaveLength(4);
+    expect((init.body as FormData).getAll("files").map((file) => (file as File).name)).toEqual(csvBatch.map((file) => file.name));
   });
 
   test("loads summary and history independently and maps stable non-2xx errors", async () => {

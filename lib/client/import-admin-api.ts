@@ -61,11 +61,33 @@ async function requestJson<T>(
   return body as T;
 }
 
-export function validateImportFile(file: File): AdminTranslationKey | null {
-  const filename = file.name.toLowerCase();
-  return filename.endsWith(".xlsx") || filename.endsWith(".csv")
+const rateCardCsvFilenames = [
+  "building-prices.csv",
+  "metadata.csv",
+  "package-buildings.csv",
+  "package-prices.csv",
+] as const;
+
+export function validateImportFiles(
+  dataType: OperationalImportDataType,
+  files: readonly File[],
+): AdminTranslationKey | null {
+  if (dataType !== "rate_card") {
+    if (files.length !== 1) return "upload.singleFile";
+    return hasAllowedExtension(files[0]) ? null : "upload.invalidType";
+  }
+
+  if (files.length === 1 && files[0].name.toLowerCase().endsWith(".xlsx")) return null;
+  if (files.length !== rateCardCsvFilenames.length) return "upload.rateCardFileSet";
+  const filenames = files.map((file) => file.name).sort();
+  return filenames.every((filename, index) => filename === rateCardCsvFilenames[index])
     ? null
-    : "upload.invalidType";
+    : "upload.rateCardFileSet";
+}
+
+function hasAllowedExtension(file: File): boolean {
+  const filename = file.name.toLowerCase();
+  return filename.endsWith(".xlsx") || filename.endsWith(".csv");
 }
 
 export function bootstrapLogin(
@@ -122,15 +144,15 @@ export function listRateCardVersions(
 
 export function uploadImport(
   dataType: OperationalImportDataType,
-  file: File,
+  files: readonly File[],
   signal?: AbortSignal,
   fetcher: Fetcher = fetch,
 ): Promise<ImportUploadResult> {
-  const errorKey = validateImportFile(file);
+  const errorKey = validateImportFiles(dataType, files);
   if (errorKey) return Promise.reject(new ImportAdminApiError(400, errorKey));
   const form = new FormData();
   form.set("templateVersion", "TMN-IMPORT-2");
-  form.append("files", file, file.name);
+  for (const file of files) form.append("files", file, file.name);
   return requestJson(`/api/imports?dataType=${dataType}`, {
     method: "POST",
     body: form,
