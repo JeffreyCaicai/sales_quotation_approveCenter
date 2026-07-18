@@ -1,4 +1,4 @@
-export type PublicationDataType = "building" | "rate_card";
+export type PublicationDataType = "building" | "package" | "rate_card";
 
 const BUILDING_REFERENCE_LOCK = "import-publish-building-references-v1";
 const TYPE_LOCK_PREFIX = "import-publish-data-type-v1";

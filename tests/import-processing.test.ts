@@ -3,9 +3,10 @@ import * as XLSX from "xlsx";
 
 import type { SessionUser } from "@/lib/auth/session";
 import { processImport, validateRateCardForProcessing, type ImportProcessingRepository } from "@/lib/imports/process-import";
-import type { RateCardImport } from "@/lib/imports/template-v2";
+import type { PackageImport, RateCardImport } from "@/lib/imports/template-v2";
 import type { BuildingDiffSnapshot } from "@/lib/imports/diff";
-import type { BuildingValidationSnapshot } from "@/lib/imports/validate";
+import type { PackageChange, PackageSnapshot } from "@/lib/imports/package-diff";
+import type { BuildingValidationSnapshot, PackageValidationSnapshot } from "@/lib/imports/validate";
 import { PROCESSING_STALE_AFTER_MS, assertPreliminaryDataType, processingClaimIsStale } from "@/lib/imports/processing-repository";
 
 const actor: SessionUser = {
@@ -29,6 +30,23 @@ const buildingBody = workbook({
   ],
 });
 
+const packageBody = workbook({
+  Instructions: [["Template Version", "TMN-IMPORT-2"]],
+  "Sales Packages": [
+    ["Package Code", "Package Name", "Operational Status"],
+    ["PKG-A", "Regional A", "active"],
+    ["", "Metro New", "inactive"],
+  ],
+});
+
+const reusedPackageNameBody = workbook({
+  Instructions: [["Template Version", "TMN-IMPORT-2"]],
+  "Sales Packages": [
+    ["Package Code", "Package Name", "Operational Status"],
+    ["", "Regional A", "active"],
+  ],
+});
+
 class Repository implements ImportProcessingRepository {
   state: "uploaded" | "validating" | "ready_to_publish" | "draft" | "validation_failed" | "published" = "uploaded";
   errors: unknown[] = [];
@@ -39,15 +57,17 @@ class Repository implements ImportProcessingRepository {
   claimToken = "2026-07-12T00:00:00.000Z";
   unsupported = false;
   stale = false;
+  dataType: "building" | "package" | "rate_card" = "building";
+  packages: PackageSnapshot[] = [];
 
   async claim() {
-    if (this.unsupported) return { kind: "unsupported" as const, dataType: "package" as const };
+    if (this.unsupported) return { kind: "unsupported" as const, dataType: "customer_brand" as const };
     if (this.state !== "uploaded" && !(this.state === "validating" && this.stale)) return { kind: "terminal" as const, state: this.state };
     this.state = "validating";
     return {
       kind: "claimed" as const,
       job: {
-        id: "job-1", dataType: "building" as const, templateVersion: this.templateVersion,
+        id: "job-1", dataType: this.dataType, templateVersion: this.templateVersion,
         claimToken: this.claimToken,
         files: [{ objectStorageKey: "key", originalFilename: "buildings.xlsx", checksum: "a".repeat(64) }],
       },
@@ -57,12 +77,17 @@ class Repository implements ImportProcessingRepository {
     return { buildings: [], controlledValues: { buildingTypes: ["Office"], gradeResources: ["Grade A"] } };
   }
   async rateCardSnapshot() { return { buildings: [], packages: [], versionCodes: [] }; }
+  async packageSnapshot(): Promise<PackageValidationSnapshot> { return { packages: this.packages }; }
   async completeBuilding(_jobId: string, _claimToken: string, normalized: unknown, changes: unknown[]) {
     this.normalized = normalized; this.changes = changes; this.state = "ready_to_publish";
   }
   async completeRateCard(_jobId: string, _claimToken: string, normalized: unknown) {
     void _jobId; void _claimToken;
     this.normalized = normalized; this.state = "draft";
+  }
+  async completePackage(_jobId: string, _claimToken: string, normalized: PackageImport, changes: PackageChange[]) {
+    void _jobId; void _claimToken;
+    this.normalized = normalized; this.changes = changes; this.state = "ready_to_publish";
   }
   async fail(_jobId: string, _claimToken: string, errors: unknown[]) { this.errors = errors; this.state = "validation_failed"; }
   async retry(_jobId: string, _claimToken: string) {
@@ -97,6 +122,46 @@ describe("production import processing", () => {
       key: "import.error.building_controlled_values_unavailable",
     })]);
     expect(repository.changes).toEqual([]);
+  });
+
+  test("passes the canonical existing package snapshot into validation and stages package differences", async () => {
+    const repository = new Repository();
+    repository.dataType = "package";
+    repository.packages = [{ packageCode: "PKG-A", packageName: "Regional A", status: "inactive" }];
+
+    await expect(processImport("job-1", actor, {
+      repository,
+      objectStore: { readImmutable: async () => packageBody },
+    })).resolves.toEqual({ jobId: "job-1", state: "ready_to_publish" });
+    expect(repository.changes).toEqual([
+      expect.objectContaining({ entityKey: "PKG-A", changeType: "modified" }),
+      expect.objectContaining({ entityKey: "row:3", changeType: "added" }),
+    ]);
+
+    repository.state = "uploaded";
+    repository.packages = [{ packageCode: "PKG-A", packageName: "Immutable Name", status: "inactive" }];
+    await expect(processImport("job-1", actor, {
+      repository,
+      objectStore: { readImmutable: async () => packageBody },
+    })).resolves.toEqual({ jobId: "job-1", state: "validation_failed" });
+    expect(repository.errors).toContainEqual(expect.objectContaining({
+      key: "import.error.package_name_immutable",
+    }));
+  });
+
+  test("rejects a blank-code package that reuses an existing stable Package Name", async () => {
+    const repository = new Repository();
+    repository.dataType = "package";
+    repository.packages = [{ packageCode: "PKG-A", packageName: "Regional A", status: "active" }];
+
+    await expect(processImport("job-1", actor, {
+      repository,
+      objectStore: { readImmutable: async () => reusedPackageNameBody },
+    })).resolves.toEqual({ jobId: "job-1", state: "validation_failed" });
+    expect(repository.errors).toContainEqual(expect.objectContaining({
+      key: "import.error.package_name_duplicate",
+      params: { packageName: "regional a" },
+    }));
   });
 
   test("is retry-safe after a terminal processing transition", async () => {

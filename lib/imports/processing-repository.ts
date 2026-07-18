@@ -4,9 +4,10 @@ import { getDb } from "@/db";
 import { buildingControlledValues, buildings, importChanges, importErrors, importFiles, importJobs, rateCardVersions, salesPackages, userPermissions, users } from "@/db/schema";
 import type { SessionUser } from "@/lib/auth/session";
 import type { ImportChange } from "@/lib/imports/diff";
+import type { PackageChange, PackageSnapshot } from "@/lib/imports/package-diff";
 import type { ImportValidationError } from "@/lib/imports/errors";
 import type { ImportProcessingRepository } from "@/lib/imports/process-import";
-import type { BuildingImport, RateCardImport } from "@/lib/imports/template-v2";
+import type { BuildingImport, PackageImport, RateCardImport } from "@/lib/imports/template-v2";
 import { ImportProcessingError } from "@/lib/imports/processing-errors";
 
 export const PROCESSING_STALE_AFTER_MS = 15 * 60 * 1000;
@@ -42,7 +43,7 @@ export class PostgresImportProcessingRepository implements ImportProcessingRepos
         .innerJoin(userPermissions, and(eq(userPermissions.userId, users.id), eq(userPermissions.permissionKey, permission)))
         .where(and(eq(users.id, actor.id), eq(users.status, "active"))).limit(1);
       if (!authorized) throw new ImportProcessingError("PERMISSION_DENIED", 403);
-      if (candidate.dataType !== "building" && candidate.dataType !== "rate_card") {
+      if (candidate.dataType !== "building" && candidate.dataType !== "package" && candidate.dataType !== "rate_card") {
         return { kind: "unsupported" as const, dataType: candidate.dataType };
       }
 
@@ -62,7 +63,7 @@ export class PostgresImportProcessingRepository implements ImportProcessingRepos
       if (!claimed) throw new ImportProcessingError("IMPORT_JOB_PROCESSING", 409);
       const files = await tx.select({ objectStorageKey: importFiles.objectStorageKey, originalFilename: importFiles.originalFilename, checksum: importFiles.checksum })
         .from(importFiles).where(eq(importFiles.importJobId, jobId));
-      return { kind: "claimed" as const, job: { id: job.id, dataType: job.dataType as "building" | "rate_card", templateVersion: job.templateVersion, claimToken: now.toISOString(), files } };
+      return { kind: "claimed" as const, job: { id: job.id, dataType: job.dataType as "building" | "package" | "rate_card", templateVersion: job.templateVersion, claimToken: now.toISOString(), files } };
     });
   }
 
@@ -89,6 +90,21 @@ export class PostgresImportProcessingRepository implements ImportProcessingRepos
     return { ...buildingSnapshot, packages: packages.map((item) => ({ ...item, status: item.status as "active" | "inactive" })), versionCodes: versions.map((item) => item.versionCode) };
   }
 
+  async packageSnapshot() {
+    const packages = await getDb().select({
+      packageCode: salesPackages.packageCode,
+      packageName: salesPackages.name,
+      status: salesPackages.status,
+    }).from(salesPackages);
+    return {
+      packages: packages.map((item): PackageSnapshot => ({
+        packageCode: item.packageCode.trim(),
+        packageName: item.packageName.trim(),
+        status: item.status as "active" | "inactive",
+      })),
+    };
+  }
+
   async completeBuilding(jobId: string, claimToken: string, normalized: BuildingImport, changes: ImportChange[]) {
     await getDb().transaction(async (tx) => {
       const [updated] = await tx.update(importJobs).set({ state: "ready_to_publish", normalizedPayload: normalized, totalRows: normalized.rows.length, validRows: normalized.rows.length, invalidRows: 0, failureSummary: null, updatedAt: new Date() })
@@ -97,6 +113,23 @@ export class PostgresImportProcessingRepository implements ImportProcessingRepos
       await tx.delete(importErrors).where(eq(importErrors.importJobId, jobId));
       await tx.delete(importChanges).where(eq(importChanges.importJobId, jobId));
       if (changes.length) await tx.insert(importChanges).values(changes.map((change) => ({ importJobId: jobId, entityType: "building", entityId: change.before?.id ?? null, changeType: change.type, beforeValue: change.before, afterValue: change.after })));
+    });
+  }
+
+  async completePackage(jobId: string, claimToken: string, normalized: PackageImport, changes: PackageChange[]) {
+    await getDb().transaction(async (tx) => {
+      const [updated] = await tx.update(importJobs).set({ state: "ready_to_publish", normalizedPayload: normalized, totalRows: normalized.rows.length, validRows: normalized.rows.length, invalidRows: 0, failureSummary: null, updatedAt: new Date() })
+        .where(and(eq(importJobs.id, jobId), eq(importJobs.state, "validating"), eq(importJobs.updatedAt, new Date(claimToken)))).returning({ id: importJobs.id });
+      if (!updated) throw new ImportProcessingError("IMPORT_JOB_PROCESSING", 409);
+      await tx.delete(importErrors).where(eq(importErrors.importJobId, jobId));
+      await tx.delete(importChanges).where(eq(importChanges.importJobId, jobId));
+      if (changes.length) await tx.insert(importChanges).values(changes.map((change) => ({
+        importJobId: jobId,
+        entityType: "package",
+        changeType: change.changeType,
+        beforeValue: change.before,
+        afterValue: { rowNumber: change.rowNumber, ...change.after },
+      })));
     });
   }
 

@@ -2,13 +2,14 @@ import type { SessionUser } from "@/lib/auth/session";
 import type { ImportDataType, ImportState } from "@/db/enums";
 import type { BuildingDiffSnapshot, ImportChange } from "@/lib/imports/diff";
 import { calculateBuildingDiff } from "@/lib/imports/diff";
+import { calculatePackageDiff, type PackageChange, type PackageSnapshot } from "@/lib/imports/package-diff";
 import type { ImportValidationError } from "@/lib/imports/errors";
 import { sortImportValidationErrors } from "@/lib/imports/errors";
 import { parseImportFiles } from "@/lib/imports/normalize";
 import { PostgresImportProcessingRepository } from "@/lib/imports/processing-repository";
 import { RateCardBuildingResolutionError, resolveRateCardBuildingReferences } from "@/lib/imports/resolve-rate-card-building-references";
-import { ImportParseError, type BuildingImport, type RateCardImport } from "@/lib/imports/template-v2";
-import { validateBuildingRows, type BuildingValidationSnapshot } from "@/lib/imports/validate";
+import { ImportParseError, type BuildingImport, type PackageImport, type RateCardImport } from "@/lib/imports/template-v2";
+import { validateBuildingRows, validatePackageRows, type BuildingValidationSnapshot, type PackageValidationSnapshot } from "@/lib/imports/validate";
 import { S3ObjectStore } from "@/lib/storage/s3-object-store";
 import { TEMPLATE_VERSION_V2 } from "@/lib/imports/template-v2";
 import { ImportProcessingError } from "@/lib/imports/processing-errors";
@@ -18,7 +19,7 @@ export { ImportProcessingError } from "@/lib/imports/processing-errors";
 
 export interface ProcessingJob {
   id: string;
-  dataType: Extract<ImportDataType, "building" | "rate_card">;
+  dataType: Extract<ImportDataType, "building" | "package" | "rate_card">;
   templateVersion: string;
   claimToken: string;
   files: Array<{ objectStorageKey: string; originalFilename: string; checksum: string }>;
@@ -29,15 +30,21 @@ export interface RateCardProcessingSnapshot extends BuildingValidationSnapshot {
   versionCodes: string[];
 }
 
+export interface PackageProcessingSnapshot extends PackageValidationSnapshot {
+  packages: PackageSnapshot[];
+}
+
 export interface ImportProcessingRepository {
   claim(jobId: string, actor: SessionUser, now: Date): Promise<
     | { kind: "claimed"; job: ProcessingJob }
     | { kind: "terminal"; state: ImportState }
-    | { kind: "unsupported"; dataType: Exclude<ImportDataType, "building" | "rate_card"> }
+    | { kind: "unsupported"; dataType: Exclude<ImportDataType, "building" | "package" | "rate_card"> }
   >;
   buildingSnapshot(): Promise<BuildingValidationSnapshot & BuildingDiffSnapshot>;
+  packageSnapshot(): Promise<PackageProcessingSnapshot>;
   rateCardSnapshot(): Promise<RateCardProcessingSnapshot>;
   completeBuilding(jobId: string, claimToken: string, normalized: BuildingImport, changes: ImportChange[]): Promise<void>;
+  completePackage(jobId: string, claimToken: string, normalized: PackageImport, changes: PackageChange[]): Promise<void>;
   completeRateCard(jobId: string, claimToken: string, normalized: RateCardImport): Promise<void>;
   fail(jobId: string, claimToken: string, errors: ImportValidationError[]): Promise<void>;
   retry(jobId: string, claimToken: string, failureSummary: string): Promise<void>;
@@ -95,6 +102,19 @@ export async function processImport(
       return { jobId, state: "ready_to_publish" };
     }
 
+    if (job.dataType === "package") {
+      const normalized = await parseImportFiles("package", files);
+      const snapshot = await dependencies.repository.packageSnapshot();
+      const errors = [
+        ...validatePackageRows(normalized.rows, snapshot),
+        ...validatePackageMasterNameIdentity(normalized, snapshot),
+      ];
+      if (errors.length > 0) return fail(jobId, job.claimToken, errors, dependencies.repository);
+      const changes = calculatePackageDiff(normalized.rows, snapshot.packages);
+      await dependencies.repository.completePackage(jobId, job.claimToken, normalized, changes);
+      return { jobId, state: "ready_to_publish" };
+    }
+
     const normalized = await parseImportFiles("rate_card", files);
     const snapshot = await dependencies.repository.rateCardSnapshot();
     const errors = validateRateCardForProcessing(normalized, snapshot);
@@ -111,6 +131,36 @@ export async function processImport(
     );
     return { jobId, state: "uploaded" };
   }
+}
+
+function validatePackageMasterNameIdentity(
+  input: PackageImport,
+  snapshot: PackageProcessingSnapshot,
+): ImportValidationError[] {
+  const codesByName = new Map<string, Set<string>>();
+  for (const item of snapshot.packages) {
+    const name = normalizePackageName(item.packageName);
+    const codes = codesByName.get(name) ?? new Set<string>();
+    codes.add(item.packageCode.trim());
+    codesByName.set(name, codes);
+  }
+  return input.rows.flatMap((row) => {
+    const name = normalizePackageName(row.packageName);
+    const packageCode = row.packageCode?.trim() || null;
+    const owners = codesByName.get(name);
+    if (!owners || (packageCode !== null && owners.size === 1 && owners.has(packageCode))) return [];
+    return [{
+      sheet: "Sales Packages",
+      rowNumber: row.rowNumber,
+      column: "Package Name",
+      key: "import.error.package_name_duplicate" as const,
+      params: { packageName: name },
+    }];
+  });
+}
+
+function normalizePackageName(value: string): string {
+  return value.trim().toLocaleLowerCase("en-US");
 }
 
 async function fail(

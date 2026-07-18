@@ -17,6 +17,7 @@ import type {
   NormalizedCurrentBuilding,
 } from "@/lib/imports/diff";
 import { publishRateCardImport } from "@/lib/imports/publish-rate-card";
+import { publishPackageImport } from "@/lib/imports/publish-package";
 import { publicationLockIdentities } from "@/lib/imports/publication-locks";
 
 const BUILDING_IMPORT_PERMISSION = "data.import.building";
@@ -25,6 +26,7 @@ export interface PublicationResult {
   jobId: string;
   state: "published";
   publishedChanges: number;
+  generatedIdentifiers?: Array<{ rowNumber: number; identifier: string }>;
 }
 
 export function orderBuildingChangesForLocking(changes: readonly ImportChange[]): ImportChange[] {
@@ -60,6 +62,8 @@ export async function publishImport(
   if (!candidate) throw new PublicationError("IMPORT_JOB_NOT_FOUND", 404);
   return candidate.dataType === "rate_card"
     ? publishRateCardImport(jobId, actor)
+    : candidate.dataType === "package"
+      ? publishPackageImport(jobId, actor)
     : publishBuildingImport(jobId, actor);
 }
 
@@ -355,10 +359,11 @@ function normalizedAfter(after: NormalizedBuilding): NormalizedBuilding {
 
 function toImportChange(row: {
   entityId: string | null;
-  changeType: "added" | "modified" | "deactivated" | "unchanged";
+  changeType: "added" | "modified" | "deactivated" | "unchanged" | "removed";
   beforeValue: unknown;
   afterValue: unknown;
 }): ImportChange {
+  if (row.changeType === "removed") invalidChange();
   const after = parseNormalizedBuilding(row.afterValue);
   const entityKey = after.irisBuildingId;
   if (row.changeType === "added") {
