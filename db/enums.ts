@@ -26,7 +26,9 @@ export const changeTypes = [
   "modified",
   "deactivated",
   "unchanged",
+  "removed",
 ] as const;
+export const rateCardVersionStatuses = ["current", "historical"] as const;
 export const filePurposes = [
   "original",
   "validation_report",
@@ -36,3 +38,4 @@ export const filePurposes = [
 export type ImportDataType = (typeof importDataTypes)[number];
 export type ImportState = (typeof importStates)[number];
 export type ImportSourceType = (typeof importSourceTypes)[number];
+export type RateCardVersionStatus = (typeof rateCardVersionStatuses)[number];

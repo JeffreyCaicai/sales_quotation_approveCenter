@@ -22,10 +22,15 @@ import {
   filePurposes,
   importDataTypes,
   importStates,
+  rateCardVersionStatuses,
 } from "./enums";
 
 export const importDataTypeEnum = pgEnum("import_data_type", importDataTypes);
 export const importStateEnum = pgEnum("import_state", importStates);
+export const rateCardVersionStatusEnum = pgEnum(
+  "rate_card_version_status",
+  rateCardVersionStatuses,
+);
 export const entityStatusEnum = pgEnum("entity_status", entityStatuses);
 export const changeTypeEnum = pgEnum("change_type", changeTypes);
 export const filePurposeEnum = pgEnum("file_purpose", filePurposes);
@@ -247,9 +252,10 @@ export const rateCardVersions = pgTable(
   {
     id: id(),
     versionCode: text("version_code").notNull().unique(),
-    effectiveAt: timestamp("effective_at", { withTimezone: true }).notNull(),
     currency: text("currency").notNull().default("IDR"),
-    status: importStateEnum("status").notNull().default("draft"),
+    status: rateCardVersionStatusEnum("status")
+      .notNull()
+      .default("historical"),
     importJobId: uuid("import_job_id")
       .notNull()
       .references(() => importJobs.id),
@@ -261,7 +267,6 @@ export const rateCardVersions = pgTable(
       .notNull()
       .defaultNow(),
     publishedAt: timestamp("published_at", { withTimezone: true }),
-    activatedAt: timestamp("activated_at", { withTimezone: true }),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },

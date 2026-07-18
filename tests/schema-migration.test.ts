@@ -82,7 +82,7 @@ async function applyMigrations(
   }
 }
 
-async function seedDraftRateCard(db: PGlite) {
+async function seedHistoricalRateCard(db: PGlite) {
   const users = await db.query<{ id: string }>(`
     insert into users (email, password_hash, display_name)
     values
@@ -95,45 +95,18 @@ async function seedDraftRateCard(db: PGlite) {
     values ('rate_card', 'v1', 'rate-card-checksum', '${users.rows[0].id}')
     returning id
   `);
-  const buildings = await db.query<{ id: string }>(`
-    insert into buildings (iris_building_id, name, address)
-    values ('BLD-001', 'Building One', 'Jakarta'),
-           ('BLD-002', 'Building Two', 'Jakarta')
-    returning id
-  `);
-  const packages = await db.query<{ id: string }>(`
-    insert into sales_packages (package_code, name)
-    values ('PKG-001', 'Package One'), ('PKG-002', 'Package Two')
-    returning id
-  `);
   const version = await db.query<{ id: string }>(`
     insert into rate_card_versions (
-      version_code, effective_at, import_job_id, uploaded_by
+      version_code, status, import_job_id, uploaded_by
     ) values (
-      'RC-001', '2026-08-01T00:00:00+07:00',
+      'RC-001', 'historical',
       '${importJob.rows[0].id}', '${users.rows[0].id}'
     ) returning id
-  `);
-
-  await db.exec(`
-    insert into rate_card_building_prices (
-      rate_card_version_id, building_id, price_idr
-    ) values ('${version.rows[0].id}', '${buildings.rows[0].id}', 1000000);
-    insert into rate_card_package_configs (
-      rate_card_version_id, package_id, price_idr
-    ) values ('${version.rows[0].id}', '${packages.rows[0].id}', 1500000);
-    insert into rate_card_package_buildings (
-      rate_card_version_id, package_id, building_id
-    ) values (
-      '${version.rows[0].id}', '${packages.rows[0].id}', '${buildings.rows[0].id}'
-    );
   `);
 
   return {
     userIds: users.rows.map((row) => row.id),
     importJobId: importJob.rows[0].id,
-    buildingIds: buildings.rows.map((row) => row.id),
-    packageIds: packages.rows.map((row) => row.id),
     versionId: version.rows[0].id,
   };
 }
@@ -395,6 +368,61 @@ describe("generated PostgreSQL migration", () => {
     );
   });
 
+  test("migrates Rate Card versions to one current version and historical records", async () => {
+    db = new PGlite();
+    await applyMigrations(db);
+
+    const columns = await db.query<{ column_name: string }>(`
+      select column_name from information_schema.columns
+      where table_name = 'rate_card_versions'
+    `);
+    expect(columns.rows.map((row) => row.column_name)).not.toContain("effective_at");
+    expect(columns.rows.map((row) => row.column_name)).not.toContain("activated_at");
+
+    const statuses = await db.query<{ enumlabel: string }>(`
+      select enumlabel
+      from pg_enum
+      join pg_type on pg_type.oid = pg_enum.enumtypid
+      where pg_type.typname = 'rate_card_version_status'
+      order by enumsortorder
+    `);
+    expect(statuses.rows.map((row) => row.enumlabel)).toEqual([
+      "current",
+      "historical",
+    ]);
+
+    const user = await db.query<{ id: string }>(`
+      insert into users (email, password_hash, display_name)
+      values ('rate-card-lifecycle@example.com', 'test-only-hash', 'Rate Card Lifecycle')
+      returning id
+    `);
+    const jobs = await db.query<{ id: string }>(`
+      insert into import_jobs (data_type, template_version, checksum, uploaded_by)
+      values
+        ('rate_card', 'v1', '${"1".repeat(64)}', '${user.rows[0].id}'),
+        ('rate_card', 'v1', '${"2".repeat(64)}', '${user.rows[0].id}')
+      returning id
+    `);
+    const userId = user.rows[0].id;
+    const [jobId, secondJobId] = jobs.rows.map((row) => row.id);
+
+    await db.exec(`
+      insert into rate_card_versions
+        (version_code, currency, status, import_job_id, uploaded_by, uploaded_at)
+      values ('RC-ONE', 'IDR', 'current', '${jobId}', '${userId}', now())
+    `);
+    await expect(db.exec(`
+      insert into rate_card_versions
+        (version_code, currency, status, import_job_id, uploaded_by, uploaded_at)
+      values ('RC-TWO', 'IDR', 'current', '${secondJobId}', '${userId}', now())
+    `)).rejects.toThrow();
+    await expect(db.exec(`
+      insert into rate_card_versions
+        (version_code, currency, status, import_job_id, uploaded_by, uploaded_at)
+      values ('RC-INVALID', 'IDR', 'draft', '${secondJobId}', '${userId}', now())
+    `)).rejects.toThrow();
+  });
+
   test("creates the Stage 2 tables, constraints, and indexes", async () => {
     db = new PGlite();
     await applyMigrations(db);
@@ -492,7 +520,7 @@ describe("generated PostgreSQL migration", () => {
     ).rejects.toThrow(/users\.email is immutable/);
   });
 
-  test("normalizes controlled-value codes and reproduces the published-parent child guard", async () => {
+  test("normalizes controlled-value codes and creates historical Rate Card records", async () => {
     db = new PGlite();
     await applyMigrations(db);
     const controlled = await db.query<{ value: string }>(`
@@ -505,12 +533,11 @@ describe("generated PostgreSQL migration", () => {
       values ('grade_resource', E' \t ')
     `)).rejects.toThrow(/building_controlled_values_value_not_blank_check/i);
 
-    const seed = await seedDraftRateCard(db);
-    await db.query(`update rate_card_versions set status = 'published' where id = '${seed.versionId}'`);
-    await expect(db.query(`
-      insert into rate_card_building_prices (rate_card_version_id, building_id, price_idr)
-      values ('${seed.versionId}', '${seed.buildingIds[1]}', 2000000)
-    `)).rejects.toThrow(/published rate card child rows are immutable/i);
+    const seed = await seedHistoricalRateCard(db);
+    const version = await db.query<{ status: string }>(`
+      select status from rate_card_versions where id = '${seed.versionId}'
+    `);
+    expect(version.rows[0].status).toBe("historical");
   });
 
   test("normalizes existing controlled values before adding the trimmed constraint", async () => {
@@ -532,122 +559,52 @@ describe("generated PostgreSQL migration", () => {
   test("rejects a Rate Card currency other than IDR", async () => {
     db = new PGlite();
     await applyMigrations(db);
-    const seed = await seedDraftRateCard(db);
+    const seed = await seedHistoricalRateCard(db);
 
     await expect(
       db.query(`
         insert into rate_card_versions (
-          version_code, effective_at, currency, import_job_id, uploaded_by
+          version_code, currency, import_job_id, uploaded_by
         ) values (
-          'RC-USD', '2026-08-01T00:00:00+07:00', 'USD',
+          'RC-USD', 'USD',
           '${seed.importJobId}', '${seed.userIds[0]}'
         )
       `),
     ).rejects.toThrow(/rate_card_versions_currency_idr_check/);
   });
 
-  test("freezes published Rate Card data and enforces lifecycle transitions", async () => {
+  test("migrates the newest published Rate Card to current", async () => {
     db = new PGlite();
-    await applyMigrations(db);
-    const seed = await seedDraftRateCard(db);
-
-    await db.exec(`
-      update rate_card_versions
-      set status = 'published',
-          published_by = '${seed.userIds[0]}',
-          published_at = now()
-      where id = '${seed.versionId}'
+    await applyMigrations(db, 8);
+    const user = await db.query<{ id: string }>(`
+      insert into users (email, password_hash, display_name)
+      values ('rate-card-migration@example.com', 'test-only-hash', 'Rate Card Migration')
+      returning id
     `);
-
-    await expect(
-      db.exec(`
-        update rate_card_versions
-        set version_code = 'RC-CHANGED'
-        where id = '${seed.versionId}'
-      `),
-    ).rejects.toThrow(/published rate card version business fields are immutable/);
-    await expect(
-      db.exec(`
-        update rate_card_versions
-        set uploaded_by = '${seed.userIds[1]}'
-        where id = '${seed.versionId}'
-      `),
-    ).rejects.toThrow(/published rate card version business fields are immutable/);
-    await expect(
-      db.exec(`
-        update rate_card_versions
-        set published_by = '${seed.userIds[1]}'
-        where id = '${seed.versionId}'
-      `),
-    ).rejects.toThrow(/published rate card version business fields are immutable/);
-
-    await expect(
-      db.exec(`
-        update rate_card_building_prices
-        set price_idr = 2000000
-        where rate_card_version_id = '${seed.versionId}'
-      `),
-    ).rejects.toThrow(/published rate card child rows are immutable/);
-    await expect(
-      db.exec(`
-        delete from rate_card_package_configs
-        where rate_card_version_id = '${seed.versionId}'
-      `),
-    ).rejects.toThrow(/published rate card child rows are immutable/);
-    await expect(
-      db.exec(`
-        insert into rate_card_package_buildings (
-          rate_card_version_id, package_id, building_id
-        ) values (
-          '${seed.versionId}', '${seed.packageIds[0]}', '${seed.buildingIds[1]}'
-        )
-      `),
-    ).rejects.toThrow(/published rate card child rows are immutable/);
-
-    const emptyVersion = await db.query<{ id: string }>(`
+    const job = await db.query<{ id: string }>(`
+      insert into import_jobs (data_type, template_version, checksum, uploaded_by)
+      values ('rate_card', 'v1', '${"3".repeat(64)}', '${user.rows[0].id}')
+      returning id
+    `);
+    await db.exec(`
       insert into rate_card_versions (
-        version_code, effective_at, import_job_id, uploaded_by
-      ) values (
-        'RC-EMPTY', '2026-09-01T00:00:00+07:00',
-        '${seed.importJobId}', '${seed.userIds[0]}'
-      ) returning id
+        version_code, effective_at, status, import_job_id, uploaded_by, published_at
+      ) values
+        ('RC-OLDER', '2026-07-01T00:00:00Z', 'published', '${job.rows[0].id}', '${user.rows[0].id}', '2026-07-01T00:00:00Z'),
+        ('RC-NEWEST', '2026-07-02T00:00:00Z', 'published', '${job.rows[0].id}', '${user.rows[0].id}', '2026-07-02T00:00:00Z'),
+        ('RC-UNPUBLISHED', '2026-07-03T00:00:00Z', 'draft', '${job.rows[0].id}', '${user.rows[0].id}', null)
     `);
-    await db.exec(`
-      update rate_card_versions
-      set status = 'published', published_at = now()
-      where id = '${emptyVersion.rows[0].id}'
-    `);
-    await expect(
-      db.exec(`
-        delete from rate_card_versions where id = '${emptyVersion.rows[0].id}'
-      `),
-    ).rejects.toThrow(/published rate card version cannot be deleted/);
+    await applyMigrations(db, 9, 9);
 
-    await expect(
-      db.exec(`
-        update rate_card_versions
-        set status = 'superseded'
-        where id = '${seed.versionId}'
-      `),
-    ).rejects.toThrow(/invalid rate card lifecycle transition/);
-
-    await db.exec(`
-      update rate_card_versions
-      set status = 'active', activated_at = now()
-      where id = '${seed.versionId}';
-      update rate_card_versions
-      set status = 'superseded'
-      where id = '${seed.versionId}';
-      update rate_card_versions
-      set status = 'active', activated_at = now()
-      where id = '${seed.versionId}';
-      update rate_card_versions
-      set status = 'rolled_back'
-      where id = '${seed.versionId}';
+    const versions = await db.query<{ version_code: string; status: string }>(`
+      select version_code, status
+      from rate_card_versions
+      order by version_code
     `);
-    const finalState = await db.query<{ status: string }>(`
-      select status from rate_card_versions where id = '${seed.versionId}'
-    `);
-    expect(finalState.rows[0].status).toBe("rolled_back");
+    expect(versions.rows).toEqual([
+      { version_code: "RC-NEWEST", status: "current" },
+      { version_code: "RC-OLDER", status: "historical" },
+      { version_code: "RC-UNPUBLISHED", status: "historical" },
+    ]);
   });
 });
