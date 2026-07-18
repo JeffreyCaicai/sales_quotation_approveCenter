@@ -423,6 +423,75 @@ describe("generated PostgreSQL migration", () => {
     `)).rejects.toThrow();
   });
 
+  test("allows Current Rate Card assembly and freezes its Historical child rows", async () => {
+    db = new PGlite();
+    await applyMigrations(db);
+
+    const user = await db.query<{ id: string }>(`
+      insert into users (email, password_hash, display_name)
+      values ('rate-card-assembly@example.com', 'test-only-hash', 'Rate Card Assembly')
+      returning id
+    `);
+    const job = await db.query<{ id: string }>(`
+      insert into import_jobs (data_type, template_version, checksum, uploaded_by)
+      values ('rate_card', 'v1', '${"4".repeat(64)}', '${user.rows[0].id}')
+      returning id
+    `);
+    const building = await db.query<{ id: string }>(`
+      insert into buildings (iris_building_id, name, address)
+      values ('RC-ASSEMBLY-BUILDING', 'Assembly Building', 'Jakarta')
+      returning id
+    `);
+    const salesPackage = await db.query<{ id: string }>(`
+      insert into sales_packages (package_code, name)
+      values ('RC-ASSEMBLY-PACKAGE', 'Assembly Package')
+      returning id
+    `);
+    const version = await db.query<{ id: string }>(`
+      insert into rate_card_versions (
+        version_code, status, import_job_id, uploaded_by, published_at
+      ) values (
+        'RC-ASSEMBLY', 'current', '${job.rows[0].id}', '${user.rows[0].id}', now()
+      ) returning id
+    `);
+
+    await expect(db.exec(`
+      insert into rate_card_building_prices (
+        rate_card_version_id, building_id, price_idr
+      ) values ('${version.rows[0].id}', '${building.rows[0].id}', 1000000)
+    `)).resolves.toBeDefined();
+    await expect(db.exec(`
+      insert into rate_card_package_configs (
+        rate_card_version_id, package_id, price_idr
+      ) values ('${version.rows[0].id}', '${salesPackage.rows[0].id}', 1500000)
+    `)).resolves.toBeDefined();
+    await expect(db.exec(`
+      insert into rate_card_package_buildings (
+        rate_card_version_id, package_id, building_id
+      ) values (
+        '${version.rows[0].id}', '${salesPackage.rows[0].id}', '${building.rows[0].id}'
+      )
+    `)).resolves.toBeDefined();
+
+    await expect(db.exec(`
+      update rate_card_versions set status = 'historical'
+      where id = '${version.rows[0].id}'
+    `)).resolves.toBeDefined();
+
+    await expect(db.exec(`
+      update rate_card_building_prices set price_idr = 2000000
+      where rate_card_version_id = '${version.rows[0].id}'
+    `)).rejects.toThrow(/historical rate card child rows are immutable/i);
+    await expect(db.exec(`
+      delete from rate_card_package_configs
+      where rate_card_version_id = '${version.rows[0].id}'
+    `)).rejects.toThrow(/historical rate card child rows are immutable/i);
+    await expect(db.exec(`
+      delete from rate_card_package_buildings
+      where rate_card_version_id = '${version.rows[0].id}'
+    `)).rejects.toThrow(/historical rate card child rows are immutable/i);
+  });
+
   test("creates the Stage 2 tables, constraints, and indexes", async () => {
     db = new PGlite();
     await applyMigrations(db);
