@@ -16,6 +16,12 @@ export async function POST(
     return NextResponse.json(await publishImport(jobId, actor));
   } catch (error) {
     if (error instanceof AuthError || error instanceof PublicationError || error instanceof RateCardPublicationError) {
+      if (error.key === "IMPORT_CHANGE_STALE") {
+        return NextResponse.json(
+          { error: error.key, reprocessRequired: true },
+          { status: 409 },
+        );
+      }
       return NextResponse.json({ error: error.key }, { status: error.status });
     }
     return NextResponse.json({ error: "IMPORT_PUBLISH_FAILED" }, { status: 500 });

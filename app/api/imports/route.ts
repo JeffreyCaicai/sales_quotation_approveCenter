@@ -1,8 +1,12 @@
 import { NextResponse } from "next/server";
 
-import type { ImportDataType } from "@/db/enums";
 import { AuthError, requirePermission } from "@/lib/auth/session";
-import { ImportError, parseImportTemplateVersion, permissionForDataType } from "@/lib/imports/contracts";
+import {
+  ImportError,
+  parseImportTemplateVersion,
+  permissionForActiveImportDataType,
+  type ActiveImportDataType,
+} from "@/lib/imports/contracts";
 import { createImportJob } from "@/lib/imports/create-job";
 import { parseImportMultipart } from "@/lib/imports/multipart";
 
@@ -23,12 +27,12 @@ function errorResponse(error: unknown): NextResponse {
 export async function POST(request: Request): Promise<NextResponse> {
   try {
     const rawDataType = new URL(request.url).searchParams.get("dataType");
-    const permission = permissionForDataType(rawDataType);
+    const permission = permissionForActiveImportDataType(rawDataType);
     const actor = await requirePermission(permission);
     const { templateVersion, files } = await parseImportMultipart(request);
     const result = await createImportJob(
       {
-        dataType: rawDataType as ImportDataType,
+        dataType: rawDataType as ActiveImportDataType,
         templateVersion: parseImportTemplateVersion(templateVersion),
         files,
       },

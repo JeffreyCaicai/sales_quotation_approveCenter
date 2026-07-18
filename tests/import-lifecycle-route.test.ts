@@ -2,6 +2,8 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 
 import { AuthError } from "@/lib/auth/session";
 import { ImportProcessingError } from "@/lib/imports/process-import";
+import { PublicationError } from "@/lib/imports/publish";
+import { RateCardPublicationError } from "@/lib/imports/publish-rate-card";
 
 const mocks = vi.hoisted(() => ({
   requireSession: vi.fn(),
@@ -25,42 +27,106 @@ vi.mock("@/lib/imports/publish", async (importActual) => ({
 import { POST as processRoute } from "@/app/api/imports/[jobId]/process/route";
 import { POST as publishRoute } from "@/app/api/imports/[jobId]/publish/route";
 
-const context = { params: Promise.resolve({ jobId: "job-1" }) };
+function context(jobId = "job-1") {
+  return { params: Promise.resolve({ jobId }) };
+}
 
 describe("import lifecycle route authorization", () => {
   beforeEach(() => vi.clearAllMocks());
 
   test("requires an authenticated session before processing", async () => {
     mocks.requireSession.mockRejectedValue(new AuthError(401, "AUTH_REQUIRED"));
-    const response = await processRoute(new Request("https://test/api/imports/job-1/process", { method: "POST" }), context);
+    const response = await processRoute(new Request("https://test/api/imports/job-1/process", { method: "POST" }), context());
     expect(response.status).toBe(401);
     expect(mocks.processImport).not.toHaveBeenCalled();
   });
 
-  test("passes the authenticated actor to state-checked processing", async () => {
-    const actor = { id: "actor" };
-    mocks.requireSession.mockResolvedValue(actor);
-    mocks.processImport.mockResolvedValue({ jobId: "job-1", state: "draft" });
-    const response = await processRoute(new Request("https://test/api/imports/job-1/process", { method: "POST" }), context);
-    expect(mocks.processImport).toHaveBeenCalledWith("job-1", actor);
-    await expect(response.json()).resolves.toEqual({ jobId: "job-1", state: "draft" });
+  test.each(["building", "package", "rate_card"] as const)(
+    "dispatches authenticated %s processing to the state-checked processor",
+    async (dataType) => {
+      const actor = { id: "actor" };
+      mocks.requireSession.mockResolvedValue(actor);
+      const jobId = `job-${dataType}`;
+      const state = dataType === "rate_card" ? "draft" : "ready_to_publish";
+      mocks.processImport.mockResolvedValue({ jobId, state });
+      const response = await processRoute(
+        new Request(`https://test/api/imports/${jobId}/process`, { method: "POST" }),
+        context(jobId),
+      );
+      expect(mocks.processImport).toHaveBeenCalledWith(jobId, actor);
+      await expect(response.json()).resolves.toEqual({ jobId, state });
+    },
+  );
+
+  test("maps a server-side processing permission denial to 403", async () => {
+    mocks.requireSession.mockResolvedValue({ id: "actor" });
+    mocks.processImport.mockRejectedValue(new ImportProcessingError("PERMISSION_DENIED", 403));
+    const response = await processRoute(new Request("https://test/api/imports/job-package/process", { method: "POST" }), context("job-package"));
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toEqual({ error: "PERMISSION_DENIED" });
   });
 
   test("returns not implemented for an authenticated unsupported processor", async () => {
     mocks.requireSession.mockResolvedValue({ id: "actor" });
     mocks.processImport.mockRejectedValue(new ImportProcessingError("IMPORT_PROCESSOR_NOT_IMPLEMENTED", 501));
-    const response = await processRoute(new Request("https://test/api/imports/job-1/process", { method: "POST" }), context);
+    const response = await processRoute(new Request("https://test/api/imports/job-1/process", { method: "POST" }), context());
     expect(response.status).toBe(501);
     await expect(response.json()).resolves.toEqual({ error: "IMPORT_PROCESSOR_NOT_IMPLEMENTED" });
   });
 
-  test("publishes only through the authenticated explicit endpoint", async () => {
-    const actor = { id: "actor" };
-    mocks.requireSession.mockResolvedValue(actor);
-    mocks.publishImport.mockResolvedValue({ jobId: "job-1", state: "published", publishedChanges: 4 });
-    const response = await publishRoute(new Request("https://test/api/imports/job-1/publish", { method: "POST" }), context);
-    expect(mocks.publishImport).toHaveBeenCalledWith("job-1", actor);
-    await expect(response.json()).resolves.toMatchObject({ state: "published" });
+  test.each(["building", "package", "rate_card"] as const)(
+    "dispatches authenticated %s publication to its server-authorized publisher",
+    async (dataType) => {
+      const actor = { id: "actor" };
+      mocks.requireSession.mockResolvedValue(actor);
+      const jobId = `job-${dataType}`;
+      mocks.publishImport.mockResolvedValue({ jobId, state: "published", publishedChanges: 4 });
+      const response = await publishRoute(
+        new Request(`https://test/api/imports/${jobId}/publish`, { method: "POST" }),
+        context(jobId),
+      );
+      expect(mocks.publishImport).toHaveBeenCalledWith(jobId, actor);
+      await expect(response.json()).resolves.toMatchObject({ state: "published" });
+    },
+  );
+
+  test.each([
+    ["building", new PublicationError("PERMISSION_DENIED", 403)],
+    ["package", new PublicationError("PERMISSION_DENIED", 403)],
+    ["rate_card", new RateCardPublicationError("PERMISSION_DENIED", 403)],
+  ] as const)("maps a server-side %s publish permission denial to 403", async (dataType, failure) => {
+    mocks.requireSession.mockResolvedValue({ id: "actor" });
+    mocks.publishImport.mockRejectedValue(failure);
+    const response = await publishRoute(new Request(`https://test/api/imports/job-${dataType}/publish`, { method: "POST" }), context(`job-${dataType}`));
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toEqual({ error: "PERMISSION_DENIED" });
+  });
+
+  test.each([
+    ["package", new PublicationError("IMPORT_CHANGE_STALE", 409)],
+    ["rate_card", new RateCardPublicationError("IMPORT_CHANGE_STALE", 409)],
+  ] as const)("marks a stale %s preview as requiring reprocessing", async (dataType, failure) => {
+    mocks.requireSession.mockResolvedValue({ id: "actor" });
+    mocks.publishImport.mockRejectedValue(failure);
+    const response = await publishRoute(new Request(`https://test/api/imports/job-${dataType}/publish`, { method: "POST" }), context(`job-${dataType}`));
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({
+      error: "IMPORT_CHANGE_STALE",
+      reprocessRequired: true,
+    });
+  });
+
+  test.each([
+    [new PublicationError("IMPORT_JOB_NOT_FOUND", 404), 404, "IMPORT_JOB_NOT_FOUND"],
+    [new PublicationError("IMPORT_JOB_NOT_READY", 409), 409, "IMPORT_JOB_NOT_READY"],
+    [new RateCardPublicationError("IMPORT_DUPLICATE_PUBLISHED", 409), 409, "IMPORT_DUPLICATE_PUBLISHED"],
+    [new RateCardPublicationError("IMPORT_RATE_CARD_BUILDING_REFERENCE_INVALID", 409), 409, "IMPORT_RATE_CARD_BUILDING_REFERENCE_INVALID"],
+  ] as const)("preserves stable publication error mapping", async (failure, status, key) => {
+    mocks.requireSession.mockResolvedValue({ id: "actor" });
+    mocks.publishImport.mockRejectedValue(failure);
+    const response = await publishRoute(new Request("https://test/api/imports/job-1/publish", { method: "POST" }), context());
+    expect(response.status).toBe(status);
+    await expect(response.json()).resolves.toEqual({ error: key });
   });
 
   test.each([new Error("database password leaked"), { secret: "raw non-error" }])(
@@ -68,7 +134,7 @@ describe("import lifecycle route authorization", () => {
     async (failure) => {
       mocks.requireSession.mockResolvedValue({ id: "actor" });
       mocks.processImport.mockRejectedValue(failure);
-      const response = await processRoute(new Request("https://test/api/imports/job-1/process", { method: "POST" }), context);
+      const response = await processRoute(new Request("https://test/api/imports/job-1/process", { method: "POST" }), context());
       expect(response.status).toBe(500);
       await expect(response.json()).resolves.toEqual({ error: "IMPORT_PROCESS_FAILED" });
     },

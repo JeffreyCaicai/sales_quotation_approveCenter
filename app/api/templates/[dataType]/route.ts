@@ -1,7 +1,10 @@
 import { NextResponse } from "next/server";
 
 import { AuthError, requirePermission } from "@/lib/auth/session";
-import { permissionForDataType } from "@/lib/imports/contracts";
+import {
+  importPermissionByDataType,
+  type ActiveImportDataType,
+} from "@/lib/imports/contracts";
 import { generateImportTemplate } from "@/lib/imports/generate-template";
 import { TEMPLATE_VERSION_V2 } from "@/lib/imports/template-v2";
 
@@ -9,6 +12,7 @@ export const runtime = "nodejs";
 
 const filenames = {
   building: "02_Buildings_Template.xlsx",
+  package: "03_Sales_Packages_Template.xlsx",
   rate_card: "04_Rate_Card_Template.xlsx",
 } as const;
 
@@ -20,17 +24,18 @@ export async function GET(
 ): Promise<Response> {
   try {
     const { dataType } = await context.params;
-    if (dataType !== "building" && dataType !== "rate_card") {
+    if (!Object.hasOwn(importPermissionByDataType, dataType)) {
       return NextResponse.json({ error: "TEMPLATE_NOT_FOUND" }, { status: 404 });
     }
-    await requirePermission(permissionForDataType(dataType));
-    const buffer = await generateImportTemplate(dataType, TEMPLATE_VERSION_V2);
+    const activeDataType = dataType as ActiveImportDataType;
+    await requirePermission(importPermissionByDataType[activeDataType]);
+    const buffer = await generateImportTemplate(activeDataType, TEMPLATE_VERSION_V2);
     return new Response(new Uint8Array(buffer), {
       status: 200,
       headers: {
         "Content-Type":
           "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        "Content-Disposition": `attachment; filename="${filenames[dataType]}"`,
+        "Content-Disposition": `attachment; filename="${filenames[activeDataType]}"`,
         "Cache-Control": "private, no-store",
       },
     });

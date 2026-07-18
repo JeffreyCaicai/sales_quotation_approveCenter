@@ -149,11 +149,24 @@ export interface ImportJobDependencies {
   randomUUID: () => string;
 }
 
-const permissionByDataType = {
-  customer_brand: "data.import.customer_brand",
+export const importPermissionByDataType = {
   building: "data.import.building",
   package: "data.import.package",
   rate_card: "rate_card.upload",
+} as const satisfies Record<Exclude<ImportDataType, "customer_brand">, Permission>;
+
+export type ActiveImportDataType = keyof typeof importPermissionByDataType;
+
+export function permissionForActiveImportDataType(value: unknown): Permission {
+  if (typeof value !== "string" || !Object.hasOwn(importPermissionByDataType, value)) {
+    throw new ImportError(400, "IMPORT_DATA_TYPE_INVALID");
+  }
+  return importPermissionByDataType[value as ActiveImportDataType];
+}
+
+const permissionByDataType = {
+  customer_brand: "data.import.customer_brand",
+  ...importPermissionByDataType,
 } as const satisfies Record<ImportDataType, Permission>;
 
 export function permissionForDataType(value: unknown): Permission {

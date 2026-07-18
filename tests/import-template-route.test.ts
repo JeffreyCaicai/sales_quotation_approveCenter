@@ -54,20 +54,24 @@ describe("formal template download route", () => {
     expect(mocks.generateImportTemplate).not.toHaveBeenCalled();
   });
 
-  test("returns a safe 404 for an unknown template without authenticating", async () => {
-    const response = await GET(
-      new Request("https://quotation.test/api/templates/../../secrets"),
-      context("../../secrets"),
-    );
+  test.each(["customer_brand", "constructor", "../../secrets"])(
+    "returns a safe 404 for the disabled or unknown %s template without authenticating",
+    async (dataType) => {
+      const response = await GET(
+        new Request(`https://quotation.test/api/templates/${dataType}`),
+        context(dataType),
+      );
 
-    expect(response.status).toBe(404);
-    await expect(response.json()).resolves.toEqual({ error: "TEMPLATE_NOT_FOUND" });
-    expect(mocks.requirePermission).not.toHaveBeenCalled();
-    expect(mocks.generateImportTemplate).not.toHaveBeenCalled();
-  });
+      expect(response.status).toBe(404);
+      await expect(response.json()).resolves.toEqual({ error: "TEMPLATE_NOT_FOUND" });
+      expect(mocks.requirePermission).not.toHaveBeenCalled();
+      expect(mocks.generateImportTemplate).not.toHaveBeenCalled();
+    },
+  );
 
   test.each([
     ["building", "data.import.building", "02_Buildings_Template.xlsx"],
+    ["package", "data.import.package", "03_Sales_Packages_Template.xlsx"],
     ["rate_card", "rate_card.upload", "04_Rate_Card_Template.xlsx"],
   ] as const)("downloads the authenticated %s workbook", async (dataType, permission, filename) => {
     const bytes = Buffer.from("verified xlsx bytes");
