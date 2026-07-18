@@ -183,7 +183,7 @@ export function validatePackageRows(
 }
 
 export function validateRateCardBuildings(
-  input: Pick<RateCardImport, "buildingPrices" | "packageBuildings">,
+  input: Pick<RateCardImport, "buildingPrices" | "packageMemberships">,
   snapshot: BuildingValidationSnapshot,
 ): ImportValidationError[] {
   const errors: ImportValidationError[] = [];
@@ -192,7 +192,7 @@ export function validateRateCardBuildings(
   );
   const references = [
     ...input.buildingPrices.map((row) => ({ sheet: "Building Prices", ...row })),
-    ...input.packageBuildings.map((row) => ({ sheet: "Package Buildings", ...row })),
+    ...input.packageMemberships.map((row) => ({ sheet: "Package Membership", ...row })),
   ];
 
   for (const reference of references) {

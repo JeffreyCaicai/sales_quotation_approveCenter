@@ -2,7 +2,7 @@ import { describe, expect, test } from "vitest";
 import * as XLSX from "xlsx";
 
 import type { SessionUser } from "@/lib/auth/session";
-import { processImport, validateRateCardForProcessing, type ImportProcessingRepository } from "@/lib/imports/process-import";
+import { processImport, validateRateCardForProcessing, type ImportProcessingRepository, type RateCardProcessingSnapshot } from "@/lib/imports/process-import";
 import type { PackageImport, RateCardImport } from "@/lib/imports/template-v2";
 import type { BuildingDiffSnapshot } from "@/lib/imports/diff";
 import type { PackageChange, PackageSnapshot } from "@/lib/imports/package-diff";
@@ -47,6 +47,14 @@ const reusedPackageNameBody = workbook({
   ],
 });
 
+const rateCardBody = workbook({
+  Instructions: [["English"], ["Bahasa Indonesia"]],
+  Metadata: [["Template Version", "TMN-IMPORT-2"], ["Currency", "IDR"]],
+  "Building Prices": [["IRIS Building ID", "Price IDR"], ["B001", "0"]],
+  "Package Prices": [["Package Code", "Price IDR"], ["PKG-A", "250"]],
+  "Package Membership": [["Package Code", "IRIS Building ID"], ["PKG-A", "B001"]],
+});
+
 class Repository implements ImportProcessingRepository {
   state: "uploaded" | "validating" | "ready_to_publish" | "draft" | "validation_failed" | "published" = "uploaded";
   errors: unknown[] = [];
@@ -59,6 +67,14 @@ class Repository implements ImportProcessingRepository {
   stale = false;
   dataType: "building" | "package" | "rate_card" = "building";
   packages: PackageSnapshot[] = [];
+  rateCard: RateCardProcessingSnapshot = {
+    buildings: [{ id: "building-1", irisBuildingId: "B001", erpBuildingId: null, status: "active" }],
+    packages: [{ packageCode: "PKG-A", status: "active" }],
+    versionId: "current-version",
+    buildingPrices: new Map([["B001", "100"]]),
+    packagePrices: new Map([["PKG-A", "250"]]),
+    packageMemberships: new Set(["PKG-A:B001"]),
+  };
 
   async claim() {
     if (this.unsupported) return { kind: "unsupported" as const, dataType: "customer_brand" as const };
@@ -76,14 +92,14 @@ class Repository implements ImportProcessingRepository {
   async buildingSnapshot(): Promise<BuildingValidationSnapshot & BuildingDiffSnapshot> {
     return { buildings: [], controlledValues: { buildingTypes: ["Office"], gradeResources: ["Grade A"] } };
   }
-  async rateCardSnapshot() { return { buildings: [], packages: [], versionCodes: [] }; }
+  async loadRateCardSnapshot() { return this.rateCard; }
   async packageSnapshot(): Promise<PackageValidationSnapshot> { return { packages: this.packages }; }
   async completeBuilding(_jobId: string, _claimToken: string, normalized: unknown, changes: unknown[]) {
     this.normalized = normalized; this.changes = changes; this.state = "ready_to_publish";
   }
-  async completeRateCard(_jobId: string, _claimToken: string, normalized: unknown) {
+  async completeRateCard(_jobId: string, _claimToken: string, normalized: unknown, changes: unknown[]) {
     void _jobId; void _claimToken;
-    this.normalized = normalized; this.state = "draft";
+    this.normalized = normalized; this.changes = changes; this.state = "draft";
   }
   async completePackage(_jobId: string, _claimToken: string, normalized: PackageImport, changes: PackageChange[]) {
     void _jobId; void _claimToken;
@@ -221,6 +237,29 @@ describe("production import processing", () => {
     expect(repository.state).toBe("uploaded");
   });
 
+  test("stages a full Current-based Rate Card difference preview as draft", async () => {
+    const repository = new Repository();
+    repository.dataType = "rate_card";
+    repository.rateCard.buildingPrices.set("B-REMOVED", "99");
+
+    await expect(processImport("job-1", actor, {
+      repository,
+      objectStore: { readImmutable: async () => rateCardBody },
+    })).resolves.toEqual({ jobId: "job-1", state: "draft" });
+
+    expect(repository.normalized).toEqual(expect.objectContaining({
+      basedOnVersionId: "current-version",
+      currency: "IDR",
+      packageMemberships: [{ rowNumber: 2, packageCode: "PKG-A", irisBuildingId: "B001" }],
+    }));
+    expect(repository.changes).toEqual(expect.arrayContaining([
+      expect.objectContaining({ entityKey: "building:B001", changeType: "modified" }),
+      expect.objectContaining({ entityKey: "building:B-REMOVED", changeType: "removed" }),
+      expect.objectContaining({ entityKey: "package:PKG-A", changeType: "unchanged" }),
+      expect.objectContaining({ entityKey: "membership:PKG-A:B001", changeType: "unchanged" }),
+    ]));
+  });
+
   test("reclaims only claims older than the bounded stale interval", () => {
     const now = new Date("2026-07-12T12:00:00.000Z");
     expect(processingClaimIsStale(new Date(now.getTime() - PROCESSING_STALE_AFTER_MS), now)).toBe(true);
@@ -237,12 +276,25 @@ describe("production import processing", () => {
     })).resolves.toEqual({ jobId: "job-1", state: "ready_to_publish" });
   });
 
-  test("rejects empty and cross-sheet-incomplete Rate Cards during processing", () => {
+  test("rejects empty, duplicate, invalid-reference, and cross-sheet-incomplete Rate Cards", () => {
     const base: RateCardImport = {
-      templateVersion: "TMN-IMPORT-2", versionCode: "RC-PROCESS", effectiveDate: "2026-08-01", currency: "IDR",
-      buildingPrices: [], packagePrices: [], packageBuildings: [],
+      templateVersion: "TMN-IMPORT-2", currency: "IDR",
+      buildingPrices: [], packagePrices: [], packageMemberships: [],
     };
-    const snapshot = { buildings: [], packages: [{ packageCode: "P1", status: "active" as const }], versionCodes: [] };
+    const snapshot: RateCardProcessingSnapshot = {
+      buildings: [
+        { id: "b1", irisBuildingId: "B1", erpBuildingId: null, status: "active" },
+        { id: "b2", irisBuildingId: "B2", erpBuildingId: null, status: "inactive" },
+      ],
+      packages: [
+        { packageCode: "P1", status: "active" },
+        { packageCode: "P2", status: "inactive" },
+      ],
+      versionId: null,
+      buildingPrices: new Map(),
+      packagePrices: new Map(),
+      packageMemberships: new Set(),
+    };
     expect(validateRateCardForProcessing(base, snapshot).map((error) => error.key)).toContain("import.error.rate_card_empty");
     expect(validateRateCardForProcessing({
       ...base,
@@ -250,11 +302,44 @@ describe("production import processing", () => {
     }, snapshot).map((error) => error.key)).toContain("import.error.package_price_missing_membership");
     expect(validateRateCardForProcessing({
       ...base,
-      packageBuildings: [{ rowNumber: 2, packageCode: "P1", irisBuildingId: "B1" }],
+      packageMemberships: [{ rowNumber: 2, packageCode: "P1", irisBuildingId: "B1" }],
     }, snapshot).map((error) => error.key)).toContain("import.error.package_membership_missing_price");
-    expect(validateRateCardForProcessing({ ...base, effectiveDate: "2026-02-30" }, snapshot))
-      .toContainEqual(expect.objectContaining({ sheet: "Metadata", column: "Effective Date", key: "import.error.value_invalid" }));
+    expect(validateRateCardForProcessing({
+      ...base,
+      buildingPrices: [
+        { rowNumber: 2, irisBuildingId: "B2", priceIdr: "0" },
+        { rowNumber: 3, irisBuildingId: "MISSING", priceIdr: "10" },
+        { rowNumber: 4, irisBuildingId: "B1", priceIdr: "20" },
+        { rowNumber: 5, irisBuildingId: "B1", priceIdr: "30" },
+      ],
+      packagePrices: [{ rowNumber: 2, packageCode: "P2", priceIdr: "100" }],
+      packageMemberships: [{ rowNumber: 2, packageCode: "P2", irisBuildingId: "B1" }],
+    }, snapshot).map((error) => error.key)).toEqual(expect.arrayContaining([
+      "import.error.building_inactive",
+      "import.error.building_not_found",
+      "import.error.rate_card_building_duplicate",
+      "import.error.package_inactive",
+    ]));
   });
+
+  test.each(["-1", "1.0", "1e3", "+1", "1,000", " 1", "1 "])(
+    "rejects non-canonical IDR integer text %j while accepting zero",
+    (priceIdr) => {
+      const snapshot: RateCardProcessingSnapshot = {
+        buildings: [{ id: "b1", irisBuildingId: "B1", erpBuildingId: null, status: "active" }],
+        packages: [], versionId: null,
+        buildingPrices: new Map(), packagePrices: new Map(), packageMemberships: new Set(),
+      };
+      const input = (value: string): RateCardImport => ({
+        templateVersion: "TMN-IMPORT-2", currency: "IDR",
+        buildingPrices: [{ rowNumber: 2, irisBuildingId: "B1", priceIdr: value }],
+        packagePrices: [], packageMemberships: [],
+      });
+      expect(validateRateCardForProcessing(input(priceIdr), snapshot))
+        .toContainEqual(expect.objectContaining({ column: "Price IDR", key: "import.error.value_invalid" }));
+      expect(validateRateCardForProcessing(input("0"), snapshot)).toEqual([]);
+    },
+  );
 
   test("rejects a locked job whose data type changed after preliminary authorization", () => {
     expect(() => assertPreliminaryDataType("building", "rate_card"))

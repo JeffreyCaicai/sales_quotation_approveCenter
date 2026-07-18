@@ -8,7 +8,10 @@ import { generateImportTemplate } from "@/lib/imports/generate-template";
 import {
   BUILDING_HEADERS,
   PACKAGE_HEADERS,
+  RATE_CARD_BUILDING_PRICE_HEADERS,
   RATE_CARD_HEADERS,
+  RATE_CARD_PACKAGE_MEMBERSHIP_HEADERS,
+  RATE_CARD_PACKAGE_PRICE_HEADERS,
   TEMPLATE_VERSION_V2,
 } from "@/lib/imports/template-v2";
 
@@ -60,14 +63,20 @@ describe("formal TMN-IMPORT-2 templates", () => {
     const buffer = await generateImportTemplate("rate_card", TEMPLATE_VERSION_V2);
 
     expect(rows(buffer, "Metadata")).toEqual(
-      expect.arrayContaining([
+      [
         ["Template Version", TEMPLATE_VERSION_V2],
         ["Currency", "IDR"],
-      ]),
+      ],
     );
-    for (const [sheetName, headers] of Object.entries(RATE_CARD_HEADERS)) {
-      expect(rows(buffer, sheetName)[0]).toEqual([...headers]);
-    }
+    expect(RATE_CARD_HEADERS).toEqual([
+      "Record Type",
+      "IRIS Building ID",
+      "Package Code",
+      "Price IDR",
+    ]);
+    expect(rows(buffer, "Building Prices")[0]).toEqual([...RATE_CARD_BUILDING_PRICE_HEADERS]);
+    expect(rows(buffer, "Package Prices")[0]).toEqual([...RATE_CARD_PACKAGE_PRICE_HEADERS]);
+    expect(rows(buffer, "Package Membership")[0]).toEqual([...RATE_CARD_PACKAGE_MEMBERSHIP_HEADERS]);
 
     const buildingPrice = rows(buffer, "Building Prices")[1]?.[1];
     const packagePrice = rows(buffer, "Package Prices")[1]?.[1];
@@ -160,18 +169,20 @@ describe("formal TMN-IMPORT-2 templates", () => {
       "Metadata",
       "Building Prices",
       "Package Prices",
-      "Package Buildings",
+      "Package Membership",
     ]);
     expect(rateCard.Sheets.Metadata.B1?.v).toBe(TEMPLATE_VERSION_V2);
-    expect(["n", "d"]).toContain(rateCard.Sheets.Metadata.B3?.t);
-    expect(rateCard.Sheets.Metadata.B3?.t).not.toBe("s");
-    for (const [sheetName, headers] of Object.entries(RATE_CARD_HEADERS)) {
-      expect(XLSX.utils.sheet_to_json(rateCard.Sheets[sheetName], {
-        header: 1,
-        raw: true,
-        defval: null,
-      })[0]).toEqual([...headers]);
-    }
+    expect(rateCard.Sheets.Metadata.B2?.v).toBe("IDR");
+    expect(rateCard.Sheets.Metadata.A3).toBeUndefined();
+    expect(XLSX.utils.sheet_to_json(rateCard.Sheets["Building Prices"], {
+      header: 1, raw: true, defval: null,
+    })[0]).toEqual([...RATE_CARD_BUILDING_PRICE_HEADERS]);
+    expect(XLSX.utils.sheet_to_json(rateCard.Sheets["Package Prices"], {
+      header: 1, raw: true, defval: null,
+    })[0]).toEqual([...RATE_CARD_PACKAGE_PRICE_HEADERS]);
+    expect(XLSX.utils.sheet_to_json(rateCard.Sheets["Package Membership"], {
+      header: 1, raw: true, defval: null,
+    })[0]).toEqual([...RATE_CARD_PACKAGE_MEMBERSHIP_HEADERS]);
     for (const address of ["B2"] as const) {
       const buildingPrice = rateCard.Sheets["Building Prices"][address]?.v;
       const packagePrice = rateCard.Sheets["Package Prices"][address]?.v;

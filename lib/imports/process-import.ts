@@ -3,17 +3,16 @@ import type { ImportDataType, ImportState } from "@/db/enums";
 import type { BuildingDiffSnapshot, ImportChange } from "@/lib/imports/diff";
 import { calculateBuildingDiff } from "@/lib/imports/diff";
 import { calculatePackageDiff, type PackageChange, type PackageSnapshot } from "@/lib/imports/package-diff";
+import { calculateRateCardDiff, type RateCardChange, type RateCardDiffSnapshot } from "@/lib/imports/rate-card-diff";
 import type { ImportValidationError } from "@/lib/imports/errors";
 import { sortImportValidationErrors } from "@/lib/imports/errors";
 import { parseImportFiles } from "@/lib/imports/normalize";
 import { PostgresImportProcessingRepository } from "@/lib/imports/processing-repository";
-import { RateCardBuildingResolutionError, resolveRateCardBuildingReferences } from "@/lib/imports/resolve-rate-card-building-references";
-import { ImportParseError, type BuildingImport, type PackageImport, type RateCardImport } from "@/lib/imports/template-v2";
-import { validateBuildingRows, validatePackageRows, type BuildingValidationSnapshot, type PackageValidationSnapshot } from "@/lib/imports/validate";
+import { ImportParseError, type BuildingImport, type PackageImport, type RateCardImport, type StagedRateCardImport } from "@/lib/imports/template-v2";
+import { validateBuildingRows, validatePackageRows, validateRateCardBuildings, type BuildingValidationSnapshot, type PackageValidationSnapshot } from "@/lib/imports/validate";
 import { S3ObjectStore } from "@/lib/storage/s3-object-store";
 import { TEMPLATE_VERSION_V2 } from "@/lib/imports/template-v2";
 import { ImportProcessingError } from "@/lib/imports/processing-errors";
-import { parseCalendarDateInJakarta, StrictCalendarDateError } from "@/lib/imports/calendar-date";
 
 export { ImportProcessingError } from "@/lib/imports/processing-errors";
 
@@ -25,9 +24,8 @@ export interface ProcessingJob {
   files: Array<{ objectStorageKey: string; originalFilename: string; checksum: string }>;
 }
 
-export interface RateCardProcessingSnapshot extends BuildingValidationSnapshot {
+export interface RateCardProcessingSnapshot extends BuildingValidationSnapshot, RateCardDiffSnapshot {
   packages: Array<{ packageCode: string; status: "active" | "inactive" }>;
-  versionCodes: string[];
 }
 
 export interface PackageProcessingSnapshot extends PackageValidationSnapshot {
@@ -42,10 +40,10 @@ export interface ImportProcessingRepository {
   >;
   buildingSnapshot(): Promise<BuildingValidationSnapshot & BuildingDiffSnapshot>;
   packageSnapshot(): Promise<PackageProcessingSnapshot>;
-  rateCardSnapshot(): Promise<RateCardProcessingSnapshot>;
+  loadRateCardSnapshot(): Promise<RateCardProcessingSnapshot>;
   completeBuilding(jobId: string, claimToken: string, normalized: BuildingImport, changes: ImportChange[]): Promise<void>;
   completePackage(jobId: string, claimToken: string, normalized: PackageImport, changes: PackageChange[]): Promise<void>;
-  completeRateCard(jobId: string, claimToken: string, normalized: RateCardImport): Promise<void>;
+  completeRateCard(jobId: string, claimToken: string, normalized: StagedRateCardImport, changes: RateCardChange[]): Promise<void>;
   fail(jobId: string, claimToken: string, errors: ImportValidationError[]): Promise<void>;
   retry(jobId: string, claimToken: string, failureSummary: string): Promise<void>;
 }
@@ -116,10 +114,12 @@ export async function processImport(
     }
 
     const normalized = await parseImportFiles("rate_card", files);
-    const snapshot = await dependencies.repository.rateCardSnapshot();
+    const snapshot = await dependencies.repository.loadRateCardSnapshot();
     const errors = validateRateCardForProcessing(normalized, snapshot);
     if (errors.length > 0) return fail(jobId, job.claimToken, errors, dependencies.repository);
-    await dependencies.repository.completeRateCard(jobId, job.claimToken, normalized);
+    const staged: StagedRateCardImport = { ...normalized, basedOnVersionId: snapshot.versionId };
+    const changes = calculateRateCardDiff(staged, snapshot);
+    await dependencies.repository.completeRateCard(jobId, job.claimToken, staged, changes);
     return { jobId, state: "draft" };
   } catch (error) {
     const errors = processingErrors(error);
@@ -174,7 +174,6 @@ async function fail(
 }
 
 function processingErrors(error: unknown): ImportValidationError[] | null {
-  if (error instanceof RateCardBuildingResolutionError) return error.errors;
   if (error instanceof ImportParseError) {
     return [{
       sheet: String(error.details.sheet ?? "File"),
@@ -193,19 +192,14 @@ export function validateRateCardForProcessing(
   snapshot: RateCardProcessingSnapshot,
 ): ImportValidationError[] {
   const errors: ImportValidationError[] = [];
-  if (input.buildingPrices.length + input.packagePrices.length + input.packageBuildings.length === 0) {
+  if (input.buildingPrices.length + input.packagePrices.length + input.packageMemberships.length === 0) {
     errors.push({ sheet: "Metadata", rowNumber: 0, column: "", key: "import.error.rate_card_empty", params: {} });
   }
-  try {
-    resolveRateCardBuildingReferences(input, snapshot);
-  } catch (error) {
-    if (error instanceof RateCardBuildingResolutionError) errors.push(...error.errors);
-    else throw error;
-  }
+  errors.push(...validateRateCardBuildings(input, snapshot));
   const activePackages = new Set(snapshot.packages.filter((item) => item.status === "active").map((item) => item.packageCode));
   const knownPackages = new Set(snapshot.packages.map((item) => item.packageCode));
-  for (const row of [...input.packagePrices, ...input.packageBuildings]) {
-    const sheet = "priceIdr" in row ? "Package Prices" : "Package Buildings";
+  for (const row of [...input.packagePrices, ...input.packageMemberships]) {
+    const sheet = "priceIdr" in row ? "Package Prices" : "Package Membership";
     if (!knownPackages.has(row.packageCode)) {
       errors.push({ sheet, rowNumber: row.rowNumber, column: "Package Code", key: "import.error.package_not_found", params: { packageCode: row.packageCode } });
     } else if (!activePackages.has(row.packageCode)) {
@@ -213,26 +207,56 @@ export function validateRateCardForProcessing(
     }
   }
   const pricedPackages = new Set(input.packagePrices.map((row) => row.packageCode.trim()));
-  const memberPackages = new Set(input.packageBuildings.map((row) => row.packageCode.trim()));
+  const memberPackages = new Set(input.packageMemberships.map((row) => row.packageCode.trim()));
   for (const row of input.packagePrices) {
     if (!memberPackages.has(row.packageCode.trim())) errors.push({ sheet: "Package Prices", rowNumber: row.rowNumber, column: "Package Code", key: "import.error.package_price_missing_membership", params: { packageCode: row.packageCode.trim() } });
   }
-  for (const row of input.packageBuildings) {
-    if (!pricedPackages.has(row.packageCode.trim())) errors.push({ sheet: "Package Buildings", rowNumber: row.rowNumber, column: "Package Code", key: "import.error.package_membership_missing_price", params: { packageCode: row.packageCode.trim() } });
-  }
-  if (!input.versionCode || snapshot.versionCodes.includes(input.versionCode)) {
-    errors.push({ sheet: "Metadata", rowNumber: 2, column: "Version Code", key: "import.error.rate_card_version_invalid", params: { versionCode: input.versionCode } });
-  }
-  try {
-    parseCalendarDateInJakarta(input.effectiveDate);
-  } catch (error) {
-    if (!(error instanceof StrictCalendarDateError)) throw error;
-    errors.push({ sheet: "Metadata", rowNumber: 3, column: "Effective Date", key: "import.error.value_invalid", params: {} });
+  for (const row of input.packageMemberships) {
+    if (!pricedPackages.has(row.packageCode.trim())) errors.push({ sheet: "Package Membership", rowNumber: row.rowNumber, column: "Package Code", key: "import.error.package_membership_missing_price", params: { packageCode: row.packageCode.trim() } });
   }
   for (const row of [...input.buildingPrices, ...input.packagePrices]) {
-    if (!/^[1-9]\d*$/u.test(row.priceIdr)) {
+    if (!/^(?:0|[1-9]\d*)$/u.test(row.priceIdr)) {
       errors.push({ sheet: "priceIdr" in row && "irisBuildingId" in row ? "Building Prices" : "Package Prices", rowNumber: row.rowNumber, column: "Price IDR", key: "import.error.value_invalid", params: {} });
     }
   }
+  errors.push(...duplicateRateCardErrors(input));
   return sortImportValidationErrors(errors);
+}
+
+function duplicateRateCardErrors(input: RateCardImport): ImportValidationError[] {
+  const errors: ImportValidationError[] = [];
+  const duplicates = <T>(rows: T[], keyFor: (row: T) => string) => {
+    const counts = new Map<string, number>();
+    for (const row of rows) {
+      const key = keyFor(row);
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
+    return counts;
+  };
+  const buildingCounts = duplicates(input.buildingPrices, (row) => row.irisBuildingId.trim());
+  const packageCounts = duplicates(input.packagePrices, (row) => row.packageCode.trim());
+  const membershipCounts = duplicates(input.packageMemberships, (row) => `${row.packageCode.trim()}:${row.irisBuildingId.trim()}`);
+  for (const row of input.buildingPrices) {
+    const irisBuildingId = row.irisBuildingId.trim();
+    if ((buildingCounts.get(irisBuildingId) ?? 0) > 1) errors.push({
+      sheet: "Building Prices", rowNumber: row.rowNumber, column: "IRIS Building ID",
+      key: "import.error.rate_card_building_duplicate", params: { irisBuildingId },
+    });
+  }
+  for (const row of input.packagePrices) {
+    const packageCode = row.packageCode.trim();
+    if ((packageCounts.get(packageCode) ?? 0) > 1) errors.push({
+      sheet: "Package Prices", rowNumber: row.rowNumber, column: "Package Code",
+      key: "import.error.rate_card_package_duplicate", params: { packageCode },
+    });
+  }
+  for (const row of input.packageMemberships) {
+    const packageCode = row.packageCode.trim();
+    const irisBuildingId = row.irisBuildingId.trim();
+    if ((membershipCounts.get(`${packageCode}:${irisBuildingId}`) ?? 0) > 1) errors.push({
+      sheet: "Package Membership", rowNumber: row.rowNumber, column: "Package Code / IRIS Building ID",
+      key: "import.error.rate_card_membership_duplicate", params: { packageCode, irisBuildingId },
+    });
+  }
+  return errors;
 }

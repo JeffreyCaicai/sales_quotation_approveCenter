@@ -5,7 +5,7 @@ import { describe, expect, test } from "vitest";
 import * as XLSX from "xlsx";
 
 import { parseImportFiles } from "@/lib/imports/normalize";
-import { PACKAGE_HEADERS } from "@/lib/imports/template-v2";
+import { PACKAGE_HEADERS, RATE_CARD_HEADERS } from "@/lib/imports/template-v2";
 
 const FIXTURES = join(process.cwd(), "tests", "fixtures", "imports", "v2");
 
@@ -33,6 +33,15 @@ describe("TMN-IMPORT-2 parser", () => {
       "Package Code",
       "Package Name",
       "Operational Status",
+    ]);
+  });
+
+  test("defines the exact single-file Rate Card CSV headers", () => {
+    expect(RATE_CARD_HEADERS).toEqual([
+      "Record Type",
+      "IRIS Building ID",
+      "Package Code",
+      "Price IDR",
     ]);
   });
 
@@ -121,35 +130,76 @@ describe("TMN-IMPORT-2 parser", () => {
     });
   });
 
-  test("normalizes Rate Card references as IRIS IDs", async () => {
-    const result = await parseImportFiles("rate_card", [await fixture("rate-card-valid.xlsx")]);
+  test("parses the three Rate Card record types from one CSV", async () => {
+    const body = new TextEncoder().encode([
+      "Record Type,IRIS Building ID,Package Code,Price IDR",
+      "BUILDING_PRICE,B003004,,0",
+      "PACKAGE_PRICE,,PKG-01,1500000",
+      "PACKAGE_MEMBER,B003004,PKG-01,",
+      "",
+    ].join("\n"));
 
-    expect(result).toMatchObject({
-      templateVersion: "TMN-IMPORT-2",
-      versionCode: "RC-2026-07",
-      effectiveDate: "2026-07-15",
-      currency: "IDR",
-    });
-    expect(result.buildingPrices[0].irisBuildingId).toBe("B003004");
-    expect(result.packageBuildings[0].irisBuildingId).toBe("B003004");
+    await expect(parseImportFiles("rate_card", [{ filename: "rate-card.csv", body }]))
+      .resolves.toEqual({
+        templateVersion: "TMN-IMPORT-2",
+        currency: "IDR",
+        buildingPrices: [{ rowNumber: 2, irisBuildingId: "B003004", priceIdr: "0" }],
+        packagePrices: [{ rowNumber: 3, packageCode: "PKG-01", priceIdr: "1500000" }],
+        packageMemberships: [{ rowNumber: 4, packageCode: "PKG-01", irisBuildingId: "B003004" }],
+      });
   });
 
-  test("normalizes an Excel effective date to YYYY-MM-DD", async () => {
-    const file = workbookFile("dated-rate-card.xlsx", {
+  test("parses the three exact Rate Card data sheets and minimal metadata", async () => {
+    const file = workbookFile("rate-card.xlsx", {
+      Instructions: [["English"], ["Bahasa Indonesia"]],
       Metadata: [
         ["Template Version", "TMN-IMPORT-2"],
-        ["Version Code", "RC-DATED"],
-        ["Effective Date", new Date(Date.UTC(2026, 7, 1))],
         ["Currency", "IDR"],
       ],
-      "Building Prices": [["IRIS Building ID", "Price IDR"], ["B003004", "1000000"]],
+      "Building Prices": [["IRIS Building ID", "Price IDR"], [" B003004 ", "0"]],
       "Package Prices": [["Package Code", "Price IDR"], ["PKG-01", "1500000"]],
-      "Package Buildings": [["Package Code", "IRIS Building ID"], ["PKG-01", "B003004"]],
+      "Package Membership": [["Package Code", "IRIS Building ID"], ["PKG-01", "B003004"]],
     });
 
-    await expect(parseImportFiles("rate_card", [file])).resolves.toMatchObject({
-      effectiveDate: "2026-08-01",
+    await expect(parseImportFiles("rate_card", [file])).resolves.toEqual({
+      templateVersion: "TMN-IMPORT-2",
+      currency: "IDR",
+      buildingPrices: [{ rowNumber: 2, irisBuildingId: "B003004", priceIdr: "0" }],
+      packagePrices: [{ rowNumber: 2, packageCode: "PKG-01", priceIdr: "1500000" }],
+      packageMemberships: [{ rowNumber: 2, packageCode: "PKG-01", irisBuildingId: "B003004" }],
     });
+  });
+
+  test.each([
+    ["missing data sheet", {
+      Instructions: [["English"]],
+      Metadata: [["Template Version", "TMN-IMPORT-2"], ["Currency", "IDR"]],
+      "Building Prices": [["IRIS Building ID", "Price IDR"]],
+      "Package Prices": [["Package Code", "Price IDR"]],
+    }, "import.error.missing_sheet"],
+    ["unexpected data sheet", {
+      Instructions: [["English"]],
+      Metadata: [["Template Version", "TMN-IMPORT-2"], ["Currency", "IDR"]],
+      "Building Prices": [["IRIS Building ID", "Price IDR"]],
+      "Package Prices": [["Package Code", "Price IDR"]],
+      "Package Membership": [["Package Code", "IRIS Building ID"]],
+      Surprise: [["No"]],
+    }, "import.error.unknown_sheet"],
+  ])("rejects a Rate Card workbook with a %s", async (_label, sheets, key) => {
+    await expect(parseImportFiles("rate_card", [workbookFile("invalid-rate-card.xlsx", sheets)]))
+      .rejects.toMatchObject({ key });
+  });
+
+  test.each([
+    "BUILDING_PRICE,B003004,PKG-01,100",
+    "PACKAGE_PRICE,B003004,PKG-01,100",
+    "PACKAGE_MEMBER,B003004,PKG-01,100",
+  ])("rejects a Rate Card CSV record with a nonblank inapplicable field: %s", async (record) => {
+    const body = new TextEncoder().encode(
+      `Record Type,IRIS Building ID,Package Code,Price IDR\n${record}\n`,
+    );
+    await expect(parseImportFiles("rate_card", [{ filename: "rate-card.csv", body }]))
+      .rejects.toMatchObject({ key: "import.error.value_invalid" });
   });
 
   test("retains duplicate IRIS IDs for the validation stage", async () => {
@@ -167,15 +217,14 @@ describe("TMN-IMPORT-2 parser", () => {
 
   test("rejects a legacy Building Code Rate Card header", async () => {
     const file = workbookFile("legacy-rate-card.xlsx", {
+      Instructions: [["English"]],
       Metadata: [
         ["Template Version", "TMN-IMPORT-2"],
-        ["Version Code", "RC-LEGACY"],
-        ["Effective Date", "2026-07-15"],
         ["Currency", "IDR"],
       ],
       "Building Prices": [["Building Code", "Price IDR"], ["B003004", "1000000"]],
       "Package Prices": [["Package Code", "Price IDR"], ["PKG-01", "1500000"]],
-      "Package Buildings": [["Package Code", "IRIS Building ID"], ["PKG-01", "B003004"]],
+      "Package Membership": [["Package Code", "IRIS Building ID"], ["PKG-01", "B003004"]],
     });
 
     await expect(parseImportFiles("rate_card", [file])).rejects.toMatchObject({
@@ -288,20 +337,19 @@ describe("TMN-IMPORT-2 parser", () => {
 
   test("retains physical Rate Card section row numbers", async () => {
     const file = workbookFile("rate-card-blank-rows.xlsx", {
+      Instructions: [["English"]],
       Metadata: [
         ["Template Version", "TMN-IMPORT-2"],
-        ["Version Code", "RC-BLANKS"],
-        ["Effective Date", "2026-08-01"],
         ["Currency", "IDR"],
       ],
       "Building Prices": [[], ["IRIS Building ID", "Price IDR"], [], ["B003004", "1000000"]],
       "Package Prices": [[], [], ["Package Code", "Price IDR"], ["PKG-01", "1500000"]],
-      "Package Buildings": [["Package Code", "IRIS Building ID"], [], [], ["PKG-01", "B003004"]],
+      "Package Membership": [["Package Code", "IRIS Building ID"], [], [], ["PKG-01", "B003004"]],
     });
 
     const result = await parseImportFiles("rate_card", [file]);
     expect(result.buildingPrices[0].rowNumber).toBe(4);
     expect(result.packagePrices[0].rowNumber).toBe(4);
-    expect(result.packageBuildings[0].rowNumber).toBe(4);
+    expect(result.packageMemberships[0].rowNumber).toBe(4);
   });
 });

@@ -21,11 +21,16 @@ export const PACKAGE_HEADERS = [
   "Operational Status",
 ] as const;
 
-export const RATE_CARD_HEADERS = {
-  "Building Prices": ["IRIS Building ID", "Price IDR"],
-  "Package Prices": ["Package Code", "Price IDR"],
-  "Package Buildings": ["Package Code", "IRIS Building ID"],
-} as const;
+export const RATE_CARD_HEADERS = [
+  "Record Type",
+  "IRIS Building ID",
+  "Package Code",
+  "Price IDR",
+] as const;
+
+export const RATE_CARD_BUILDING_PRICE_HEADERS = ["IRIS Building ID", "Price IDR"] as const;
+export const RATE_CARD_PACKAGE_PRICE_HEADERS = ["Package Code", "Price IDR"] as const;
+export const RATE_CARD_PACKAGE_MEMBERSHIP_HEADERS = ["Package Code", "IRIS Building ID"] as const;
 
 export interface SourceRow {
   rowNumber: number;
@@ -67,8 +72,6 @@ export interface PackageImport {
 
 export interface RateCardImport {
   templateVersion: typeof TEMPLATE_VERSION_V2;
-  versionCode: string;
-  effectiveDate: string;
   currency: "IDR";
   buildingPrices: Array<{
     rowNumber: number;
@@ -80,11 +83,15 @@ export interface RateCardImport {
     packageCode: string;
     priceIdr: string;
   }>;
-  packageBuildings: Array<{
+  packageMemberships: Array<{
     rowNumber: number;
     packageCode: string;
     irisBuildingId: string;
   }>;
+}
+
+export interface StagedRateCardImport extends RateCardImport {
+  basedOnVersionId: string | null;
 }
 
 export type NormalizedImport = BuildingImport | PackageImport | RateCardImport;

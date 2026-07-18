@@ -41,12 +41,10 @@ function snapshot(
 function rateCard(overrides: Partial<RateCardImport> = {}): RateCardImport {
   return {
     templateVersion: "TMN-IMPORT-2",
-    versionCode: "RC-2026-07",
-    effectiveDate: "2026-07-15",
     currency: "IDR",
     buildingPrices: [],
     packagePrices: [],
-    packageBuildings: [],
+    packageMemberships: [],
     ...overrides,
   };
 }
@@ -158,7 +156,7 @@ describe("Rate Card building validation", () => {
         { rowNumber: 8, irisBuildingId: " B-MISSING ", priceIdr: "100" },
         { rowNumber: 4, irisBuildingId: "B-INACTIVE", priceIdr: "200" },
       ],
-      packageBuildings: [
+      packageMemberships: [
         { rowNumber: 6, packageCode: "PKG-01", irisBuildingId: "B-MISSING" },
         { rowNumber: 3, packageCode: "PKG-02", irisBuildingId: "B-ACTIVE" },
       ],
@@ -170,7 +168,7 @@ describe("Rate Card building validation", () => {
     expect(errors).toEqual([
       { sheet: "Building Prices", rowNumber: 4, column: "IRIS Building ID", key: "import.error.building_inactive", params: { irisBuildingId: "B-INACTIVE" } },
       { sheet: "Building Prices", rowNumber: 8, column: "IRIS Building ID", key: "import.error.building_not_found", params: { irisBuildingId: "B-MISSING" } },
-      { sheet: "Package Buildings", rowNumber: 6, column: "IRIS Building ID", key: "import.error.building_not_found", params: { irisBuildingId: "B-MISSING" } },
+      { sheet: "Package Membership", rowNumber: 6, column: "IRIS Building ID", key: "import.error.building_not_found", params: { irisBuildingId: "B-MISSING" } },
     ]);
   });
 });

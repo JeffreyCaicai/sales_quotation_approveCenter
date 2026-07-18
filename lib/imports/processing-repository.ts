@@ -1,13 +1,14 @@
 import { and, eq, lte } from "drizzle-orm";
 
 import { getDb } from "@/db";
-import { buildingControlledValues, buildings, importChanges, importErrors, importFiles, importJobs, rateCardVersions, salesPackages, userPermissions, users } from "@/db/schema";
+import { buildingControlledValues, buildings, importChanges, importErrors, importFiles, importJobs, rateCardBuildingPrices, rateCardPackageBuildings, rateCardPackageConfigs, rateCardVersions, salesPackages, userPermissions, users } from "@/db/schema";
 import type { SessionUser } from "@/lib/auth/session";
 import type { ImportChange } from "@/lib/imports/diff";
 import type { PackageChange, PackageSnapshot } from "@/lib/imports/package-diff";
+import type { RateCardChange } from "@/lib/imports/rate-card-diff";
 import type { ImportValidationError } from "@/lib/imports/errors";
 import type { ImportProcessingRepository } from "@/lib/imports/process-import";
-import type { BuildingImport, PackageImport, RateCardImport } from "@/lib/imports/template-v2";
+import type { BuildingImport, PackageImport, StagedRateCardImport } from "@/lib/imports/template-v2";
 import { ImportProcessingError } from "@/lib/imports/processing-errors";
 
 export const PROCESSING_STALE_AFTER_MS = 15 * 60 * 1000;
@@ -81,13 +82,55 @@ export class PostgresImportProcessingRepository implements ImportProcessingRepos
     };
   }
 
-  async rateCardSnapshot() {
-    const [buildingSnapshot, packages, versions] = await Promise.all([
+  async loadRateCardSnapshot() {
+    const [buildingSnapshot, packages, currentVersions] = await Promise.all([
       this.buildingSnapshot(),
       getDb().select({ packageCode: salesPackages.packageCode, status: salesPackages.status }).from(salesPackages),
-      getDb().select({ versionCode: rateCardVersions.versionCode }).from(rateCardVersions),
+      getDb().select({ id: rateCardVersions.id }).from(rateCardVersions)
+        .where(eq(rateCardVersions.status, "current"))
+        .limit(1),
     ]);
-    return { ...buildingSnapshot, packages: packages.map((item) => ({ ...item, status: item.status as "active" | "inactive" })), versionCodes: versions.map((item) => item.versionCode) };
+    const currentVersion = currentVersions[0];
+    if (!currentVersion) {
+      return {
+        ...buildingSnapshot,
+        packages: packages.map((item) => ({ ...item, status: item.status as "active" | "inactive" })),
+        versionId: null,
+        buildingPrices: new Map<string, string>(),
+        packagePrices: new Map<string, string>(),
+        packageMemberships: new Set<string>(),
+      };
+    }
+
+    const [buildingPrices, packagePrices, packageMemberships] = await Promise.all([
+      getDb().select({
+        irisBuildingId: buildings.irisBuildingId,
+        priceIdr: rateCardBuildingPrices.priceIdr,
+      }).from(rateCardBuildingPrices)
+        .innerJoin(buildings, eq(rateCardBuildingPrices.buildingId, buildings.id))
+        .where(eq(rateCardBuildingPrices.rateCardVersionId, currentVersion.id)),
+      getDb().select({
+        packageCode: salesPackages.packageCode,
+        priceIdr: rateCardPackageConfigs.priceIdr,
+      }).from(rateCardPackageConfigs)
+        .innerJoin(salesPackages, eq(rateCardPackageConfigs.packageId, salesPackages.id))
+        .where(eq(rateCardPackageConfigs.rateCardVersionId, currentVersion.id)),
+      getDb().select({
+        packageCode: salesPackages.packageCode,
+        irisBuildingId: buildings.irisBuildingId,
+      }).from(rateCardPackageBuildings)
+        .innerJoin(salesPackages, eq(rateCardPackageBuildings.packageId, salesPackages.id))
+        .innerJoin(buildings, eq(rateCardPackageBuildings.buildingId, buildings.id))
+        .where(eq(rateCardPackageBuildings.rateCardVersionId, currentVersion.id)),
+    ]);
+    return {
+      ...buildingSnapshot,
+      packages: packages.map((item) => ({ ...item, status: item.status as "active" | "inactive" })),
+      versionId: currentVersion.id,
+      buildingPrices: new Map(buildingPrices.map((item) => [item.irisBuildingId, String(item.priceIdr)])),
+      packagePrices: new Map(packagePrices.map((item) => [item.packageCode, String(item.priceIdr)])),
+      packageMemberships: new Set(packageMemberships.map((item) => `${item.packageCode}:${item.irisBuildingId}`)),
+    };
   }
 
   async packageSnapshot() {
@@ -133,15 +176,21 @@ export class PostgresImportProcessingRepository implements ImportProcessingRepos
     });
   }
 
-  async completeRateCard(jobId: string, claimToken: string, normalized: RateCardImport) {
+  async completeRateCard(jobId: string, claimToken: string, normalized: StagedRateCardImport, changes: RateCardChange[]) {
     await getDb().transaction(async (tx) => {
-      const totalRows = normalized.buildingPrices.length + normalized.packagePrices.length + normalized.packageBuildings.length;
+      const totalRows = normalized.buildingPrices.length + normalized.packagePrices.length + normalized.packageMemberships.length;
       const [updated] = await tx.update(importJobs).set({ state: "draft", normalizedPayload: normalized, totalRows, validRows: totalRows, invalidRows: 0, failureSummary: null, updatedAt: new Date() })
         .where(and(eq(importJobs.id, jobId), eq(importJobs.state, "validating"), eq(importJobs.updatedAt, new Date(claimToken)))).returning({ id: importJobs.id });
       if (!updated) throw new ImportProcessingError("IMPORT_JOB_PROCESSING", 409);
       await tx.delete(importErrors).where(eq(importErrors.importJobId, jobId));
       await tx.delete(importChanges).where(eq(importChanges.importJobId, jobId));
-      await tx.insert(importChanges).values({ importJobId: jobId, entityType: "rate_card", changeType: "added", beforeValue: null, afterValue: normalized });
+      if (changes.length) await tx.insert(importChanges).values(changes.map((change) => ({
+        importJobId: jobId,
+        entityType: "rate_card",
+        changeType: change.changeType,
+        beforeValue: change.before === null ? null : { entityKey: change.entityKey, ...change.before },
+        afterValue: change.after === null ? null : { entityKey: change.entityKey, ...change.after },
+      })));
     });
   }
 

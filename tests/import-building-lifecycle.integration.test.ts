@@ -37,16 +37,18 @@ function buildingFile(
 }
 
 function rateCardFiles(
-  versionCode: string,
   irisBuildingId = "B003004",
   packageCode = "PKG-IRIS",
 ) {
-  return [
-    { filename: "metadata.csv", body: new TextEncoder().encode(`Template Version,TMN-IMPORT-2\nVersion Code,${versionCode}\nEffective Date,2026-08-01\nCurrency,IDR`) },
-    { filename: "building-prices.csv", body: new TextEncoder().encode(`IRIS Building ID,Price IDR\n${irisBuildingId},1000000`) },
-    { filename: "package-prices.csv", body: new TextEncoder().encode(`Package Code,Price IDR\n${packageCode},1500000`) },
-    { filename: "package-buildings.csv", body: new TextEncoder().encode(`Package Code,IRIS Building ID\n${packageCode},${irisBuildingId}`) },
-  ];
+  return [{
+    filename: "rate-card.csv",
+    body: new TextEncoder().encode([
+      "Record Type,IRIS Building ID,Package Code,Price IDR",
+      `BUILDING_PRICE,${irisBuildingId},,1000000`,
+      `PACKAGE_PRICE,,${packageCode},1500000`,
+      `PACKAGE_MEMBER,${irisBuildingId},${packageCode},`,
+    ].join("\n")),
+  }];
 }
 
 async function applyMigrations(db: PGlite) {
@@ -112,23 +114,23 @@ describe("IRIS identity lifecycle in executable PostgreSQL-compatible coverage",
     const buildingId = inserted.rows[0].id;
     expect(inserted.rows[0].erp_link_status).toBe("manual_only");
 
-    const parsedRateCard = await parseImportFiles("rate_card", rateCardFiles("RC-HISTORY"));
+    const parsedRateCard = await parseImportFiles("rate_card", rateCardFiles());
     const resolvedRateCard = resolveRateCardBuildingReferences(
       parsedRateCard,
       validationSnapshot(buildingId, null, "active"),
     );
     expect(resolvedRateCard).toMatchObject({
       buildingPrices: [{ buildingId }],
-      packageBuildings: [{ buildingId }],
+      packageMemberships: [{ buildingId }],
     });
     const rateCardJob = await db.query<{ id: string }>(`insert into import_jobs (data_type, template_version, checksum, state, uploaded_by, published_by, published_at) values ('rate_card', 'v2', '${randomUUID()}', 'published', '${user.rows[0].id}', '${user.rows[0].id}', now()) returning id`);
     const packageRow = await db.query<{ id: string }>(`insert into sales_packages (package_code, name) values ('PKG-IRIS', 'IRIS Package') returning id`);
-    const version = await db.query<{ id: string }>(`insert into rate_card_versions (version_code, effective_at, status, import_job_id, uploaded_by, published_by, published_at) values ('RC-HISTORY', '2026-08-01', 'draft', '${rateCardJob.rows[0].id}', '${user.rows[0].id}', '${user.rows[0].id}', now()) returning id`);
+    const version = await db.query<{ id: string }>(`insert into rate_card_versions (version_code, status, import_job_id, uploaded_by) values ('RC-HISTORY', 'current', '${rateCardJob.rows[0].id}', '${user.rows[0].id}') returning id`);
     await db.exec(`
       insert into rate_card_building_prices (rate_card_version_id, building_id, price_idr) values ('${version.rows[0].id}', '${resolvedRateCard.buildingPrices[0].buildingId}', 1000000);
       insert into rate_card_package_configs (rate_card_version_id, package_id, price_idr) values ('${version.rows[0].id}', '${packageRow.rows[0].id}', 1500000);
-      insert into rate_card_package_buildings (rate_card_version_id, package_id, building_id) values ('${version.rows[0].id}', '${packageRow.rows[0].id}', '${resolvedRateCard.packageBuildings[0].buildingId}');
-      update rate_card_versions set status = 'published' where id = '${version.rows[0].id}';
+      insert into rate_card_package_buildings (rate_card_version_id, package_id, building_id) values ('${version.rows[0].id}', '${packageRow.rows[0].id}', '${resolvedRateCard.packageMemberships[0].buildingId}');
+      update rate_card_versions set published_by = '${user.rows[0].id}', published_at = now() where id = '${version.rows[0].id}';
     `);
 
     const linked = await parseImportFiles("building", [buildingFile("B003004", "ERP-89321")]);
@@ -139,14 +141,14 @@ describe("IRIS identity lifecycle in executable PostgreSQL-compatible coverage",
     const inactive = await parseImportFiles("building", [buildingFile("B003004", "ERP-89321", "inactive")]);
     expect(calculateBuildingDiff(inactive.rows, diffSnapshot(buildingId, "ERP-89321", "active"))[0]).toMatchObject({ type: "deactivated", before: { id: buildingId } });
     await db.exec(`update buildings set status = 'inactive' where id = '${buildingId}'`);
-    const rejected = await parseImportFiles("rate_card", rateCardFiles("RC-REJECTED"));
+    const rejected = await parseImportFiles("rate_card", rateCardFiles());
     expect(() => resolveRateCardBuildingReferences(
       rejected,
       validationSnapshot(buildingId, "ERP-89321", "inactive"),
     )).toThrow(RateCardBuildingResolutionError);
     expect(validateRateCardBuildings(rejected, validationSnapshot(buildingId, "ERP-89321", "inactive"))).toEqual([
       { sheet: "Building Prices", rowNumber: 2, column: "IRIS Building ID", key: "import.error.building_inactive", params: { irisBuildingId: "B003004" } },
-      { sheet: "Package Buildings", rowNumber: 2, column: "IRIS Building ID", key: "import.error.building_inactive", params: { irisBuildingId: "B003004" } },
+      { sheet: "Package Membership", rowNumber: 4, column: "IRIS Building ID", key: "import.error.building_inactive", params: { irisBuildingId: "B003004" } },
     ]);
 
     const history = await db.query<{ price_building_id: string; package_building_id: string; erp_building_id: string; status: string }>(`
@@ -158,7 +160,7 @@ describe("IRIS identity lifecycle in executable PostgreSQL-compatible coverage",
       join buildings building on building.id = price.building_id
       where version.id = '${version.rows[0].id}'
     `);
-    expect(history.rows).toEqual([{ price_building_id: buildingId, package_building_id: buildingId, erp_building_id: "ERP-89321", status: "published" }]);
+    expect(history.rows).toEqual([{ price_building_id: buildingId, package_building_id: buildingId, erp_building_id: "ERP-89321", status: "current" }]);
   });
 });
 
@@ -227,22 +229,22 @@ describe("complete native PostgreSQL IRIS identity lifecycle", () => {
     const buildingId = snapshot.validation.buildings[0].id;
     expect(snapshot.validation.buildings[0]).toMatchObject({ erpBuildingId: null, status: "active" });
 
-    const rateCard = await parseImportFiles("rate_card", rateCardFiles(`RC-${randomUUID()}`, irisBuildingId, packageCode));
+    const rateCard = await parseImportFiles("rate_card", rateCardFiles(irisBuildingId, packageCode));
     const resolvedRateCard = resolveRateCardBuildingReferences(
       rateCard,
       snapshot.validation,
     );
     expect(resolvedRateCard).toMatchObject({
       buildingPrices: [{ buildingId }],
-      packageBuildings: [{ buildingId }],
+      packageMemberships: [{ buildingId }],
     });
     const rateCardJob = await pool!.query<{ id: string }>(`insert into import_jobs (data_type, template_version, checksum, state, uploaded_by, published_by, published_at) values ('rate_card', 'v2', $1, 'published', $2, $2, now()) returning id`, [randomUUID(), actor.id]);
     const packageRow = await pool!.query<{ id: string }>(`insert into sales_packages (package_code, name) values ($1, 'IRIS Package') returning id`, [packageCode]);
-    const version = await pool!.query<{ id: string }>(`insert into rate_card_versions (version_code, effective_at, status, import_job_id, uploaded_by, published_by, published_at) values ($1, '2026-08-01', 'draft', $2, $3, $3, now()) returning id`, [rateCard.versionCode, rateCardJob.rows[0].id, actor.id]);
+    const version = await pool!.query<{ id: string }>(`insert into rate_card_versions (version_code, status, import_job_id, uploaded_by) values ($1, 'current', $2, $3) returning id`, [`RC-${randomUUID()}`, rateCardJob.rows[0].id, actor.id]);
     await pool!.query(`insert into rate_card_building_prices (rate_card_version_id, building_id, price_idr) values ($1, $2, $3)`, [version.rows[0].id, resolvedRateCard.buildingPrices[0].buildingId, resolvedRateCard.buildingPrices[0].priceIdr]);
     await pool!.query(`insert into rate_card_package_configs (rate_card_version_id, package_id, price_idr) values ($1, $2, 1500000)`, [version.rows[0].id, packageRow.rows[0].id]);
-    await pool!.query(`insert into rate_card_package_buildings (rate_card_version_id, package_id, building_id) values ($1, $2, $3)`, [version.rows[0].id, packageRow.rows[0].id, resolvedRateCard.packageBuildings[0].buildingId]);
-    await pool!.query(`update rate_card_versions set status = 'published' where id = $1`, [version.rows[0].id]);
+    await pool!.query(`insert into rate_card_package_buildings (rate_card_version_id, package_id, building_id) values ($1, $2, $3)`, [version.rows[0].id, packageRow.rows[0].id, resolvedRateCard.packageMemberships[0].buildingId]);
+    await pool!.query(`update rate_card_versions set published_by = $2, published_at = now() where id = $1`, [version.rows[0].id, actor.id]);
 
     const linked = await parseImportFiles("building", [buildingFile(irisBuildingId, erpBuildingId)]);
     snapshot = await nativeBuildingSnapshot(irisBuildingId);
@@ -254,13 +256,13 @@ describe("complete native PostgreSQL IRIS identity lifecycle", () => {
     const inactive = await parseImportFiles("building", [buildingFile(irisBuildingId, erpBuildingId, "inactive")]);
     const deactivateJobId = await publishNativeBuilding(actor, inactive, calculateBuildingDiff(inactive.rows, snapshot.diff));
     snapshot = await nativeBuildingSnapshot(irisBuildingId);
-    const rejected = await parseImportFiles("rate_card", rateCardFiles(`RC-${randomUUID()}`, irisBuildingId, packageCode));
+    const rejected = await parseImportFiles("rate_card", rateCardFiles(irisBuildingId, packageCode));
     expect(() => resolveRateCardBuildingReferences(rejected, snapshot.validation))
       .toThrow(RateCardBuildingResolutionError);
     expect(validateRateCardBuildings(rejected, snapshot.validation).map((error) => error.key)).toEqual(["import.error.building_inactive", "import.error.building_inactive"]);
 
     const history = await pool!.query<{ price_building_id: string; package_building_id: string; status: string }>(`select price.building_id as price_building_id, member.building_id as package_building_id, version.status from rate_card_versions version join rate_card_building_prices price on price.rate_card_version_id = version.id join rate_card_package_buildings member on member.rate_card_version_id = version.id where version.id = $1`, [version.rows[0].id]);
-    expect(history.rows).toEqual([{ price_building_id: buildingId, package_building_id: buildingId, status: "published" }]);
+    expect(history.rows).toEqual([{ price_building_id: buildingId, package_building_id: buildingId, status: "current" }]);
     const audits = await pool!.query<{ import_job_id: string; entity_id: string }>(`select import_job_id, entity_id from audit_events where import_job_id in ($1, $2) order by import_job_id`, [linkJobId, deactivateJobId]);
     expect(audits.rows).toHaveLength(2);
     expect(audits.rows.every((row) => row.entity_id === buildingId)).toBe(true);

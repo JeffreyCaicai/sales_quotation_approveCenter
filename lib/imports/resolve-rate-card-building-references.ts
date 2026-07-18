@@ -14,7 +14,7 @@ export interface ResolvedRateCardBuildingReferences {
     buildingId: string;
     priceIdr: string;
   }>;
-  packageBuildings: Array<{
+  packageMemberships: Array<{
     rowNumber: number;
     packageCode: string;
     buildingId: string;
@@ -34,7 +34,7 @@ export class RateCardBuildingResolutionError extends Error {
  * building references have passed active/missing and duplicate validation.
  */
 export function resolveRateCardBuildingReferences(
-  input: Pick<RateCardImport, "buildingPrices" | "packageBuildings">,
+  input: Pick<RateCardImport, "buildingPrices" | "packageMemberships">,
   snapshot: BuildingValidationSnapshot,
 ): ResolvedRateCardBuildingReferences {
   const errors = [
@@ -58,7 +58,7 @@ export function resolveRateCardBuildingReferences(
       buildingId: activeIdByIrisId.get(row.irisBuildingId.trim())!,
       priceIdr: row.priceIdr,
     })),
-    packageBuildings: input.packageBuildings.map((row) => ({
+    packageMemberships: input.packageMemberships.map((row) => ({
       rowNumber: row.rowNumber,
       packageCode: row.packageCode,
       buildingId: activeIdByIrisId.get(row.irisBuildingId.trim())!,
@@ -67,7 +67,7 @@ export function resolveRateCardBuildingReferences(
 }
 
 function duplicateErrors(
-  input: Pick<RateCardImport, "buildingPrices" | "packageBuildings">,
+  input: Pick<RateCardImport, "buildingPrices" | "packageMemberships">,
 ): ImportValidationError[] {
   const errors: ImportValidationError[] = [];
   const priceCounts = countBy(input.buildingPrices, (row) =>
@@ -85,16 +85,16 @@ function duplicateErrors(
     }
   }
 
-  const membershipCounts = countBy(input.packageBuildings, (row) =>
+  const membershipCounts = countBy(input.packageMemberships, (row) =>
     `${row.packageCode}\0${row.irisBuildingId.trim()}`);
-  for (const row of input.packageBuildings) {
+  for (const row of input.packageMemberships) {
     const irisBuildingId = row.irisBuildingId.trim();
     if ((membershipCounts.get(`${row.packageCode}\0${irisBuildingId}`) ?? 0) > 1) {
       errors.push({
-        sheet: "Package Buildings",
+        sheet: "Package Membership",
         rowNumber: row.rowNumber,
         column: "IRIS Building ID",
-        key: "import.error.package_building_duplicate",
+        key: "import.error.rate_card_membership_duplicate",
         params: { irisBuildingId, packageCode: row.packageCode },
       });
     }

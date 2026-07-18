@@ -2,7 +2,10 @@ import {
   BUILDING_HEADERS,
   ImportParseError,
   PACKAGE_HEADERS,
+  RATE_CARD_BUILDING_PRICE_HEADERS,
   RATE_CARD_HEADERS,
+  RATE_CARD_PACKAGE_MEMBERSHIP_HEADERS,
+  RATE_CARD_PACKAGE_PRICE_HEADERS,
   TEMPLATE_VERSION_V2,
   type BuildingImport,
   type BuildingRow,
@@ -13,7 +16,6 @@ import {
 } from "@/lib/imports/template-v2";
 import { parseCsv } from "@/lib/imports/parse-csv";
 import { parseWorkbook, type ParsedSheet } from "@/lib/imports/parse-workbook";
-import * as XLSX from "xlsx";
 
 export interface ImportSourceFile {
   filename: string;
@@ -22,13 +24,6 @@ export interface ImportSourceFile {
 
 const MAX_TOTAL_BYTES = 25 * 1024 * 1024;
 const MAX_ROWS = 10_000;
-const RATE_CARD_CSV_FILES = [
-  "building-prices.csv",
-  "metadata.csv",
-  "package-buildings.csv",
-  "package-prices.csv",
-] as const;
-
 function extension(filename: string): string {
   const dot = filename.lastIndexOf(".");
   return dot === -1 ? "" : filename.slice(dot).toLowerCase();
@@ -43,11 +38,9 @@ function nullable(value: unknown): string | null {
   return text(value) || null;
 }
 
-function dateText(value: unknown): string {
-  if (typeof value !== "number") return text(value);
-  const parsed = XLSX.SSF.parse_date_code(value);
-  if (!parsed) return text(value);
-  return `${String(parsed.y).padStart(4, "0")}-${String(parsed.m).padStart(2, "0")}-${String(parsed.d).padStart(2, "0")}`;
+function exactText(value: unknown): string {
+  if (value === null || value === undefined) return "";
+  return String(value);
 }
 
 function headerText(value: unknown): string {
@@ -167,8 +160,15 @@ function metadata(rows: SourceRow[]): Map<string, unknown> {
 }
 
 function normalizeRateCard(sheets: Map<string, ParsedSheet>): RateCardImport {
-  assertAllowedSheets(sheets, ["Instructions", "Metadata", "Building Prices", "Package Prices", "Package Buildings"]);
-  const fields = metadata(requiredSheet(sheets, "Metadata"));
+  assertAllowedSheets(sheets, ["Instructions", "Metadata", "Building Prices", "Package Prices", "Package Membership"]);
+  requiredSheet(sheets, "Instructions");
+  const metadataRows = requiredSheet(sheets, "Metadata");
+  if (metadataRows.length !== 2
+    || text(metadataRows[0]?.cells[0]) !== "Template Version"
+    || text(metadataRows[1]?.cells[0]) !== "Currency") {
+    throw new ImportParseError("import.error.value_invalid", { sheet: "Metadata" });
+  }
+  const fields = metadata(metadataRows);
   if (text(fields.get("Template Version")) !== TEMPLATE_VERSION_V2) {
     throw new ImportParseError("import.error.template_version");
   }
@@ -178,33 +178,72 @@ function normalizeRateCard(sheets: Map<string, ParsedSheet>): RateCardImport {
 
   const buildingRows = requiredSheet(sheets, "Building Prices");
   const packagePriceRows = requiredSheet(sheets, "Package Prices");
-  const packageBuildingRows = requiredSheet(sheets, "Package Buildings");
-  for (const rows of [buildingRows, packagePriceRows, packageBuildingRows]) assertRowLimit(rows);
-  const buildingColumns = assertHeaders("Building Prices", buildingRows, RATE_CARD_HEADERS["Building Prices"]);
-  const packagePriceColumns = assertHeaders("Package Prices", packagePriceRows, RATE_CARD_HEADERS["Package Prices"]);
-  const packageBuildingColumns = assertHeaders("Package Buildings", packageBuildingRows, RATE_CARD_HEADERS["Package Buildings"]);
+  const packageMembershipRows = requiredSheet(sheets, "Package Membership");
+  for (const rows of [buildingRows, packagePriceRows, packageMembershipRows]) assertRowLimit(rows);
+  const buildingColumns = assertHeaders("Building Prices", buildingRows, RATE_CARD_BUILDING_PRICE_HEADERS);
+  const packagePriceColumns = assertHeaders("Package Prices", packagePriceRows, RATE_CARD_PACKAGE_PRICE_HEADERS);
+  const packageMembershipColumns = assertHeaders("Package Membership", packageMembershipRows, RATE_CARD_PACKAGE_MEMBERSHIP_HEADERS);
 
   return {
     templateVersion: TEMPLATE_VERSION_V2,
-    versionCode: text(fields.get("Version Code")),
-    effectiveDate: dateText(fields.get("Effective Date")),
     currency: "IDR",
     buildingPrices: buildingRows.slice(1).map((row) => ({
       rowNumber: row.rowNumber,
       irisBuildingId: text(value(row, buildingColumns, "IRIS Building ID")),
-      priceIdr: text(value(row, buildingColumns, "Price IDR")),
+      priceIdr: exactText(value(row, buildingColumns, "Price IDR")),
     })),
     packagePrices: packagePriceRows.slice(1).map((row) => ({
       rowNumber: row.rowNumber,
       packageCode: text(value(row, packagePriceColumns, "Package Code")),
-      priceIdr: text(value(row, packagePriceColumns, "Price IDR")),
+      priceIdr: exactText(value(row, packagePriceColumns, "Price IDR")),
     })),
-    packageBuildings: packageBuildingRows.slice(1).map((row) => ({
+    packageMemberships: packageMembershipRows.slice(1).map((row) => ({
       rowNumber: row.rowNumber,
-      packageCode: text(value(row, packageBuildingColumns, "Package Code")),
-      irisBuildingId: text(value(row, packageBuildingColumns, "IRIS Building ID")),
+      packageCode: text(value(row, packageMembershipColumns, "Package Code")),
+      irisBuildingId: text(value(row, packageMembershipColumns, "IRIS Building ID")),
     })),
   };
+}
+
+function invalidRateCardCsvCell(row: SourceRow, column: string): never {
+  throw new ImportParseError("import.error.value_invalid", {
+    sheet: "Rate Card",
+    rowNumber: row.rowNumber,
+    column,
+  });
+}
+
+function normalizeRateCardCsv(rows: SourceRow[]): RateCardImport {
+  rows = nonBlankRows(rows);
+  assertRowLimit(rows);
+  const columns = assertHeaders("Rate Card", rows, RATE_CARD_HEADERS);
+  const result: RateCardImport = {
+    templateVersion: TEMPLATE_VERSION_V2,
+    currency: "IDR",
+    buildingPrices: [],
+    packagePrices: [],
+    packageMemberships: [],
+  };
+
+  for (const row of rows.slice(1)) {
+    const recordType = text(value(row, columns, "Record Type"));
+    const irisBuildingId = text(value(row, columns, "IRIS Building ID"));
+    const packageCode = text(value(row, columns, "Package Code"));
+    const priceIdr = exactText(value(row, columns, "Price IDR"));
+    if (recordType === "BUILDING_PRICE") {
+      if (packageCode !== "") invalidRateCardCsvCell(row, "Package Code");
+      result.buildingPrices.push({ rowNumber: row.rowNumber, irisBuildingId, priceIdr });
+    } else if (recordType === "PACKAGE_PRICE") {
+      if (irisBuildingId !== "") invalidRateCardCsvCell(row, "IRIS Building ID");
+      result.packagePrices.push({ rowNumber: row.rowNumber, packageCode, priceIdr });
+    } else if (recordType === "PACKAGE_MEMBER") {
+      if (priceIdr !== "") invalidRateCardCsvCell(row, "Price IDR");
+      result.packageMemberships.push({ rowNumber: row.rowNumber, packageCode, irisBuildingId });
+    } else {
+      invalidRateCardCsvCell(row, "Record Type");
+    }
+  }
+  return result;
 }
 
 function assertFiles(files: readonly ImportSourceFile[]): void {
@@ -250,15 +289,8 @@ export async function parseImportFiles(dataType: "building" | "package" | "rate_
   if (files.length === 1 && extension(files[0].filename) === ".xlsx") {
     return normalizeRateCard(await parseWorkbook(files[0].body));
   }
-  const names = files.map((file) => file.filename).sort();
-  if (names.length !== RATE_CARD_CSV_FILES.length || names.some((name, index) => name !== RATE_CARD_CSV_FILES[index])) {
-    throw new ImportParseError("import.error.file_set_invalid");
+  if (files.length === 1 && extension(files[0].filename) === ".csv") {
+    return normalizeRateCardCsv(parseCsv(files[0].body));
   }
-  const byName = new Map(files.map((file) => [file.filename, file]));
-  return normalizeRateCard(new Map([
-    ["Metadata", { name: "Metadata", rows: parseCsv(byName.get("metadata.csv")!.body) }],
-    ["Building Prices", { name: "Building Prices", rows: parseCsv(byName.get("building-prices.csv")!.body) }],
-    ["Package Prices", { name: "Package Prices", rows: parseCsv(byName.get("package-prices.csv")!.body) }],
-    ["Package Buildings", { name: "Package Buildings", rows: parseCsv(byName.get("package-buildings.csv")!.body) }],
-  ]));
+  throw new ImportParseError("import.error.file_set_invalid");
 }
