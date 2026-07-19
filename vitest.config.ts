@@ -10,7 +10,9 @@ export default defineConfig({
   test: {
     exclude: [
       ...configDefaults.exclude,
+      ".worktrees/**",
       "exports/**",
+      "test-results/**",
       "**/*.integration.test.ts",
       "tests/quotation.test.ts",
       "tests/localization.test.ts",
