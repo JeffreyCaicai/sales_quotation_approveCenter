@@ -139,7 +139,7 @@ async function createAndSubmitQuote(page: Page, scenario: QuoteScenario): Promis
   await page.getByRole("button", { name: /Kopi Nusantara/ }).click();
   await page
     .getByRole("region", { name: "Select customer and brand" })
-    .getByRole("combobox")
+    .getByRole("combobox", { name: /^Brand/ })
     .selectOption("brand-kopi-kenangan");
   await nextStep(page);
 
