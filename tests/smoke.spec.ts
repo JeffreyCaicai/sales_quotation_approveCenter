@@ -41,23 +41,23 @@ test("no Bonus routes directly to Head of Sales", async ({ page, request }) => {
   await expect(managerRow.getByRole("button", { name: "Review quotation" })).toBeVisible();
 });
 
-test("65% placement discount plus a small Bonus routes directly to Business Control", async ({ page }) => {
+test("65% customer discount stays with Head of Sales when Bonus raises effective discount", async ({ page }) => {
   const quoteNumber = await createAndSubmitQuote(page, {
     bonus: { resourceName: "Pacific Place Jakarta", weeks: 1 },
     discount: 65,
   });
 
-  await expect(quoteRow(page, quoteNumber)).toContainText("Awaiting Head of Business Control");
-  await switchRole(page, USERS.businessControl);
-  const businessControlRow = quoteRow(page, quoteNumber);
-  await expect(businessControlRow).toBeVisible();
-  await expect(businessControlRow.getByRole("button", { name: "Review quotation" })).toBeVisible();
+  await expect(quoteRow(page, quoteNumber)).toContainText("Awaiting Head of Sales");
+  await switchRole(page, USERS.manager);
+  const managerRow = quoteRow(page, quoteNumber);
+  await expect(managerRow).toBeVisible();
+  await expect(managerRow.getByRole("button", { name: "Review quotation" })).toBeVisible();
 });
 
-test("65% placement discount plus a larger Bonus routes directly to CEO", async ({ page }) => {
+test("customer discount above 75 routes directly to CEO even with Bonus", async ({ page }) => {
   const quoteNumber = await createAndSubmitQuote(page, {
     bonus: { resourceName: "Pacific Place Jakarta", weeks: 5 },
-    discount: 65,
+    discount: 80,
   });
 
   await expect(quoteRow(page, quoteNumber)).toContainText("Awaiting CEO");
@@ -89,6 +89,7 @@ test("returned quotation can add Bonus, resubmit as V2, and reroute", async ({ p
   await nextStep(page);
   await setCommercialParameters(page, { bonusWeeks: 5 });
   await nextStep(page);
+  await page.getByLabel("Customer discount").fill("80");
   await expect(page.getByRole("status")).toContainText("CEO · Direct approval");
   await nextStep(page);
   await page.getByRole("button", { name: "Resubmit for approval" }).click();
@@ -107,7 +108,7 @@ test("returned quotation can add Bonus, resubmit as V2, and reroute", async ({ p
 test("approved quotation shows Placement and Bonus with FREE Bonus Nett", async ({ page }) => {
   const quoteNumber = await createAndSubmitQuote(page, {
     bonus: { resourceName: "Pacific Place Jakarta", weeks: 1 },
-    discount: 65,
+    discount: 70,
   });
 
   await switchRole(page, USERS.businessControl);

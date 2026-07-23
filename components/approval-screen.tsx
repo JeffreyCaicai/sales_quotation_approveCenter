@@ -29,7 +29,7 @@ export function ApprovalScreen({ quote, actor, onApprove, onReturn, onBack }: Ap
   const creator = creatorSource ? localizeUser(creatorSource, locale) : undefined;
   const approver = USERS.find((item) => item.id === quote.requiredApproverId);
   const displayApprover = approver ? localizeUser(approver, locale) : undefined;
-  const band = getDiscountBand(quote.pricing.effectiveDiscountRate);
+  const band = getDiscountBand(quote.discount);
   const canDecide = canApproveQuote(quote, actor, APPROVAL_DIRECTORY);
 
   useEffect(() => {
@@ -60,7 +60,7 @@ export function ApprovalScreen({ quote, actor, onApprove, onReturn, onBack }: Ap
         <section className="approval-card"><header className="approval-card__heading"><span>04</span><div><h2>{t("approval.versionAndHistory")}</h2><p>{t("approval.versionHelp")}</p></div></header><QuoteVersionHistory quote={quote} /></section>
       </main>
       <aside className="approval-sidebar">
-        <section className={`approval-risk approval-risk--${band}`}><span>{t("commercial.effectiveDiscount")}</span><strong>{formatNumber(Math.round(quote.pricing.effectiveDiscountRate * 100) / 100)}%</strong><p>{t(riskMessageKey(band))}</p></section>
+        <section className={`approval-risk approval-risk--${band}`}><span>{t("wizard.customerDiscount")}</span><strong>{formatNumber(quote.discount)}%</strong><p>{t(riskMessageKey(band))}</p></section>
         <section className="approval-ledger"><header><span>{t("approval.pricingSummary")}</span><h2>{t("approval.calculationDetails")}</h2></header><dl>
           <LedgerRow label={t("commercial.placementGross")} amount={quote.pricing.placementGross} />
           <LedgerRow label={t("approval.discountDeduction", { discount: formatNumber(quote.discount) })} amount={-quote.pricing.placementDiscountAmount} discount />

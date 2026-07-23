@@ -113,7 +113,7 @@ export function QuoteWizard({ initialQuote, salesUser, onCancel, onSave, onSubmi
     ...input,
     discount: Number.isFinite(input.discount) ? input.discount : 0,
   });
-  const approval = approvalPath(pricing.effectiveDiscountRate);
+  const approval = approvalPath(values.discount);
 
   const clearErrors = (...keys: string[]) => {
     setErrors((current) => {
@@ -1081,15 +1081,15 @@ function getValidationErrors(input: QuoteInput, salesId: string): Record<string,
   };
 }
 
-function approvalPath(effectiveDiscountRate: number) {
-  if (effectiveDiscountRate > 75) {
+function approvalPath(customerDiscount: number) {
+  if (customerDiscount > 75) {
     return {
       labelKey: "wizard.approvalExecutive",
       tone: "executive",
       descriptionKey: "wizard.approvalExecutiveHelp",
     } as const;
   }
-  if (effectiveDiscountRate > 65) {
+  if (customerDiscount > 65) {
     return {
       labelKey: "wizard.approvalElevated",
       tone: "elevated",

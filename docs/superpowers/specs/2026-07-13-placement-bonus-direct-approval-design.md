@@ -2,7 +2,7 @@
 
 ## Purpose
 
-The quotation prototype currently treats Bonus as a numeric scheduling field attached to Placement. The confirmed quotation template and business workflow establish that Bonus is instead a separate commercial selection with its own buildings or sales package, its own campaign parameters, and a Rate Card value. Bonus is free to the customer, but its gross value must be included when the system calculates the effective discount used for approval routing.
+The quotation prototype currently treats Bonus as a numeric scheduling field attached to Placement. The confirmed quotation template and business workflow establish that Bonus is instead a separate commercial selection with its own buildings or sales package, its own campaign parameters, and a Rate Card value. Bonus is free to the customer, and its gross value is included in the effective discount shown as a commercial and analytics metric. Approval routing uses the customer discount entered by Sales.
 
 This change updates the interactive demo and the formal application source while preserving the existing customer-to-Sales PIC restriction, quotation version history, return-and-resubmit workflow, English localization, IDR currency, and simulated 6% tax used by the prototype.
 
@@ -46,19 +46,19 @@ Tax = Total Nett × simulated tax rate
 Total Including Tax = Total Nett + Tax
 ```
 
-All persisted monetary values are integer IDR. Effective discount is retained with sufficient precision for correct boundary routing and displayed to two decimal places where appropriate.
+All persisted monetary values are integer IDR. Effective discount is retained with sufficient precision for commercial analysis and displayed to two decimal places where appropriate.
 
 ### Direct approval routing
 
-Approval is single-step and non-cascading. The effective discount determines exactly one approver:
+Approval is single-step and non-cascading. The customer discount determines exactly one approver:
 
 - `<= 65%`: Head of Sales
-- `> 65% and <= 70%`: Head of Business Control
-- `> 70%`: CEO
+- `> 65% and <= 75%`: Head of Business Control
+- `> 75%`: CEO
 
 The application represents these approvers as roles and resolves the actual user from configuration or user data. Ayu, April, and Thomas may appear as demo users, but routing logic must never depend on their names.
 
-An approver either approves or returns the quotation. Approval immediately locks the submitted version and makes the quotation available for formal document generation. A return sends the quotation back to Sales with a required reason. On resubmission, the application creates a new immutable snapshot, recalculates the effective discount, and routes directly to the approver for the new band.
+An approver either approves or returns the quotation. Approval immediately locks the submitted version and makes the quotation available for formal document generation. A return sends the quotation back to Sales with a required reason. On resubmission, the application creates a new immutable snapshot and routes directly to the approver for the updated customer-discount band.
 
 ## Wizard Design
 
@@ -148,8 +148,8 @@ No Sites project is created, and no PostgreSQL, MinIO, import API, CI/CD, or VPS
 Automated verification must prove:
 
 - No Bonus produces zero Bonus gross and the expected effective discount.
-- A free Bonus selection increases Total Gross and can move approval from Head of Sales to Head of Business Control or CEO.
-- 65%, 70%, and values above 70% route at exact confirmed boundaries.
+- A free Bonus selection increases Total Gross and effective discount without changing the approval route at the same customer discount.
+- 65%, 75%, and values above 75% route at exact confirmed boundaries.
 - Each approver can only act on their own direct queue.
 - Return and resubmit creates a new immutable version and recalculates the approver.
 - Placement and Bonus resource mode, price, and campaign parameters are independently validated.

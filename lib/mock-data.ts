@@ -193,7 +193,7 @@ function seedQuote({
     status: route,
     approverRole,
     requiredApproverId,
-  } = resolveApprovalRoute(pricing.effectiveDiscountRate, "sales-chen", APPROVAL_DIRECTORY);
+  } = resolveApprovalRoute(discount, "sales-chen", APPROVAL_DIRECTORY);
   const history: ApprovalEvent[] = [{
     id: `${id}-submitted`, role: "sales", action: "submitted", actorId: "sales-chen",
     actorName: USERS[0].name, createdAt: submittedAt, version: 1,
@@ -263,14 +263,14 @@ export const SEEDED_QUOTES: Quote[] = [
     customerId: "customer-bank-mandiri", brandId: "brand-livin",
     placement: selection("package", ["package-cbd-premium"], 4, 180),
     bonus: selection("building", ["building-menara-bca"], 4, 60),
-    discount: 55, status: "pending_business_control", submittedAt: "2026-07-06T01:10:00.000Z",
+    discount: 70, status: "pending_business_control", submittedAt: "2026-07-06T01:10:00.000Z",
   }),
   seedQuote({
     id: "quote-pending-ceo", quoteNumber: "DEMO-Q-202607-004",
     customerId: "customer-bank-mandiri", brandId: "brand-livin",
     placement: selection("package", ["package-jakarta-signature"], 8, 320),
     bonus: selection("building", ["building-pacific-place"], 8, 100),
-    discount: 70, status: "pending_ceo", submittedAt: "2026-07-06T04:25:00.000Z",
+    discount: 80, status: "pending_ceo", submittedAt: "2026-07-06T04:25:00.000Z",
   }),
   seedQuote({
     id: "quote-approved", quoteNumber: "DEMO-Q-202607-005",

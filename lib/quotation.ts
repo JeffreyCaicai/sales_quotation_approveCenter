@@ -70,17 +70,17 @@ export function getDiscountBand(discount: number): DiscountBand {
   return "executive";
 }
 
-export function getApprovalStatus(effectiveDiscountRate: number): QuoteStatus {
-  if (!Number.isFinite(effectiveDiscountRate) || effectiveDiscountRate < 0 || effectiveDiscountRate > 100) {
-    throw new RangeError(VALIDATION.effectiveDiscountRateRange);
+export function getApprovalStatus(customerDiscount: number): QuoteStatus {
+  if (!Number.isFinite(customerDiscount) || customerDiscount < 0 || customerDiscount > 100) {
+    throw new RangeError(VALIDATION.discountRange);
   }
-  if (effectiveDiscountRate <= 65) return "pending_manager";
-  if (effectiveDiscountRate <= 75) return "pending_business_control";
+  if (customerDiscount <= 65) return "pending_manager";
+  if (customerDiscount <= 75) return "pending_business_control";
   return "pending_ceo";
 }
 
-export function getNextApproval(effectiveDiscountRate: number): QuoteStatus {
-  return getApprovalStatus(effectiveDiscountRate);
+export function getNextApproval(customerDiscount: number): QuoteStatus {
+  return getApprovalStatus(customerDiscount);
 }
 
 export interface ApprovalRoute {
@@ -90,11 +90,11 @@ export interface ApprovalRoute {
 }
 
 export function resolveApprovalRoute(
-  effectiveDiscountRate: number,
+  customerDiscount: number,
   salesOwnerId: string,
   approvalDirectory: ApprovalDirectory,
 ): ApprovalRoute {
-  let status = getApprovalStatus(effectiveDiscountRate) as SubmittedQuote["status"];
+  let status = getApprovalStatus(customerDiscount) as SubmittedQuote["status"];
   let approverRole = getApproverRole(status);
   if (approverRole === "manager" && approvalDirectory.manager === salesOwnerId) {
     status = "pending_business_control";
@@ -326,7 +326,7 @@ export function submitQuote(
   const bonus = input.bonus ? toCommercialSelection(input.bonus) : undefined;
   const pricing = calculatePricing(input);
   const { status, approverRole, requiredApproverId } = resolveApprovalRoute(
-    pricing.effectiveDiscountRate,
+    input.discount,
     salesOwnerId,
     approvalDirectory,
   );
@@ -439,11 +439,7 @@ export function canApproveQuote(
   if (actor.id !== quote.requiredApproverId) return false;
   if (!approvalDirectory) return true;
   try {
-    const route = resolveApprovalRoute(
-      quote.pricing.effectiveDiscountRate,
-      quote.salesId,
-      approvalDirectory,
-    );
+    const route = resolveApprovalRoute(quote.discount, quote.salesId, approvalDirectory);
     return route.status === quote.status
       && route.approverRole === actor.role
       && route.requiredApproverId === actor.id;

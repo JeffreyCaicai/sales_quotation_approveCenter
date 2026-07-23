@@ -2,9 +2,10 @@
 
 ## Confirmed business rules
 
-- Effective discount up to and including 65% routes directly to Ayu, Head of Sales.
-- Effective discount above 65% and up to and including 75% routes directly to April, Head of Business Control.
-- Effective discount above 75% routes directly to Thomas, CEO.
+- Customer discount up to and including 65% routes directly to Ayu, Head of Sales.
+- Customer discount above 65% and up to and including 75% routes directly to April, Head of Business Control.
+- Customer discount above 75% routes directly to Thomas, CEO.
+- Effective discount, including the value of a free Bonus, remains a commercial-risk and analytics metric only. It never determines the approver.
 - Approval is single-step. A quotation is not passed through lower approval levels first.
 - Ayu must never approve her own quotation. A quotation commercially owned by Ayu that would normally route to Ayu is escalated to April.
 - Amal and Desti may enter quotations on behalf of explicitly assigned Freelancer sales owners.
@@ -28,7 +29,7 @@ Users may receive quotation-entry capabilities independently of their approval r
 
 ## Routing
 
-The routing resolver receives the effective discount, commercial owner, and approval directory. It first calculates the normal discount band, then applies the no-self-approval rule. It returns the pending status, approver role, and exact required approver identity as one atomic result.
+The routing resolver receives the customer discount entered by Sales, commercial owner, and approval directory. It first calculates the normal discount band, then applies the no-self-approval rule. It returns the pending status, approver role, and exact required approver identity as one atomic result.
 
 ## Compatibility
 
@@ -37,4 +38,3 @@ Existing local demo quotations without `createdById` are migrated during loading
 ## UI behavior
 
 Ordinary sales users see the existing quotation flow unchanged. Amal and Desti see an “Enter quotation for” selector before customer selection. Changing the commercial owner clears customer and brand selections so stale assignments cannot be submitted.
-

@@ -52,11 +52,11 @@ test("free bonus contributes gross value and raises the effective discount", () 
   assert.ok(Math.abs(pricing.effectiveDiscountRate - 70.444444) < 0.000001);
 });
 
-test("effective discount routes directly at confirmed boundaries", () => {
+test("customer discount routes directly at confirmed boundaries", () => {
   assert.equal(getApprovalStatus(65), "pending_manager");
   assert.equal(getApprovalStatus(65.000001), "pending_business_control");
-  assert.equal(getApprovalStatus(70), "pending_business_control");
-  assert.equal(getApprovalStatus(70.000001), "pending_ceo");
+  assert.equal(getApprovalStatus(75), "pending_business_control");
+  assert.equal(getApprovalStatus(75.000001), "pending_ceo");
 });
 ```
 
@@ -85,7 +85,7 @@ In `lib/types.ts`:
 In `lib/quotation.ts`:
 
 - calculate Placement Nett, zero Bonus Nett, Total Gross, Total Nett, effective discount, tax, and total;
-- route directly from effective discount;
+- route directly from customer discount;
 - validate Placement always and Bonus only when enabled;
 - validate finite integer campaign parameters and finite nonnegative gross/traffic/impressions.
 

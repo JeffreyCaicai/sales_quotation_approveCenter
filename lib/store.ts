@@ -227,7 +227,7 @@ function isVersionSnapshot(value: unknown, salesId: string): value is QuoteVersi
       bonus: value.bonus,
       discount: value.discount,
     });
-    const route = resolveApprovalRoute(expected.effectiveDiscountRate, salesId, APPROVAL_DIRECTORY);
+    const route = resolveApprovalRoute(value.discount, salesId, APPROVAL_DIRECTORY);
     return value.requiredApproverId === route.requiredApproverId
       && arePricingEqual(value.pricing, expected);
   } catch {
@@ -292,7 +292,7 @@ function isWorkflowValid(quote: Quote): boolean {
 
     let route: ReturnType<typeof resolveApprovalRoute>;
     try {
-      route = resolveApprovalRoute(snapshot.pricing.effectiveDiscountRate, quote.salesId, APPROVAL_DIRECTORY);
+      route = resolveApprovalRoute(snapshot.discount, quote.salesId, APPROVAL_DIRECTORY);
     } catch {
       return false;
     }

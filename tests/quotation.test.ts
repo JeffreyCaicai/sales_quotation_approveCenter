@@ -140,9 +140,9 @@ test("a sales user cannot submit on behalf of an owner outside the explicit prox
   }, undefined, sales, references, approvalDirectory), /quotation\.submit\.ownerForbidden/);
 });
 
-test("approval routing rejects invalid effective discount rates", () => {
+test("approval routing rejects invalid customer discount rates", () => {
   for (const rate of [Number.NaN, Number.POSITIVE_INFINITY, -0.1, 100.1]) {
-    assert.throws(() => getApprovalStatus(rate), /validation\.effectiveDiscountRateRange/);
+    assert.throws(() => getApprovalStatus(rate), /validation\.discountRange/);
   }
 });
 
@@ -243,16 +243,17 @@ test("reference validation rejects forged catalog traffic and impressions", () =
   }), undefined, sales, references, approvalDirectory), /validation\.impressionsMismatch/);
 });
 
-test("submission snapshots both sections and routes from effective discount", () => {
+test("submission snapshots both sections and routes from customer discount", () => {
   const input = catalogQuoteInput({
-    discount: 55,
-    placement: catalogSelection("package", [PACKAGES[0].id]),
-    bonus: catalogSelection("building", [BUILDINGS[1].id]),
+    discount: 50,
+    placement: catalogSelection("building", [BUILDINGS[0].id]),
+    bonus: catalogSelection("package", [PACKAGES[0].id]),
   });
   const submitted = submitQuote(input, undefined, sales, references, approvalDirectory);
-  assert.equal(submitted.status, "pending_business_control");
-  assert.equal(submitted.requiredApproverId, businessControl.id);
-  assert.equal(submitted.versionSnapshots[0].requiredApproverId, businessControl.id);
+  assert.ok(submitted.pricing.effectiveDiscountRate > 75);
+  assert.equal(submitted.status, "pending_manager");
+  assert.equal(submitted.requiredApproverId, manager.id);
+  assert.equal(submitted.versionSnapshots[0].requiredApproverId, manager.id);
   assert.deepEqual(submitted.versionSnapshots[0].placement, input.placement);
   assert.deepEqual(submitted.versionSnapshots[0].bonus, input.bonus);
   assert.deepEqual(submitted.versionSnapshots[0].pricing, submitted.pricing);
@@ -275,7 +276,7 @@ test("submission rejects unknown or role-mismatched approval directory identitie
     { ...approvalDirectory, manager: businessControl.id },
   ), /quotation\.approval\.stageRequired/);
   assert.throws(() => submitQuote(
-    catalogQuoteInput({ discount: 65, bonus: catalogSelection("building", [BUILDINGS[1].id]) }),
+    catalogQuoteInput({ discount: 80, bonus: catalogSelection("building", [BUILDINGS[1].id]) }),
     undefined,
     sales,
     references,
@@ -286,8 +287,8 @@ test("submission rejects unknown or role-mismatched approval directory identitie
 test("all three approvers act only on their direct queue and approval is final", () => {
   const cases = [
     [catalogQuoteInput({ discount: 50 }), manager],
-    [catalogQuoteInput({ discount: 43, bonus: catalogSelection("building", [BUILDINGS[1].id]) }), businessControl],
-    [catalogQuoteInput({ discount: 65, bonus: catalogSelection("building", [BUILDINGS[1].id]) }), ceo],
+    [catalogQuoteInput({ discount: 70, bonus: catalogSelection("building", [BUILDINGS[1].id]) }), businessControl],
+    [catalogQuoteInput({ discount: 80, bonus: catalogSelection("building", [BUILDINGS[1].id]) }), ceo],
   ] as const;
   for (const [input, approver] of cases) {
     const pending = submitQuote(input, undefined, sales, references, approvalDirectory);
@@ -334,7 +335,7 @@ test("resubmission keeps V1 immutable and reroutes V2", () => {
   const returned = returnQuote(submitted, manager, "Add bonus");
   const lockedV1 = structuredClone(returned.versionSnapshots[0]);
   const resubmitted = submitQuote(catalogQuoteInput({
-    discount: 65,
+    discount: 80,
     placement: catalogSelection("building", [BUILDINGS[0].id]),
     bonus: catalogSelection("building", [BUILDINGS[1].id]),
   }), returned, sales, references, approvalDirectory);
@@ -505,12 +506,12 @@ test("generated direct approval and return workflows survive v3 validation", () 
   const generated = [
     approveQuote(submitQuote(catalogQuoteInput({ discount: 50 }), undefined, sales, references, approvalDirectory), manager),
     returnQuote(submitQuote(catalogQuoteInput({
-      discount: 43,
+      discount: 70,
       placement: catalogSelection("building", [BUILDINGS[0].id]),
       bonus: catalogSelection("building", [BUILDINGS[1].id]),
     }), undefined, sales, references, approvalDirectory), businessControl, "Revise"),
     approveQuote(submitQuote(catalogQuoteInput({
-      discount: 65,
+      discount: 80,
       placement: catalogSelection("building", [BUILDINGS[0].id]),
       bonus: catalogSelection("building", [BUILDINGS[1].id]),
     }), undefined, sales, references, approvalDirectory), ceo),

@@ -233,8 +233,10 @@ test("approval copy describes one direct approver and never the retired manager-
   const englishCopy = Object.values(dictionaryLeaves(translations.en)).join("\n");
   const chineseCopy = Object.values(dictionaryLeaves(translations["zh-CN"])).join("\n");
 
-  assert.match(englishCopy, /effective discount[^\n]*directly|direct approver/i);
-  assert.match(chineseCopy, /有效折扣[^\n]*直接|直接审批人/);
+  assert.match(englishCopy, /customer discount[^\n]*(?:directly|direct approval)|direct approver/i);
+  assert.match(chineseCopy, /客户折扣[^\n]*(?:直接|审批)|直接审批人/);
+  assert.doesNotMatch(englishCopy, /effective discount (?:up to|above)/i);
+  assert.doesNotMatch(chineseCopy, /有效折扣(?:不超过|大于)/);
   assert.doesNotMatch(englishCopy, /Sales Manager\s*(?:→|->)\s*CEO|after (?:the )?Sales Manager|goes to the CEO after|passed Sales Manager review/i);
   assert.doesNotMatch(chineseCopy, /销售主管\s*(?:→|->)\s*CEO|主管通过后.*CEO|主管批准后.*CEO|完成主管审批.*CEO|经主管.*流转.*CEO/);
   assert.doesNotMatch(englishCopy, /Bonus must be a nonnegative integer|Spot and Bonus confirm scheduling/i);

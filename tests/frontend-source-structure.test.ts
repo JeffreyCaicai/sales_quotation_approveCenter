@@ -36,14 +36,15 @@ describe("quotation wizard source structure", () => {
     expect(wizardSource).toContain('t("commercial.addBonus")');
   });
 
-  it("derives nested pricing and routes on effective discount", () => {
+  it("derives nested pricing and routes on customer discount", () => {
     expect(wizardSource).toContain("tvcDurationSeconds");
     expect(wizardSource).toContain("pricing.placementGross");
     expect(wizardSource).toContain("pricing.bonusGross");
     expect(wizardSource).toContain("pricing.totalGross");
     expect(wizardSource).toContain("pricing.totalNet");
     expect(wizardSource).toContain("pricing.totalIncludingTax");
-    expect(wizardSource).toContain("approvalPath(pricing.effectiveDiscountRate)");
+    expect(wizardSource).toContain("approvalPath(values.discount)");
+    expect(wizardSource).toContain("pricing.effectiveDiscountRate");
     expect(wizardSource).not.toContain("pricing.total)");
     expect(wizardSource).not.toContain('id="bonus"');
   });
