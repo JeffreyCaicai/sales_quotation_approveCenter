@@ -1,4 +1,4 @@
-import { calculatePricing, getApprovalStatus } from "./quotation.ts";
+import { calculatePricing, resolveApprovalRoute } from "./quotation.ts";
 import type {
   ApprovalDirectory,
   ApprovalEvent,
@@ -19,14 +19,33 @@ export function toDemoIdr(cnyAmount: number): number {
 }
 
 export const USERS: User[] = [
-  { id: "sales-chen", name: "陈晨", role: "sales", title: "雅加达客户经理", isDemoData: true },
+  {
+    id: "sales-chen", name: "陈晨", role: "sales", title: "雅加达客户经理",
+    salesGroup: "sales_team", canCreateQuotations: true, isDemoData: true,
+  },
   {
     id: "manager-lin",
     name: "Ayu Purnama",
     role: "manager",
     title: "销售负责人",
     teamMemberIds: ["sales-chen"],
+    salesGroup: "sales_team",
+    canCreateQuotations: true,
     isDemoData: true,
+  },
+  {
+    id: "sales-freelancer-demo", name: "Freelancer Demo", role: "sales", title: "Freelance Sales",
+    salesGroup: "freelancer", canCreateQuotations: false, isDemoData: true,
+  },
+  {
+    id: "sales-amal", name: "Amal", role: "sales", title: "Sales Controller",
+    salesGroup: "freelancer", canCreateQuotations: true,
+    canCreateOnBehalfOfSalesIds: ["sales-freelancer-demo"], isDemoData: true,
+  },
+  {
+    id: "sales-desti", name: "Desti", role: "sales", title: "Sales Controller",
+    salesGroup: "freelancer", canCreateQuotations: true,
+    canCreateOnBehalfOfSalesIds: ["sales-freelancer-demo"], isDemoData: true,
   },
   {
     id: "business-control-april",
@@ -70,6 +89,21 @@ export const CUSTOMERS: Customer[] = [
       { id: "brand-gofood", name: "GoFood", category: "本地生活", isDemoData: true },
       { id: "brand-tokopedia", name: "Tokopedia", category: "电子商务", isDemoData: true },
     ],
+  },
+  {
+    id: "customer-ayu-demo", name: "Ayu Direct Account", industry: "企业客户",
+    salesId: "manager-lin", isDemoData: true,
+    brands: [{ id: "brand-ayu-demo", name: "Ayu Demo Brand", category: "企业服务", isDemoData: true }],
+  },
+  {
+    id: "customer-freelancer-demo", name: "Freelancer Account", industry: "本地服务",
+    salesId: "sales-freelancer-demo", isDemoData: true,
+    brands: [{
+      id: "brand-freelancer-demo",
+      name: "Freelancer Demo Brand",
+      category: "本地服务",
+      isDemoData: true,
+    }],
   },
 ];
 
@@ -129,12 +163,6 @@ function selection(
   };
 }
 
-const APPROVER_ROLE_BY_STATUS = {
-  pending_manager: "manager",
-  pending_business_control: "business_control",
-  pending_ceo: "ceo",
-} as const;
-
 function seedQuote({
   id,
   quoteNumber,
@@ -161,9 +189,11 @@ function seedQuote({
   comment?: string;
 }): Quote {
   const pricing = calculatePricing({ customerId, brandId, placement, bonus, discount, taxRate: DEMO_TAX_RATE });
-  const route = getApprovalStatus(pricing.effectiveDiscountRate) as keyof typeof APPROVER_ROLE_BY_STATUS;
-  const approverRole = APPROVER_ROLE_BY_STATUS[route];
-  const requiredApproverId = APPROVAL_DIRECTORY[approverRole];
+  const {
+    status: route,
+    approverRole,
+    requiredApproverId,
+  } = resolveApprovalRoute(pricing.effectiveDiscountRate, "sales-chen", APPROVAL_DIRECTORY);
   const history: ApprovalEvent[] = [{
     id: `${id}-submitted`, role: "sales", action: "submitted", actorId: "sales-chen",
     actorName: USERS[0].name, createdAt: submittedAt, version: 1,
@@ -185,6 +215,7 @@ function seedQuote({
     id,
     quoteNumber,
     salesId: "sales-chen",
+    createdById: "sales-chen",
     customerId,
     brandId,
     placement: structuredClone(placement),
@@ -239,7 +270,7 @@ export const SEEDED_QUOTES: Quote[] = [
     customerId: "customer-bank-mandiri", brandId: "brand-livin",
     placement: selection("package", ["package-jakarta-signature"], 8, 320),
     bonus: selection("building", ["building-pacific-place"], 8, 100),
-    discount: 65, status: "pending_ceo", submittedAt: "2026-07-06T04:25:00.000Z",
+    discount: 70, status: "pending_ceo", submittedAt: "2026-07-06T04:25:00.000Z",
   }),
   seedQuote({
     id: "quote-approved", quoteNumber: "DEMO-Q-202607-005",

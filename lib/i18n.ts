@@ -115,6 +115,7 @@ interface Dictionary {
     emptyDescription: string;
     quoteCustomer: string;
     owner: string;
+    createdBy: string;
     discount: string;
     taxIncludedTotal: string;
     status: string;
@@ -181,6 +182,8 @@ interface Dictionary {
     reviewHelp: string;
     customer: string;
     brand: string;
+    salesOwner: string;
+    salesOwnerHelp: string;
     selectBrand: string;
     selectCustomerFirst: string;
     placementMode: string;
@@ -248,6 +251,7 @@ interface Dictionary {
     customer: string;
     brand: string;
     owner: string;
+    createdBy: string;
     parameters: string;
     unknownBrand: string;
     resources: string;
@@ -352,6 +356,7 @@ interface Dictionary {
     customer: string;
     brand: string;
     salesOwner: string;
+    createdBy: string;
     campaignPeriod: string;
     periodValue: string;
     resourcesAndItems: string;
@@ -480,7 +485,7 @@ export const translations: Record<Locale, Dictionary> = {
     roleBusinessControl: {
       label: "Head of Business Control",
       eyebrow: "Business Control",
-      description: "Review quotations above 65% and up to 70% effective discount",
+      description: "Review quotations above 65% and up to 75% effective discount",
       symbol: "B",
     },
     roleCeo: {
@@ -557,6 +562,7 @@ export const translations: Record<Locale, Dictionary> = {
       emptyDescription: "New quotations will appear here when they enter this stage.",
       quoteCustomer: "Quotation / Customer",
       owner: "Owner",
+      createdBy: "Entered by {name}",
       discount: "Discount",
       taxIncludedTotal: "Total incl. tax",
       status: "Status",
@@ -594,6 +600,7 @@ export const translations: Record<Locale, Dictionary> = {
       parametersTitle: "Set campaign parameters", parametersHelp: "The base price scales proportionally from the four-week Rate Card.",
       discountTitle: "Set discount", discountStepHelp: "The approval path updates as the discount changes.",
       reviewTitle: "Review and submit", reviewHelp: "Each quotation is routed directly to one approver based on effective discount.", customer: "Customer", brand: "Brand",
+      salesOwner: "Sales owner", salesOwnerHelp: "Choose the actual commercial owner. Approval routing uses this owner, even when another user enters the quotation on their behalf.",
       selectBrand: "Select a brand", selectCustomerFirst: "Select a customer first", placementMode: "Placement mode",
       buildingMode: "Choose buildings", buildingModeDescription: "Select buildings individually for the customer's target audience.", buildingModeMeta: "Flexible · Multiple selection",
       packageMode: "Predefined sales package", packageModeDescription: "Compare configured area mixes and audience reach.", packageModeMeta: "Fast quote · Single selection",
@@ -604,8 +611,8 @@ export const translations: Record<Locale, Dictionary> = {
       calculationHelp: "Placement and Bonus are selected independently. Bonus Gross contributes to effective discount, while Bonus Nett is FREE.",
       customerDiscount: "Customer discount", discountHelp: "Enter 0–100; the value is the percentage deducted from Rate Card.", currentApprovalPath: "Current approval path",
       approvalManager: "Head of Sales · Direct approval", approvalElevated: "Head of Business Control · Direct approval", approvalExecutive: "CEO · Direct approval",
-      approvalStandardHelp: "An effective discount up to and including 65% is routed directly to the Head of Sales.", approvalElevatedHelp: "An effective discount above 65% and up to 70% is routed directly to the Head of Business Control.",
-      approvalExecutiveHelp: "An effective discount above 70% is routed directly to the CEO.", completeInformation: "Complete the following information first",
+      approvalStandardHelp: "An effective discount up to and including 65% is routed directly to the Head of Sales.", approvalElevatedHelp: "An effective discount above 65% and up to 75% is routed directly to the Head of Business Control.",
+      approvalExecutiveHelp: "An effective discount above 75% is routed directly to the CEO.", completeInformation: "Complete the following information first",
       parameters: "Campaign parameters", approvalPath: "Approval path", notSelected: "Not selected", reviewNotice: "Submission locks this version and routes it directly to the one approver selected by effective discount.",
       cancel: "Cancel", previous: "Previous", next: "Next", resubmit: "Resubmit for approval", submitManager: "Submit for direct approval",
       liveSummary: "Live quotation summary", livePricing: "Live pricing", demo: "Sample", basePrice: "Rate Card base price",
@@ -614,12 +621,12 @@ export const translations: Record<Locale, Dictionary> = {
     },
     approval: {
       back: "Back to dashboard", eyebrow: "Approval Review", title: "Quotation approval details", version: "Version V{version}",
-      clientAndBrand: "Customer & brand", commercialSubject: "Commercial quotation party", customer: "Customer", brand: "Brand", owner: "Owner",
+      clientAndBrand: "Customer & brand", commercialSubject: "Commercial quotation party", customer: "Customer", brand: "Brand", owner: "Owner", createdBy: "Entered by",
       parameters: "Campaign parameters", unknownBrand: "Unknown brand", resources: "Placement resources", versionAndHistory: "Versions & approval record",
       versionHelp: "Review locked commercial snapshots and the approval timeline by version.", discountRisk: "Discount risk",
       riskStandard: "Effective discount up to and including 65%; direct approval by the Head of Sales.",
-      riskElevated: "Effective discount above 65% and up to 70%; direct approval by the Head of Business Control.",
-      riskExecutive: "Effective discount above 70%; direct approval by the CEO.", pricingSummary: "Pricing Summary", calculationDetails: "Calculation details",
+      riskElevated: "Effective discount above 65% and up to 75%; direct approval by the Head of Business Control.",
+      riskExecutive: "Effective discount above 75%; direct approval by the CEO.", pricingSummary: "Pricing Summary", calculationDetails: "Calculation details",
       basePrice: "Rate Card original price", discountDeduction: "Discount deduction ({discount}%)", netPrice: "Net price after discount",
       simulatedTax: "Simulated tax ({tax}%)", totalWithTax: "Total incl. tax", demoNotice: "IDR amounts and the tax rate are prototype sample data.",
       actions: "Approval actions", approve: "Approve quotation", return: "Return for revision", readOnly: "This quotation is not at your approval stage and is read-only.",
@@ -648,7 +655,7 @@ export const translations: Record<Locale, Dictionary> = {
       restrictedEyebrow: "Approval is not complete", restrictedTitle: "Formal quotation unavailable", restrictedHelp: "Only approved quotations can generate, display, or print the formal Quotation.",
       workspace: "QUOTATION WORKSPACE", formalDocument: "Formal commercial document · Sample data", title: "QUOTATION", subtitle: "Quotation",
       reference: "Quotation information", quoteNumber: "Quotation number", issueDate: "Issue date", version: "Quotation version", currency: "Currency", currencyIdr: "IDR · Indonesian rupiah",
-      clientAndBrand: "Customer & brand", customer: "Customer", brand: "Brand", salesOwner: "Sales owner", campaignPeriod: "Campaign period", periodValue: "{weeks} consecutive weeks from schedule confirmation",
+      clientAndBrand: "Customer & brand", customer: "Customer", brand: "Brand", salesOwner: "Sales owner", createdBy: "Entered by", campaignPeriod: "Campaign period", periodValue: "{weeks} consecutive weeks from schedule confirmation",
       resourcesAndItems: "Placement resources & quotation items", item: "Item", typeRegion: "Type / Area", period: "Period", campaignAmount: "Campaign amount", building: "Building", package: "Sales package",
       deliveryMetrics: "Delivery and audience metrics", dailyTraffic: "Daily traffic", monthlyImpressions: "Monthly impressions", occurrenceUnit: "times",
       priceDetails: "Price details", basePrice: "Rate Card base price", discountDeduction: "Discount deduction ({discount}%)", netPrice: "Net price after discount",
@@ -750,7 +757,7 @@ export const translations: Record<Locale, Dictionary> = {
     roleBusinessControl: {
       label: "业务控制负责人",
       eyebrow: "业务控制",
-      description: "审批有效折扣大于 65% 且不超过 70% 的报价",
+      description: "审批有效折扣大于 65% 且不超过 75% 的报价",
       symbol: "控",
     },
     roleCeo: {
@@ -827,6 +834,7 @@ export const translations: Record<Locale, Dictionary> = {
       emptyDescription: "新的报价进入该节点后会显示在这里。",
       quoteCustomer: "报价 / 客户",
       owner: "负责人",
+      createdBy: "由 {name} 代录",
       discount: "折扣",
       taxIncludedTotal: "含税总额",
       status: "状态",
@@ -857,7 +865,8 @@ export const translations: Record<Locale, Dictionary> = {
       stepDiscount: "折扣审批", stepReview: "确认提交", customerTitle: "选择客户与品牌", customerHelp: "仅显示当前 Sales PIC 负责的客户。", modeTitle: "选择投放方式",
       modeHelp: "按单栋楼宇灵活组合，或使用预设销售包。", resourcesTitle: "选择投放资源", resourcesHelp: "Rate Card、流量和曝光均为原型模拟数据。",
       parametersTitle: "设置投放参数", parametersHelp: "基础价格按四周 Rate Card 随周期等比例计算。", discountTitle: "设置折扣", discountStepHelp: "审批路径会随折扣实时变化。",
-      reviewTitle: "确认并提交", reviewHelp: "核对信息后提交；系统按有效折扣直接路由至唯一审批人。", customer: "客户", brand: "品牌", selectBrand: "请选择品牌",
+      reviewTitle: "确认并提交", reviewHelp: "核对信息后提交；系统按有效折扣直接路由至唯一审批人。", customer: "客户", brand: "品牌",
+      salesOwner: "实际销售归属", salesOwnerHelp: "请选择实际负责该业务的销售。即使由他人代录，审批仍按该销售归属与有效折扣路由。", selectBrand: "请选择品牌",
       selectCustomerFirst: "请先选择客户", placementMode: "投放方式", buildingMode: "定点挑楼", buildingModeDescription: "按客户目标逐栋选择，可组合多个楼宇。", buildingModeMeta: "灵活配置 · 多选",
       packageMode: "预设销售包", packageModeDescription: "比较已配置的区域组合与人群覆盖。", packageModeMeta: "快速报价 · 单选", chooseModeFirst: "请返回上一步选择投放方式。",
       resources: "投放资源", searchBuildings: "搜索楼宇", searchPlaceholder: "搜索楼宇名称、区域或类型", packageComparison: "销售包对比", fourWeekRateCard: "价格均为四周 Rate Card",
@@ -865,7 +874,7 @@ export const translations: Record<Locale, Dictionary> = {
       bonus: "Bonus", weekUnit: "周", occurrenceUnit: "次", calculationNote: "计算说明", calculationHelp: "Placement 与 Bonus 独立选择；Bonus 原价计入有效折扣，Bonus 净价为免费。",
       customerDiscount: "客户折扣", discountHelp: "输入 0–100，数值表示从 Rate Card 扣减的比例。", currentApprovalPath: "当前审批路径", approvalManager: "销售负责人 · 直接审批",
       approvalElevated: "业务控制负责人 · 直接审批", approvalExecutive: "CEO · 直接审批", approvalStandardHelp: "有效折扣不超过 65% 时，直接提交销售负责人审批。",
-      approvalElevatedHelp: "有效折扣大于 65% 且不超过 70% 时，直接提交业务控制负责人审批。", approvalExecutiveHelp: "有效折扣大于 70% 时，直接提交 CEO 审批。",
+      approvalElevatedHelp: "有效折扣大于 65% 且不超过 75% 时，直接提交业务控制负责人审批。", approvalExecutiveHelp: "有效折扣大于 75% 时，直接提交 CEO 审批。",
       completeInformation: "请先完善以下信息", parameters: "投放参数", approvalPath: "审批路径", notSelected: "未选择", reviewNotice: "提交后锁定当前版本，并按有效折扣直接路由至唯一审批人。",
       cancel: "取消", previous: "上一步", next: "下一步", resubmit: "重新提交审批", submitManager: "提交直接审批", liveSummary: "实时报价摘要", livePricing: "实时价格",
       demo: "模拟", basePrice: "Rate Card 基础价", discountDeduction: "折扣（{discount}%）", netPrice: "折后净价", simulatedTax: "模拟税费（{tax}%）", totalWithTax: "含税总额",
@@ -873,9 +882,9 @@ export const translations: Record<Locale, Dictionary> = {
     },
     approval: {
       back: "返回工作台", eyebrow: "审批审核", title: "报价审批详情", version: "版本 V{version}", clientAndBrand: "客户与品牌", commercialSubject: "本次商业报价主体", customer: "客户",
-      brand: "品牌", owner: "负责人", parameters: "投放参数", unknownBrand: "未知品牌", resources: "投放资源", versionAndHistory: "版本与审批记录", versionHelp: "按版本核对商业快照与审批时间线",
-      discountRisk: "折扣风险", riskStandard: "有效折扣不超过 65%，由销售负责人直接审批。", riskElevated: "有效折扣大于 65% 且不超过 70%，由业务控制负责人直接审批。",
-      riskExecutive: "有效折扣大于 70%，由 CEO 直接审批。", pricingSummary: "价格摘要", calculationDetails: "计算明细", basePrice: "Rate Card 原价",
+      brand: "品牌", owner: "负责人", createdBy: "代录人", parameters: "投放参数", unknownBrand: "未知品牌", resources: "投放资源", versionAndHistory: "版本与审批记录", versionHelp: "按版本核对商业快照与审批时间线",
+      discountRisk: "折扣风险", riskStandard: "有效折扣不超过 65%，由销售负责人直接审批。", riskElevated: "有效折扣大于 65% 且不超过 75%，由业务控制负责人直接审批。",
+      riskExecutive: "有效折扣大于 75%，由 CEO 直接审批。", pricingSummary: "价格摘要", calculationDetails: "计算明细", basePrice: "Rate Card 原价",
       discountDeduction: "折扣减免 ({discount}%)", netPrice: "折后净价", simulatedTax: "模拟税费 ({tax}%)", totalWithTax: "含税总额", demoNotice: "印尼盾金额与税率均为原型模拟数据。",
       actions: "审批操作", approve: "批准报价", return: "退回修改", readOnly: "当前报价不在你的审批节点，仅供查看。", returnTitle: "退回报价修改", approveTitle: "确认批准报价",
       close: "关闭弹窗", returnReason: "退回原因", required: "必填", returnPlaceholder: "说明需要销售修改或补充的内容", returnHelp: "该原因会写入审批时间线并同步给销售。",
@@ -899,7 +908,7 @@ export const translations: Record<Locale, Dictionary> = {
       toolbar: "正式报价操作", back: "返回工作台", viewHistory: "查看版本记录", print: "打印 / 导出 PDF", restrictedEyebrow: "报价尚未完成审批",
       restrictedTitle: "正式报价暂不可用", restrictedHelp: "只有状态为“已批准”的报价可以生成、查看或打印正式 Quotation。", workspace: "报价工作台",
       formalDocument: "正式商业文件 · 模拟数据", title: "QUOTATION", subtitle: "报价单", reference: "报价信息", quoteNumber: "报价编号", issueDate: "报价日期",
-      version: "报价版本", currency: "币种", currencyIdr: "印尼盾 IDR", clientAndBrand: "客户与品牌", customer: "客户", brand: "品牌", salesOwner: "销售负责人",
+      version: "报价版本", currency: "币种", currencyIdr: "印尼盾 IDR", clientAndBrand: "客户与品牌", customer: "客户", brand: "品牌", salesOwner: "销售负责人", createdBy: "代录人",
       campaignPeriod: "投放周期", periodValue: "自排期确认日起连续 {weeks} 周", resourcesAndItems: "投放资源与报价项目", item: "项目", typeRegion: "类型 / 区域", period: "周期",
       campaignAmount: "投放金额", building: "楼宇", package: "销售包", deliveryMetrics: "投放与受众指标", dailyTraffic: "日均流量", monthlyImpressions: "月曝光", occurrenceUnit: "次",
       priceDetails: "价格明细", basePrice: "Rate Card 基础价", discountDeduction: "折扣减免（{discount}%）", netPrice: "折后净价", simulatedTax: "模拟税费（{tax}%）",

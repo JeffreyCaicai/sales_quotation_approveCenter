@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { localizeBuilding, localizeCustomer, localizePackage, localizeUser } from "@/lib/display-data";
-import { BUILDINGS, CUSTOMERS, PACKAGES, USERS } from "@/lib/mock-data";
+import { APPROVAL_DIRECTORY, BUILDINGS, CUSTOMERS, PACKAGES, USERS } from "@/lib/mock-data";
 import { canApproveQuote, getDiscountBand } from "@/lib/quotation";
 import type { TranslationKey } from "@/lib/i18n";
 import type { CommercialSelectionInput, Quote, User } from "@/lib/types";
@@ -25,10 +25,12 @@ export function ApprovalScreen({ quote, actor, onApprove, onReturn, onBack }: Ap
   const brand = customer?.brands.find((item) => item.id === quote.brandId);
   const ownerSource = USERS.find((item) => item.id === quote.salesId);
   const owner = ownerSource ? localizeUser(ownerSource, locale) : undefined;
+  const creatorSource = USERS.find((item) => item.id === quote.createdById);
+  const creator = creatorSource ? localizeUser(creatorSource, locale) : undefined;
   const approver = USERS.find((item) => item.id === quote.requiredApproverId);
   const displayApprover = approver ? localizeUser(approver, locale) : undefined;
   const band = getDiscountBand(quote.pricing.effectiveDiscountRate);
-  const canDecide = canApproveQuote(quote, actor);
+  const canDecide = canApproveQuote(quote, actor, APPROVAL_DIRECTORY);
 
   useEffect(() => {
     const dialog = dialogRef.current;
@@ -51,7 +53,7 @@ export function ApprovalScreen({ quote, actor, onApprove, onReturn, onBack }: Ap
     <div className="approval-layout">
       <main className="approval-content">
         <section className="approval-card"><header className="approval-card__heading"><span>01</span><div><h2>{t("approval.clientAndBrand")}</h2><p>{t("approval.commercialSubject")}</p></div></header><dl className="approval-facts">
-          <div><dt>{t("approval.customer")}</dt><dd>{customer?.name ?? t("dashboard.unknownCustomer")}</dd></div><div><dt>{t("approval.brand")}</dt><dd>{brand?.name ?? t("approval.unknownBrand")}</dd></div><div><dt>{t("approval.owner")}</dt><dd>{owner?.name ?? quote.salesId}</dd></div><div><dt>{t("commercial.directApprover")}</dt><dd>{displayApprover?.name ?? "—"}</dd></div>
+          <div><dt>{t("approval.customer")}</dt><dd>{customer?.name ?? t("dashboard.unknownCustomer")}</dd></div><div><dt>{t("approval.brand")}</dt><dd>{brand?.name ?? t("approval.unknownBrand")}</dd></div><div><dt>{t("approval.owner")}</dt><dd>{owner?.name ?? quote.salesId}</dd></div>{creator && creator.id !== owner?.id ? <div><dt>{t("approval.createdBy")}</dt><dd>{creator.name}</dd></div> : null}<div><dt>{t("commercial.directApprover")}</dt><dd>{displayApprover?.name ?? "—"}</dd></div>
         </dl></section>
         <SelectionCard index="02" title={t("commercial.placement")} selection={quote.placement} gross={quote.pricing.placementGross} />
         <SelectionCard index="03" title={t("commercial.bonus")} selection={quote.bonus} gross={quote.pricing.bonusGross} bonus />

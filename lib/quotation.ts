@@ -49,7 +49,8 @@ const VALIDATION = {
 } as const;
 
 const DOMAIN_ERROR = {
-  salesRoleRequired: "quotation.submit.salesRoleRequired",
+  creatorRoleRequired: "quotation.submit.creatorRoleRequired",
+  ownerForbidden: "quotation.submit.ownerForbidden",
   approvalRoleRequired: "quotation.approval.roleRequired",
   approvalStageRequired: "quotation.approval.stageRequired",
 } as const;
@@ -65,7 +66,7 @@ export type ValidationKey = (typeof VALIDATION)[keyof typeof VALIDATION];
 
 export function getDiscountBand(discount: number): DiscountBand {
   if (discount <= 65) return "standard";
-  if (discount <= 70) return "elevated";
+  if (discount <= 75) return "elevated";
   return "executive";
 }
 
@@ -74,12 +75,46 @@ export function getApprovalStatus(effectiveDiscountRate: number): QuoteStatus {
     throw new RangeError(VALIDATION.effectiveDiscountRateRange);
   }
   if (effectiveDiscountRate <= 65) return "pending_manager";
-  if (effectiveDiscountRate <= 70) return "pending_business_control";
+  if (effectiveDiscountRate <= 75) return "pending_business_control";
   return "pending_ceo";
 }
 
 export function getNextApproval(effectiveDiscountRate: number): QuoteStatus {
   return getApprovalStatus(effectiveDiscountRate);
+}
+
+export interface ApprovalRoute {
+  status: SubmittedQuote["status"];
+  approverRole: ApproverRole;
+  requiredApproverId: string;
+}
+
+export function resolveApprovalRoute(
+  effectiveDiscountRate: number,
+  salesOwnerId: string,
+  approvalDirectory: ApprovalDirectory,
+): ApprovalRoute {
+  let status = getApprovalStatus(effectiveDiscountRate) as SubmittedQuote["status"];
+  let approverRole = getApproverRole(status);
+  if (approverRole === "manager" && approvalDirectory.manager === salesOwnerId) {
+    status = "pending_business_control";
+    approverRole = "business_control";
+  }
+  return {
+    status,
+    approverRole,
+    requiredApproverId: approvalDirectory[approverRole],
+  };
+}
+
+export function canUserCreateQuotations(user: User): boolean {
+  return user.canCreateQuotations ?? user.role === "sales";
+}
+
+export function canCreateQuoteFor(actor: User, salesOwnerId: string): boolean {
+  if (!canUserCreateQuotations(actor)) return false;
+  return actor.id === salesOwnerId
+    || actor.canCreateOnBehalfOfSalesIds?.includes(salesOwnerId) === true;
 }
 
 export function calculatePricing(input: QuoteInput): PricingSummary {
@@ -167,6 +202,15 @@ function validateCommercialSelection(
 }
 
 export function createDraftQuote(input: QuoteInput, previousQuote: Quote | undefined, actor: User): Quote {
+  const salesOwnerId = input.salesOwnerId ?? previousQuote?.salesId ?? actor.id;
+  if (!canUserCreateQuotations(actor)) throw new Error(DOMAIN_ERROR.creatorRoleRequired);
+  if (!canCreateQuoteFor(actor, salesOwnerId)) throw new Error(DOMAIN_ERROR.ownerForbidden);
+  if (previousQuote && (
+    previousQuote.salesId !== salesOwnerId
+    || (previousQuote.status !== "draft" && previousQuote.status !== "returned")
+  )) {
+    throw new Error(DOMAIN_ERROR.ownerForbidden);
+  }
   const now = new Date().toISOString();
   const identifier = now.replace(/\D/g, "");
   const normalizedInput: QuoteInput = {
@@ -181,7 +225,8 @@ export function createDraftQuote(input: QuoteInput, previousQuote: Quote | undef
   return {
     id: previousQuote?.id ?? `quote-draft-${identifier}`,
     quoteNumber: previousQuote?.quoteNumber ?? `DEMO-DRAFT-${identifier.slice(0, 8)}-${identifier.slice(8)}`,
-    salesId: actor.id,
+    salesId: salesOwnerId,
+    createdById: previousQuote?.createdById ?? actor.id,
     customerId: normalizedInput.customerId ?? "",
     brandId: normalizedInput.brandId ?? "",
     placement: cloneSelectionInput(normalizedInput.placement),
@@ -256,14 +301,19 @@ export function submitQuote(
   references: QuoteReferenceData,
   approvalDirectory: ApprovalDirectory,
 ): SubmittedQuote {
-  if (actor.role !== "sales") throw new Error(DOMAIN_ERROR.salesRoleRequired);
+  const salesOwnerId = input.salesOwnerId ?? previousQuote?.salesId ?? actor.id;
+  if (!canUserCreateQuotations(actor)) throw new Error(DOMAIN_ERROR.creatorRoleRequired);
+  if (!canCreateQuoteFor(actor, salesOwnerId)) throw new Error(DOMAIN_ERROR.ownerForbidden);
   const errors = {
     ...validateQuote(input),
-    ...validateQuoteReferences(input, actor.id, references),
+    ...validateQuoteReferences(input, salesOwnerId, references),
   };
   if (Object.keys(errors).length > 0) throw new Error(Object.values(errors).join(","));
-  if (previousQuote && (previousQuote.salesId !== actor.id || (previousQuote.status !== "draft" && previousQuote.status !== "returned"))) {
-    throw new Error(DOMAIN_ERROR.salesRoleRequired);
+  if (previousQuote && (
+    previousQuote.salesId !== salesOwnerId
+    || (previousQuote.status !== "draft" && previousQuote.status !== "returned")
+  )) {
+    throw new Error(DOMAIN_ERROR.ownerForbidden);
   }
 
   const now = new Date().toISOString();
@@ -275,9 +325,11 @@ export function submitQuote(
   const placement = toCommercialSelection(input.placement);
   const bonus = input.bonus ? toCommercialSelection(input.bonus) : undefined;
   const pricing = calculatePricing(input);
-  const status = getApprovalStatus(pricing.effectiveDiscountRate) as SubmittedQuote["status"];
-  const approverRole = getApproverRole(status);
-  const requiredApproverId = approvalDirectory[approverRole];
+  const { status, approverRole, requiredApproverId } = resolveApprovalRoute(
+    pricing.effectiveDiscountRate,
+    salesOwnerId,
+    approvalDirectory,
+  );
   const requiredApprover = USERS.find((user) => user.id === requiredApproverId && user.role === approverRole);
   if (!requiredApprover) throw new Error(DOMAIN_ERROR.approvalStageRequired);
   const snapshot = createVersionSnapshot(input, version, now, requiredApproverId);
@@ -285,7 +337,8 @@ export function submitQuote(
   return {
     id,
     quoteNumber: previousQuote?.quoteNumber ?? `DEMO-Q-${identifier.slice(0, 8)}-${identifier.slice(8)}`,
-    salesId: actor.id,
+    salesId: salesOwnerId,
+    createdById: previousQuote?.createdById ?? actor.id,
     customerId: input.customerId ?? "",
     brandId: input.brandId ?? "",
     placement: cloneCommercialSelection(placement)!,
@@ -303,7 +356,7 @@ export function submitQuote(
       ...structuredClone(previousQuote?.approvalHistory ?? []),
       {
         id: `${id}-v${version}-${action}`,
-        role: "sales",
+        role: actor.role,
         action,
         actorId: actor.id,
         actorName: actor.name,
@@ -345,8 +398,8 @@ function cloneVersionSnapshots(snapshots: QuoteVersionSnapshot[]): QuoteVersionS
   }));
 }
 
-export function approveQuote(quote: Quote, actor: User): Quote {
-  assertApprovalTransition(quote, actor);
+export function approveQuote(quote: Quote, actor: User, approvalDirectory?: ApprovalDirectory): Quote {
+  assertApprovalTransition(quote, actor, approvalDirectory);
   const now = new Date().toISOString();
   const eventNumber = quote.approvalHistory.length + 1;
   return {
@@ -374,21 +427,38 @@ export function approveQuote(quote: Quote, actor: User): Quote {
   };
 }
 
-export function canApproveQuote(quote: Quote, actor: User): boolean {
+export function canApproveQuote(
+  quote: Quote,
+  actor: User,
+  approvalDirectory?: ApprovalDirectory,
+): boolean {
   if (!isApproverRole(actor.role)) return false;
   if (!isSubmittedQuote(quote)) return false;
   const requiredStatus = APPROVER_STATUS_BY_ROLE[actor.role];
   if (quote.status !== requiredStatus) return false;
   if (actor.id !== quote.requiredApproverId) return false;
+  if (!approvalDirectory) return true;
   try {
-    return getApprovalStatus(quote.pricing.effectiveDiscountRate) === requiredStatus;
+    const route = resolveApprovalRoute(
+      quote.pricing.effectiveDiscountRate,
+      quote.salesId,
+      approvalDirectory,
+    );
+    return route.status === quote.status
+      && route.approverRole === actor.role
+      && route.requiredApproverId === actor.id;
   } catch {
     return false;
   }
 }
 
-export function returnQuote(quote: Quote, actor: User, reason: string): Quote {
-  assertApprovalTransition(quote, actor);
+export function returnQuote(
+  quote: Quote,
+  actor: User,
+  reason: string,
+  approvalDirectory?: ApprovalDirectory,
+): Quote {
+  assertApprovalTransition(quote, actor, approvalDirectory);
   const comment = reason.trim();
   if (!comment) throw new Error(VALIDATION.returnReasonRequired);
   const now = new Date().toISOString();
@@ -419,9 +489,13 @@ export function returnQuote(quote: Quote, actor: User, reason: string): Quote {
   };
 }
 
-function assertApprovalTransition(quote: Quote, actor: User): asserts actor is User & { role: ApproverRole } {
+function assertApprovalTransition(
+  quote: Quote,
+  actor: User,
+  approvalDirectory?: ApprovalDirectory,
+): asserts actor is User & { role: ApproverRole } {
   if (!isApproverRole(actor.role)) throw new Error(DOMAIN_ERROR.approvalRoleRequired);
-  if (!canApproveQuote(quote, actor)) throw new Error(DOMAIN_ERROR.approvalStageRequired);
+  if (!canApproveQuote(quote, actor, approvalDirectory)) throw new Error(DOMAIN_ERROR.approvalStageRequired);
 }
 
 function isApproverRole(role: Role): role is ApproverRole {

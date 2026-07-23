@@ -2,9 +2,9 @@
 
 import { useState } from "react";
 
-import { localizeBuilding, localizeCustomer, localizePackage } from "@/lib/display-data";
-import { BUILDINGS, CUSTOMERS, DEMO_TAX_RATE, PACKAGES } from "@/lib/mock-data";
-import { calculatePricing, validateQuote, validateQuoteReferences } from "@/lib/quotation";
+import { localizeBuilding, localizeCustomer, localizePackage, localizeUser } from "@/lib/display-data";
+import { BUILDINGS, CUSTOMERS, DEMO_TAX_RATE, PACKAGES, USERS } from "@/lib/mock-data";
+import { calculatePricing, canCreateQuoteFor, validateQuote, validateQuoteReferences } from "@/lib/quotation";
 import type { TranslationKey } from "@/lib/i18n";
 import type { CommercialSelectionInput, PlacementMode, Quote, QuoteInput, User } from "@/lib/types";
 
@@ -28,6 +28,7 @@ interface CommercialSelectionValues {
 }
 
 interface WizardValues {
+  salesOwnerId: string;
   customerId: string;
   brandId: string;
   placement: CommercialSelectionValues;
@@ -71,11 +72,20 @@ const ERROR_STEPS: Record<string, number> = {
 
 export function QuoteWizard({ initialQuote, salesUser, onCancel, onSave, onSubmit }: QuoteWizardProps) {
   const { locale, t } = useLocale();
+  const salesOwners = USERS
+    .filter((candidate) => canCreateQuoteFor(salesUser, candidate.id))
+    .filter((candidate) => CUSTOMERS.some((customer) => customer.salesId === candidate.id))
+    .map((candidate) => localizeUser(candidate, locale));
+  const defaultSalesOwnerId = initialQuote?.salesId
+    ?? (salesOwners.some((candidate) => candidate.id === salesUser.id)
+      ? salesUser.id
+      : salesOwners[0]?.id ?? "");
   const [step, setStep] = useState(0);
   const [placementSearch, setPlacementSearch] = useState("");
   const [bonusSearch, setBonusSearch] = useState("");
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [values, setValues] = useState<WizardValues>(() => ({
+    salesOwnerId: defaultSalesOwnerId,
     customerId: initialQuote?.customerId ?? "",
     brandId: initialQuote?.brandId ?? "",
     placement: selectionValues(initialQuote?.placement, 160),
@@ -85,8 +95,9 @@ export function QuoteWizard({ initialQuote, salesUser, onCancel, onSave, onSubmi
   }));
 
   const customers = CUSTOMERS
-    .filter((customer) => customer.salesId === salesUser.id)
+    .filter((customer) => customer.salesId === values.salesOwnerId)
     .map((item) => localizeCustomer(item, locale));
+  const salesOwner = salesOwners.find((candidate) => candidate.id === values.salesOwnerId);
   const localizedBuildings = BUILDINGS.map((item) => localizeBuilding(item, locale));
   const localizedPackages = PACKAGES.map((item) => localizePackage(item, locale));
   const customer = customers.find((item) => item.id === values.customerId);
@@ -113,7 +124,7 @@ export function QuoteWizard({ initialQuote, salesUser, onCancel, onSave, onSubmi
     });
   };
 
-  const updateValue = <Key extends "customerId" | "brandId" | "discount">(
+  const updateValue = <Key extends "salesOwnerId" | "customerId" | "brandId" | "discount">(
     key: Key,
     value: WizardValues[Key],
   ) => {
@@ -156,7 +167,7 @@ export function QuoteWizard({ initialQuote, salesUser, onCancel, onSave, onSubmi
   };
 
   const validateStep = (targetStep: number) => {
-    const validation = getValidationErrors(input, salesUser.id);
+    const validation = getValidationErrors(input, values.salesOwnerId);
     const nextErrors = Object.fromEntries(
       Object.entries(validation).filter(([key]) => targetStep === 5 || ERROR_STEPS[key] === targetStep),
     );
@@ -165,7 +176,7 @@ export function QuoteWizard({ initialQuote, salesUser, onCancel, onSave, onSubmi
   };
 
   const validateAll = () => {
-    const nextErrors = getValidationErrors(input, salesUser.id);
+    const nextErrors = getValidationErrors(input, values.salesOwnerId);
     setErrors(nextErrors);
     const firstError = Object.keys(nextErrors)
       .map((key) => ERROR_STEPS[key] ?? STEPS.length - 1)
@@ -220,10 +231,17 @@ export function QuoteWizard({ initialQuote, salesUser, onCancel, onSave, onSubmi
 
             {step === 0 ? (
               <CustomerStep
+                salesOwners={salesOwners}
+                salesOwnerId={values.salesOwnerId}
                 customers={customers}
                 customerId={values.customerId}
                 brandId={values.brandId}
                 errors={errors}
+                onSalesOwnerChange={(salesOwnerId) => {
+                  updateValue("salesOwnerId", salesOwnerId);
+                  updateValue("customerId", "");
+                  updateValue("brandId", "");
+                }}
                 onCustomerChange={(customerId) => {
                   updateValue("customerId", customerId);
                   updateValue("brandId", "");
@@ -289,6 +307,7 @@ export function QuoteWizard({ initialQuote, salesUser, onCancel, onSave, onSubmi
 
             {step === 5 ? (
               <ReviewStep
+                salesOwnerName={salesOwner?.name ?? t("wizard.notSelected")}
                 customerName={customer?.name ?? t("wizard.notSelected")}
                 brandName={brand?.name ?? t("wizard.notSelected")}
                 placement={values.placement}
@@ -361,17 +380,23 @@ function WizardSectionHeading({ step }: { step: number }) {
 }
 
 function CustomerStep({
+  salesOwners,
+  salesOwnerId,
   customers,
   customerId,
   brandId,
   errors,
+  onSalesOwnerChange,
   onCustomerChange,
   onBrandChange,
 }: {
+  salesOwners: ReturnType<typeof localizeUser>[];
+  salesOwnerId: string;
   customers: ReturnType<typeof localizeCustomer>[];
   customerId: string;
   brandId: string;
   errors: Record<string, string>;
+  onSalesOwnerChange: (id: string) => void;
   onCustomerChange: (id: string) => void;
   onBrandChange: (id: string) => void;
 }) {
@@ -380,6 +405,20 @@ function CustomerStep({
 
   return (
     <div className="form-stack">
+      <label className="form-field">
+        <span>{t("wizard.salesOwner")}</span>
+        <select
+          value={salesOwnerId}
+          disabled={salesOwners.length <= 1}
+          onChange={(event) => onSalesOwnerChange(event.target.value)}
+        >
+          {salesOwners.map((item) => (
+            <option value={item.id} key={item.id}>{item.name}</option>
+          ))}
+        </select>
+        <small>{t("wizard.salesOwnerHelp")}</small>
+      </label>
+
       <fieldset className="form-fieldset" aria-invalid={Boolean(errors.customerId)}>
         <legend>{t("wizard.customer")}</legend>
         <div className="choice-grid choice-grid--customers">
@@ -792,6 +831,7 @@ function DiscountStep({
 }
 
 function ReviewStep({
+  salesOwnerName,
   customerName,
   brandName,
   placement,
@@ -802,6 +842,7 @@ function ReviewStep({
   approval,
   errors,
 }: {
+  salesOwnerName: string;
   customerName: string;
   brandName: string;
   placement: CommercialSelectionValues;
@@ -823,6 +864,7 @@ function ReviewStep({
         </div>
       ) : null}
       <dl className="review-grid">
+        <div><dt>{t("wizard.salesOwner")}</dt><dd>{salesOwnerName}</dd></div>
         <div><dt>{t("wizard.customer")}</dt><dd>{customerName}</dd></div>
         <div><dt>{t("wizard.brand")}</dt><dd>{brandName}</dd></div>
         <ReviewSelection
@@ -1022,6 +1064,7 @@ function toQuoteInput(
   bonus?: CommercialSelectionInput,
 ): QuoteInput {
   return {
+    salesOwnerId: values.salesOwnerId,
     customerId: values.customerId,
     brandId: values.brandId,
     placement,
@@ -1039,7 +1082,7 @@ function getValidationErrors(input: QuoteInput, salesId: string): Record<string,
 }
 
 function approvalPath(effectiveDiscountRate: number) {
-  if (effectiveDiscountRate > 70) {
+  if (effectiveDiscountRate > 75) {
     return {
       labelKey: "wizard.approvalExecutive",
       tone: "executive",

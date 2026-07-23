@@ -37,6 +37,8 @@ export function QuotationScreen({ quote, onBack, onPrint, onViewHistory }: Quota
   const brand = customer?.brands.find((item) => item.id === quote.brandId);
   const sourceOwner = USERS.find((item) => item.id === quote.salesId);
   const owner = sourceOwner ? localizeUser(sourceOwner, locale) : undefined;
+  const sourceCreator = USERS.find((item) => item.id === quote.createdById);
+  const creator = sourceCreator ? localizeUser(sourceCreator, locale) : undefined;
   const placementResources = localizedResources(quote.placement, locale);
   const bonusResources = localizedResources(quote.bonus, locale);
   const appendixBuildings = getAppendixBuildings([quote.placement, quote.bonus]).map((item) => localizeBuilding(item, locale));
@@ -78,6 +80,7 @@ export function QuotationScreen({ quote, onBack, onPrint, onViewHistory }: Quota
             <div><dt>{t("quotation.customer")}</dt><dd>{customer?.name ?? t("dashboard.unknownCustomer")}</dd></div>
             <div><dt>{t("quotation.brand")}</dt><dd>{brand?.name ?? t("approval.unknownBrand")}</dd></div>
             <div><dt>{t("quotation.salesOwner")}</dt><dd>{owner?.name ?? quote.salesId} · {owner?.title ?? t("approval.roleSales")}</dd></div>
+            {creator && creator.id !== owner?.id ? <div><dt>{t("quotation.createdBy")}</dt><dd>{creator.name}</dd></div> : null}
             <div><dt>{t("quotation.campaignPeriod")}</dt><dd>{t("quotation.periodValue", { weeks: formatNumber(quote.placement?.weeks ?? 0) })}</dd></div>
           </dl>
         </section>

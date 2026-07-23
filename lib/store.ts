@@ -1,5 +1,10 @@
-import { BUILDINGS, CUSTOMERS, PACKAGES, SEEDED_QUOTES, USERS } from "./mock-data.ts";
-import { calculatePricing, getApprovalStatus } from "./quotation.ts";
+import { APPROVAL_DIRECTORY, BUILDINGS, CUSTOMERS, PACKAGES, SEEDED_QUOTES, USERS } from "./mock-data.ts";
+import {
+  calculatePricing,
+  canCreateQuoteFor,
+  canUserCreateQuotations,
+  resolveApprovalRoute,
+} from "./quotation.ts";
 import type {
   ApprovalAction,
   ApprovalEvent,
@@ -23,12 +28,6 @@ const STATUSES: QuoteStatus[] = [
   "approved",
 ];
 const ACTIONS: ApprovalAction[] = ["submitted", "resubmitted", "approved", "returned"];
-const APPROVER_BY_STATUS = {
-  pending_manager: "manager",
-  pending_business_control: "business_control",
-  pending_ceo: "ceo",
-} as const;
-
 export function loadQuotes(): Quote[] {
   const storage = getStorage();
   if (!storage) return cloneSeeds();
@@ -36,7 +35,7 @@ export function loadQuotes(): Quote[] {
   try {
     const stored = storage.getItem(STORAGE_KEY);
     if (!stored) return cloneSeeds();
-    const value: unknown = JSON.parse(stored);
+    const value: unknown = migrateLegacyQuotes(JSON.parse(stored));
     return isQuoteArray(value) ? cloneQuotes(value) : cloneSeeds();
   } catch {
     return cloneSeeds();
@@ -66,7 +65,9 @@ export function resetQuotes(): Quote[] {
 export function quotesForRole(quotes: Quote[], role: Role, userId: string): Quote[] {
   const user = USERS.find((candidate) => candidate.id === userId && candidate.role === role);
   if (!user) return [];
-  if (role === "sales") return quotes.filter((quote) => quote.salesId === userId);
+  if (role === "sales") {
+    return quotes.filter((quote) => quote.salesId === userId || quote.createdById === userId);
+  }
   if (role === "business_control") {
     return quotes.filter((quote) => quote.status === "pending_business_control" && quote.requiredApproverId === userId);
   }
@@ -74,9 +75,11 @@ export function quotesForRole(quotes: Quote[], role: Role, userId: string): Quot
     return quotes.filter((quote) => quote.status === "pending_ceo" && quote.requiredApproverId === userId);
   }
   const teamMemberIds = user.teamMemberIds ?? [];
-  return quotes.filter((quote) => quote.status === "pending_manager"
+  return quotes.filter((quote) => (
+    quote.status === "pending_manager"
     && quote.requiredApproverId === userId
-    && teamMemberIds.includes(quote.salesId));
+    && teamMemberIds.includes(quote.salesId)
+  ) || quote.salesId === userId || quote.createdById === userId);
 }
 
 function getStorage(): Storage | undefined {
@@ -107,6 +110,7 @@ function isQuote(value: unknown): value is Quote {
     !isString(value.id)
     || !isString(value.quoteNumber)
     || !isString(value.salesId)
+    || !isString(value.createdById)
     || typeof value.customerId !== "string"
     || typeof value.brandId !== "string"
     || !isFiniteNumber(value.discount) || value.discount < 0 || value.discount > 100
@@ -121,8 +125,14 @@ function isQuote(value: unknown): value is Quote {
   ) return false;
 
   const quote = value as unknown as Quote;
-  const owner = USERS.find((user) => user.id === quote.salesId && user.role === "sales");
-  if (!owner || !isCustomerBrandValid(quote.salesId, quote.customerId, quote.brandId, quote.status === "draft" || quote.status === "returned")) {
+  const owner = USERS.find((user) => user.id === quote.salesId && isSalesOwner(user));
+  const creator = USERS.find((user) => user.id === quote.createdById);
+  if (
+    !owner
+    || !creator
+    || !canCreateQuoteFor(creator, quote.salesId)
+    || !isCustomerBrandValid(quote.salesId, quote.customerId, quote.brandId, quote.status === "draft" || quote.status === "returned")
+  ) {
     return false;
   }
   if (!isCurrentStateValid(quote)) return false;
@@ -217,11 +227,9 @@ function isVersionSnapshot(value: unknown, salesId: string): value is QuoteVersi
       bonus: value.bonus,
       discount: value.discount,
     });
-    const requiredStatus = safeApprovalStatus(expected.effectiveDiscountRate);
-    if (!requiredStatus) return false;
-    const requiredRole = APPROVER_BY_STATUS[requiredStatus];
-    const requiredApprover = USERS.find((user) => user.id === value.requiredApproverId && user.role === requiredRole);
-    return Boolean(requiredApprover) && arePricingEqual(value.pricing, expected);
+    const route = resolveApprovalRoute(expected.effectiveDiscountRate, salesId, APPROVAL_DIRECTORY);
+    return value.requiredApproverId === route.requiredApproverId
+      && arePricingEqual(value.pricing, expected);
   } catch {
     return false;
   }
@@ -275,15 +283,22 @@ function isWorkflowValid(quote: Quote): boolean {
   for (const snapshot of quote.versionSnapshots) {
     const events = quote.approvalHistory.filter((event) => event.version === snapshot.version);
     const submissionAction = snapshot.version === 1 ? "submitted" : "resubmitted";
-    if (events[0]?.role !== "sales" || events[0].action !== submissionAction) return false;
-    if (events[0].actorId !== quote.salesId || events[0].createdAt !== snapshot.submittedAt) return false;
+    if (events[0]?.action !== submissionAction) return false;
+    const submitter = USERS.find((user) => user.id === events[0]?.actorId);
+    if (!submitter || !canCreateQuoteFor(submitter, quote.salesId)) return false;
+    if (snapshot.version === 1 && events[0].actorId !== quote.createdById) return false;
+    if (events[0].createdAt !== snapshot.submittedAt) return false;
     if (Date.parse(events[0].createdAt) < Date.parse(priorTimestamp)) return false;
 
-    const requiredStatus = safeApprovalStatus(snapshot.pricing.effectiveDiscountRate);
-    if (!requiredStatus) return false;
-    const requiredRole = APPROVER_BY_STATUS[requiredStatus];
-    const requiredApprover = USERS.find((user) => user.id === snapshot.requiredApproverId && user.role === requiredRole);
-    if (!requiredApprover) return false;
+    let route: ReturnType<typeof resolveApprovalRoute>;
+    try {
+      route = resolveApprovalRoute(snapshot.pricing.effectiveDiscountRate, quote.salesId, APPROVAL_DIRECTORY);
+    } catch {
+      return false;
+    }
+    const requiredStatus = route.status;
+    const requiredRole = route.approverRole;
+    if (snapshot.requiredApproverId !== route.requiredApproverId) return false;
     const isLatest = snapshot.version === quote.version;
 
     if (!isLatest) {
@@ -330,7 +345,7 @@ function isApprovalEvent(value: unknown, quoteVersion: number): value is Approva
   const actor = USERS.find((user) => user.id === value.actorId);
   if (!actor || actor.role !== value.role || actor.name !== value.actorName) return false;
   if (value.action === "submitted" || value.action === "resubmitted") {
-    return value.role === "sales" && value.comment === undefined;
+    return canUserCreateQuotations(actor) && value.comment === undefined;
   }
   if (value.role !== "manager" && value.role !== "business_control" && value.role !== "ceo") return false;
   return value.action === "returned"
@@ -373,15 +388,6 @@ function arePricingEqual(left: PricingSummary, right: PricingSummary): boolean {
   return Object.keys(right).every((key) =>
     left[key as keyof PricingSummary] === right[key as keyof PricingSummary]
   ) && Object.keys(left).length === Object.keys(right).length;
-}
-
-function safeApprovalStatus(rate: number): keyof typeof APPROVER_BY_STATUS | undefined {
-  try {
-    const status = getApprovalStatus(rate);
-    return status in APPROVER_BY_STATUS ? status as keyof typeof APPROVER_BY_STATUS : undefined;
-  } catch {
-    return undefined;
-  }
 }
 
 function hasUniqueEventIds(events: ApprovalEvent[]): boolean {
@@ -432,4 +438,22 @@ function isIsoTimestamp(value: unknown): value is string {
   return typeof value === "string"
     && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value)
     && !Number.isNaN(Date.parse(value));
+}
+
+function isSalesOwner(user: (typeof USERS)[number]): boolean {
+  return user.role === "sales" || user.canCreateQuotations === true;
+}
+
+function migrateLegacyQuotes(value: unknown): unknown {
+  if (!Array.isArray(value)) return value;
+  return value.map((candidate) => {
+    if (!isRecord(candidate) || isString(candidate.createdById)) return candidate;
+    const firstEvent = Array.isArray(candidate.approvalHistory)
+      ? candidate.approvalHistory.find((event) => isRecord(event) && (event.action === "submitted" || event.action === "resubmitted"))
+      : undefined;
+    const createdById = isRecord(firstEvent) && isString(firstEvent.actorId)
+      ? firstEvent.actorId
+      : candidate.salesId;
+    return isString(createdById) ? { ...candidate, createdById } : candidate;
+  });
 }

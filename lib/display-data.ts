@@ -3,6 +3,9 @@ import type { ApprovalEvent, Brand, Building, Customer, SalesPackage, User } fro
 
 const USER_ENGLISH: Record<string, Pick<User, "name" | "title">> = {
   "sales-chen": { name: "Chen Chen", title: "Jakarta Account Manager" },
+  "sales-freelancer-demo": { name: "Freelancer Demo", title: "Freelance Sales" },
+  "sales-amal": { name: "Amal", title: "Sales Controller" },
+  "sales-desti": { name: "Desti", title: "Sales Controller" },
   "manager-lin": { name: "Ayu Purnama", title: "Head of Sales" },
   "business-control-april": { name: "Aprilliani Shintia Dewi", title: "Head of Business Control" },
   "ceo-zhao": { name: "Thomas", title: "Chief Executive Officer" },
@@ -13,6 +16,8 @@ const CUSTOMER_ENGLISH: Record<string, Pick<Customer, "name" | "industry">> = {
   "customer-traveloka": { name: "Traveloka Indonesia", industry: "Online Travel" },
   "customer-bank-mandiri": { name: "Bank Mandiri", industry: "Financial Services" },
   "customer-gojek": { name: "GoTo Gojek Tokopedia", industry: "Local Services & E-commerce" },
+  "customer-ayu-demo": { name: "Ayu Direct Account", industry: "Corporate Account" },
+  "customer-freelancer-demo": { name: "Freelancer Account", industry: "Local Services" },
 };
 
 const BRAND_CATEGORY_ENGLISH: Record<string, string> = {
@@ -22,6 +27,8 @@ const BRAND_CATEGORY_ENGLISH: Record<string, string> = {
   "brand-livin": "Digital Banking",
   "brand-gofood": "Local Services",
   "brand-tokopedia": "E-commerce",
+  "brand-ayu-demo": "Business Services",
+  "brand-freelancer-demo": "Local Services",
 };
 
 const BUILDING_CATEGORY_ENGLISH: Record<string, string> = {

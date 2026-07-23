@@ -4,6 +4,8 @@ export type ApproverRole = Exclude<Role, "sales">;
 
 export type ApprovalDirectory = Record<ApproverRole, string>;
 
+export type SalesGroup = "sales_team" | "everyone_sales" | "freelancer";
+
 export type PlacementMode = "building" | "package";
 
 export type DiscountBand = "standard" | "elevated" | "executive";
@@ -28,6 +30,9 @@ export interface User extends DemoRecord {
   role: Role;
   title: string;
   teamMemberIds?: string[];
+  salesGroup?: SalesGroup;
+  canCreateQuotations?: boolean;
+  canCreateOnBehalfOfSalesIds?: string[];
 }
 
 export interface Brand extends DemoRecord {
@@ -75,7 +80,7 @@ interface ApprovalEventBase {
 }
 
 export interface SubmissionApprovalEvent extends ApprovalEventBase {
-  role: "sales";
+  role: Role;
   action: "submitted" | "resubmitted";
   comment?: never;
 }
@@ -120,6 +125,7 @@ export interface CommercialSelection {
 }
 
 export interface QuoteInput {
+  salesOwnerId?: string;
   customerId?: string;
   brandId?: string;
   placement?: CommercialSelectionInput;
@@ -158,6 +164,7 @@ export interface Quote {
   id: string;
   quoteNumber: string;
   salesId: string;
+  createdById: string;
   customerId: string;
   brandId: string;
   placement?: CommercialSelectionInput;

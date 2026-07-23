@@ -8,6 +8,7 @@ import {
   createDraftQuote,
   getApprovalStatus,
   getDiscountBand,
+  resolveApprovalRoute,
   returnQuote,
   submitQuote,
   validateQuote,
@@ -18,8 +19,10 @@ import type {
   Building,
   CommercialSelection,
   CommercialSelectionInput,
+  Customer,
   QuoteInput,
   SalesPackage,
+  User,
 } from "../lib/types.ts";
 
 const references = { customers: CUSTOMERS, buildings: BUILDINGS, packages: PACKAGES };
@@ -81,15 +84,60 @@ function catalogQuoteInput(overrides: Partial<QuoteInput> = {}): QuoteInput {
   return quoteInput({ placement: catalogSelection("building", [BUILDINGS[0].id]), ...overrides });
 }
 
-test("discount and direct-approval boundaries are 65 and 70 percent", () => {
+test("discount and direct-approval boundaries are 65 and 75 percent", () => {
   assert.equal(getDiscountBand(65), "standard");
   assert.equal(getDiscountBand(65.000001), "elevated");
-  assert.equal(getDiscountBand(70), "elevated");
-  assert.equal(getDiscountBand(70.000001), "executive");
+  assert.equal(getDiscountBand(75), "elevated");
+  assert.equal(getDiscountBand(75.000001), "executive");
   assert.equal(getApprovalStatus(65), "pending_manager");
   assert.equal(getApprovalStatus(65.000001), "pending_business_control");
-  assert.equal(getApprovalStatus(70), "pending_business_control");
-  assert.equal(getApprovalStatus(70.000001), "pending_ceo");
+  assert.equal(getApprovalStatus(75), "pending_business_control");
+  assert.equal(getApprovalStatus(75.000001), "pending_ceo");
+});
+
+test("Ayu's own low-discount quotation routes to April instead of self-approval", () => {
+  assert.deepEqual(resolveApprovalRoute(50, manager.id, approvalDirectory), {
+    status: "pending_business_control",
+    approverRole: "business_control",
+    requiredApproverId: businessControl.id,
+  });
+});
+
+test("an authorized proxy submission preserves creator and commercial owner identities", () => {
+  const freelancerId = "sales-freelancer-demo";
+  const proxy: User = {
+    id: "sales-amal",
+    name: "Amal",
+    role: "sales",
+    title: "Sales Controller",
+    salesGroup: "freelancer",
+    canCreateOnBehalfOfSalesIds: [freelancerId],
+    isDemoData: true,
+  };
+  const customer: Customer = {
+    ...CUSTOMERS[0],
+    id: "customer-freelancer-demo",
+    salesId: freelancerId,
+    brands: [{ ...CUSTOMERS[0].brands[0], id: "brand-freelancer-demo" }],
+  };
+  const proxyReferences = { ...references, customers: [...CUSTOMERS, customer] };
+  const submitted = submitQuote({
+    ...catalogQuoteInput(),
+    customerId: customer.id,
+    brandId: customer.brands[0].id,
+    salesOwnerId: freelancerId,
+  }, undefined, proxy, proxyReferences, approvalDirectory);
+
+  assert.equal(submitted.salesId, freelancerId);
+  assert.equal(submitted.createdById, proxy.id);
+  assert.equal(submitted.approvalHistory[0].actorId, proxy.id);
+});
+
+test("a sales user cannot submit on behalf of an owner outside the explicit proxy allow-list", () => {
+  assert.throws(() => submitQuote({
+    ...catalogQuoteInput(),
+    salesOwnerId: "sales-freelancer-demo",
+  }, undefined, sales, references, approvalDirectory), /quotation\.submit\.ownerForbidden/);
 });
 
 test("approval routing rejects invalid effective discount rates", () => {
@@ -224,7 +272,7 @@ test("submission rejects unknown or role-mismatched approval directory identitie
     undefined,
     sales,
     references,
-    { ...approvalDirectory, manager: sales.id },
+    { ...approvalDirectory, manager: businessControl.id },
   ), /quotation\.approval\.stageRequired/);
   assert.throws(() => submitQuote(
     catalogQuoteInput({ discount: 65, bonus: catalogSelection("building", [BUILDINGS[1].id]) }),
@@ -332,6 +380,38 @@ test("role visibility is server-shaped for sales, manager, Business Control, and
   );
   assert.deepEqual(quotesForRole(SEEDED_QUOTES, "ceo", ceo.id).map((quote) => quote.status), ["pending_ceo"]);
   assert.deepEqual(quotesForRole(SEEDED_QUOTES, "manager", "unknown"), []);
+});
+
+test("quotation creators retain access to their own or proxy-entered quotations", () => {
+  const freelancer = USERS.find((user) => user.id === "sales-freelancer-demo")!;
+  const proxy = USERS.find((user) => user.id === "sales-amal")!;
+  const managerOwned = {
+    ...SEEDED_QUOTES[0],
+    id: "quote-manager-owned",
+    salesId: manager.id,
+    createdById: manager.id,
+    status: "pending_business_control" as const,
+    requiredApproverId: businessControl.id,
+  };
+  const proxyEntered = {
+    ...SEEDED_QUOTES[0],
+    id: "quote-proxy-entered",
+    salesId: freelancer.id,
+    createdById: proxy.id,
+  };
+
+  assert.deepEqual(
+    quotesForRole([managerOwned], manager.role, manager.id).map((quote) => quote.id),
+    [managerOwned.id],
+  );
+  assert.deepEqual(
+    quotesForRole([proxyEntered], proxy.role, proxy.id).map((quote) => quote.id),
+    [proxyEntered.id],
+  );
+  assert.deepEqual(
+    quotesForRole([proxyEntered], freelancer.role, freelancer.id).map((quote) => quote.id),
+    [proxyEntered.id],
+  );
 });
 
 test("every approver queue is isolated by assigned identity and manager team", () => {

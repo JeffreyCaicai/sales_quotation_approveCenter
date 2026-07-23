@@ -1,9 +1,9 @@
 import { localizeCustomer, localizeUser } from "@/lib/display-data";
 import { CUSTOMERS, USERS } from "@/lib/mock-data";
 import type { TranslationKey } from "@/lib/i18n";
-import { getDiscountBand } from "@/lib/quotation";
+import { canUserCreateQuotations, getDiscountBand } from "@/lib/quotation";
 import { quotesForRole } from "@/lib/store";
-import type { DiscountBand, Quote, Role, User } from "@/lib/types";
+import type { DiscountBand, Quote, User } from "@/lib/types";
 
 import { useLocale } from "./locale-provider";
 import { Money, StatusBadge } from "./ui";
@@ -57,7 +57,7 @@ function SalesDashboard({ user, quotes, onAction }: DashboardScreenProps) {
       <QuoteTable
         title={t("dashboard.myQuotes")}
         description={t("dashboard.myQuotesDescription")}
-        role="sales"
+        user={user}
         quotes={quotes}
         onAction={onAction}
       />
@@ -70,6 +70,7 @@ function ManagerDashboard({ user, quotes, onAction }: DashboardScreenProps) {
   const displayUser = localizeUser(user, locale);
   const queueStatus = user.role === "business_control" ? "pending_business_control" : "pending_manager";
   const pending = quotes.filter((quote) => quote.status === queueStatus);
+  const ownQuotes = quotes.filter((quote) => quote.salesId === user.id || quote.createdById === user.id);
   const elevated = pending.filter((quote) => getDiscountBand(quote.pricing.effectiveDiscountRate) !== "standard").length;
   const teamMember = USERS.find((member) => user.teamMemberIds?.includes(member.id));
   const teamMemberName = teamMember ? localizeUser(teamMember, locale).name : "—";
@@ -80,6 +81,9 @@ function ManagerDashboard({ user, quotes, onAction }: DashboardScreenProps) {
         eyebrow={t(user.role === "business_control" ? "roleBusinessControl.eyebrow" : "dashboard.managerEyebrow")}
         title={t("dashboard.managerTitle", { name: displayUser.name })}
         description={t(user.role === "business_control" ? "roleBusinessControl.description" : "dashboard.managerDescription")}
+        action={canUserCreateQuotations(user)
+          ? <button className="button button--primary" type="button" onClick={() => onAction(t("dashboard.newQuote"))}>＋ {t("dashboard.newQuote")}</button>
+          : undefined}
       />
       <section className="metric-grid metric-grid--three" aria-label={t("dashboard.teamOverview")}>
         <MetricCard label={t("dashboard.metricPendingMine")} value={formatNumber(pending.length)} tone="amber" note={t("dashboard.metricPendingMineNote")} />
@@ -89,11 +93,20 @@ function ManagerDashboard({ user, quotes, onAction }: DashboardScreenProps) {
       <QuoteTable
         title={t("dashboard.teamQueue")}
         description={t("dashboard.teamQueueDescription")}
-        role={user.role}
+        user={user}
         quotes={pending}
         onAction={onAction}
         showRisk
       />
+      {ownQuotes.length > 0 ? (
+        <QuoteTable
+          title={t("dashboard.myQuotes")}
+          description={t("dashboard.myQuotesDescription")}
+          user={user}
+          quotes={ownQuotes}
+          onAction={onAction}
+        />
+      ) : null}
     </div>
   );
 }
@@ -132,7 +145,7 @@ function CeoDashboard({
       <QuoteTable
         title={t("dashboard.ceoQueue")}
         description={t("dashboard.ceoQueueDescription")}
-        role="ceo"
+        user={user}
         quotes={executiveQueue}
         onAction={onAction}
         showRisk
@@ -141,7 +154,7 @@ function CeoDashboard({
         <QuoteTable
           title={t("dashboard.approvedQuoteTitle")}
           description={t("dashboard.approvedQuoteDescription")}
-          role="ceo"
+          user={user}
           quotes={approvedQuotes}
           onAction={onAction}
         />
@@ -186,14 +199,14 @@ function MetricCard({ label, value, tone, note }: { label: string; value: string
 function QuoteTable({
   title,
   description,
-  role,
+  user,
   quotes,
   onAction,
   showRisk = false,
 }: {
   title: string;
   description: string;
-  role: Role;
+  user: User;
   quotes: Quote[];
   onAction: (label: string, quote?: Quote) => void;
   showRisk?: boolean;
@@ -216,9 +229,11 @@ function QuoteTable({
           {quotes.map((quote) => {
             const sourceCustomer = CUSTOMERS.find((item) => item.id === quote.customerId);
             const sourceOwner = USERS.find((item) => item.id === quote.salesId);
+            const sourceCreator = USERS.find((item) => item.id === quote.createdById);
             const customer = sourceCustomer ? localizeCustomer(sourceCustomer, locale) : undefined;
             const owner = sourceOwner ? localizeUser(sourceOwner, locale) : undefined;
-            const action = actionFor(role, quote);
+            const creator = sourceCreator ? localizeUser(sourceCreator, locale) : undefined;
+            const action = actionFor(user, quote);
             const actionLabel = t(action.labelKey);
             const band = getDiscountBand(quote.pricing.effectiveDiscountRate);
             return (
@@ -227,7 +242,10 @@ function QuoteTable({
                   <strong>{customer?.name ?? t("dashboard.unknownCustomer")}</strong>
                   <span>{t("dashboard.updatedAt", { number: quote.quoteNumber, date: formatDate(quote.updatedAt) })}</span>
                 </div>
-                <span data-label={t("dashboard.owner")}>{owner?.name ?? "—"}</span>
+                <span data-label={t("dashboard.owner")}>
+                  {owner?.name ?? "—"}
+                  {creator && creator.id !== owner?.id ? <small>{t("dashboard.createdBy", { name: creator.name })}</small> : null}
+                </span>
                 <span data-label={t("commercial.effectiveDiscount")}>
                   <strong>{formatNumber(Math.round(quote.pricing.effectiveDiscountRate * 100) / 100)}%</strong>
                   {showRisk ? <RiskBadge band={band} /> : null}
@@ -248,24 +266,24 @@ function QuoteTable({
   );
 }
 
-function actionFor(role: Role, quote: Quote): { labelKey: TranslationKey; primary: boolean } {
+function actionFor(user: User, quote: Quote): { labelKey: TranslationKey; primary: boolean } {
   if (quote.status === "approved") return { labelKey: "dashboard.viewQuotation", primary: false };
 
-  if (role === "sales") {
+  if (canUserCreateQuotations(user) && (quote.salesId === user.id || quote.createdById === user.id)) {
     if (quote.status === "returned") return { labelKey: "dashboard.reviseResubmit", primary: true };
     if (quote.status === "draft") return { labelKey: "dashboard.continueEditing", primary: true };
     return { labelKey: "dashboard.viewProgress", primary: false };
   }
 
-  if (role === "manager" && quote.status === "pending_manager") {
+  if (user.role === "manager" && quote.status === "pending_manager") {
     return { labelKey: "dashboard.reviewQuote", primary: true };
   }
 
-  if (role === "business_control" && quote.status === "pending_business_control") {
+  if (user.role === "business_control" && quote.status === "pending_business_control") {
     return { labelKey: "dashboard.reviewQuote", primary: true };
   }
 
-  if (role === "ceo" && quote.status === "pending_ceo") {
+  if (user.role === "ceo" && quote.status === "pending_ceo") {
     return { labelKey: "dashboard.executiveApproval", primary: true };
   }
 

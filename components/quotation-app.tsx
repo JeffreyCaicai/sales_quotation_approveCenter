@@ -6,6 +6,7 @@ import { APPROVAL_DIRECTORY, BUILDINGS, CUSTOMERS, PACKAGES } from "@/lib/mock-d
 import {
   approveQuote,
   canApproveQuote,
+  canUserCreateQuotations,
   createDraftQuote,
   returnQuote,
   submitQuote,
@@ -90,12 +91,16 @@ function QuotationWorkspace() {
   };
 
   const handleDashboardAction = (label: string, quote?: Quote) => {
-    if (user.role === "sales" && (!quote || quote.status === "draft")) {
+    const ownsOrCreatedQuote = quote
+      ? quote.salesId === user.id || quote.createdById === user.id
+      : false;
+
+    if (canUserCreateQuotations(user) && (!quote || (quote.status === "draft" && ownsOrCreatedQuote))) {
       setWizard({ initialQuote: quote });
       return;
     }
 
-    if (user.role === "sales" && quote && (
+    if (canUserCreateQuotations(user) && ownsOrCreatedQuote && quote && (
       quote.status === "returned"
       || quote.status === "pending_manager"
       || quote.status === "pending_business_control"
@@ -105,7 +110,7 @@ function QuotationWorkspace() {
       return;
     }
 
-    if (quote && canApproveQuote(quote, user)) {
+    if (quote && canApproveQuote(quote, user, APPROVAL_DIRECTORY)) {
       setApprovalQuoteId(quote.id);
       return;
     }
@@ -157,7 +162,7 @@ function QuotationWorkspace() {
 
   const handleApprove = () => {
     if (!approvalQuote) return;
-    const nextQuote = approveQuote(approvalQuote, user);
+    const nextQuote = approveQuote(approvalQuote, user, APPROVAL_DIRECTORY);
     persistQuote(nextQuote, approvalQuote);
     setApprovalQuoteId(null);
     setPlaceholder({
@@ -168,7 +173,7 @@ function QuotationWorkspace() {
 
   const handleReturn = (reason: string) => {
     if (!approvalQuote) return;
-    const nextQuote = returnQuote(approvalQuote, user, reason);
+    const nextQuote = returnQuote(approvalQuote, user, reason, APPROVAL_DIRECTORY);
     persistQuote(nextQuote, approvalQuote);
     setApprovalQuoteId(null);
     setPlaceholder({
@@ -208,7 +213,11 @@ function QuotationWorkspace() {
             setQuotationQuoteId(null);
           }}
         />
-      ) : progressQuote && (progressQuote.status === "approved" || user.role === "sales") ? (
+      ) : progressQuote && (
+        progressQuote.status === "approved"
+        || progressQuote.salesId === user.id
+        || progressQuote.createdById === user.id
+      ) ? (
         <QuoteProgressScreen
           quote={progressQuote}
           backLabel={t(progressQuote.status === "approved" ? "progress.backToQuotation" : "progress.backToWorkspace")}
@@ -221,7 +230,7 @@ function QuotationWorkspace() {
             setProgressQuoteId(null);
           }}
         />
-      ) : approvalQuote && user.role !== "sales" ? (
+      ) : approvalQuote && canApproveQuote(approvalQuote, user, APPROVAL_DIRECTORY) ? (
         <ApprovalScreen
           quote={approvalQuote}
           actor={user}
@@ -229,7 +238,7 @@ function QuotationWorkspace() {
           onReturn={handleReturn}
           onBack={() => setApprovalQuoteId(null)}
         />
-      ) : wizard && user.role === "sales" ? (
+      ) : wizard && canUserCreateQuotations(user) ? (
         <QuoteWizard
           initialQuote={wizard.initialQuote}
           salesUser={user}
@@ -252,8 +261,9 @@ function resetViewport() {
 }
 
 function assertPersistableQuote(input: QuoteInput, actor: User) {
+  const salesOwnerId = input.salesOwnerId ?? actor.id;
   const errors = {
-    ...validateQuoteReferences(input, actor.id, {
+    ...validateQuoteReferences(input, salesOwnerId, {
       customers: CUSTOMERS,
       buildings: BUILDINGS,
       packages: PACKAGES,
