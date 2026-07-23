@@ -56,7 +56,7 @@ test("65% placement discount plus a small Bonus routes directly to Business Cont
 
 test("65% placement discount plus a larger Bonus routes directly to CEO", async ({ page }) => {
   const quoteNumber = await createAndSubmitQuote(page, {
-    bonus: { resourceName: "Pacific Place Jakarta", weeks: 4 },
+    bonus: { resourceName: "Pacific Place Jakarta", weeks: 5 },
     discount: 65,
   });
 
@@ -85,9 +85,9 @@ test("returned quotation can add Bonus, resubmit as V2, and reroute", async ({ p
   await page.getByRole("button", { name: "Revise and resubmit" }).click();
 
   await advanceToBonus(page);
-  await chooseBonus(page, { resourceName: "Pacific Place Jakarta", weeks: 4 });
+  await chooseBonus(page, { resourceName: "Pacific Place Jakarta", weeks: 5 });
   await nextStep(page);
-  await setCommercialParameters(page, { bonusWeeks: 4 });
+  await setCommercialParameters(page, { bonusWeeks: 5 });
   await nextStep(page);
   await expect(page.getByRole("status")).toContainText("CEO · Direct approval");
   await nextStep(page);
