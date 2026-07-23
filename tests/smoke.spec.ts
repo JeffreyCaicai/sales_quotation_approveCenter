@@ -21,7 +21,7 @@ test.beforeEach(async ({ page }) => {
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "Quotation Approval Center" })).toBeVisible();
   await expect(page.getByRole("group", { name: "Choose a demo role" })).toBeVisible();
-  await page.getByRole("button", { name: /Sales Representative/ }).click();
+  await page.getByRole("button", { name: /Chen Chen.*Sales Representative/ }).click();
   await expect(page.getByRole("heading", { name: /Good morning/ })).toBeVisible();
 });
 

@@ -1,3 +1,4 @@
+import { localizeUser } from "@/lib/display-data";
 import { USERS } from "@/lib/mock-data";
 import type { Role, User } from "@/lib/types";
 
@@ -12,7 +13,7 @@ const ROLE_SECTIONS: Record<Role, "roleSales" | "roleManager" | "roleBusinessCon
 };
 
 export function LoginScreen({ onLogin }: { onLogin: (user: User) => void }) {
-  const { t } = useLocale();
+  const { locale, t } = useLocale();
 
   return (
     <main className="login-screen">
@@ -32,6 +33,7 @@ export function LoginScreen({ onLogin }: { onLogin: (user: User) => void }) {
         <div className="role-grid" role="group" aria-label={t("login.rolePicker")}>
           {USERS.map((user) => {
             const section = ROLE_SECTIONS[user.role];
+            const displayUser = localizeUser(user, locale);
             return (
               <button className="role-card" type="button" key={user.id} onClick={() => onLogin(user)}>
                 <span className={`role-card__symbol role-card__symbol--${user.role}`} aria-hidden="true">
@@ -39,6 +41,7 @@ export function LoginScreen({ onLogin }: { onLogin: (user: User) => void }) {
                 </span>
                 <span className="role-card__copy">
                   <span className="role-card__eyebrow">{t(`${section}.eyebrow`)}</span>
+                  <span className="role-card__identity">{displayUser.name}</span>
                   <strong>{t(`${section}.label`)}</strong>
                   <span>{t(`${section}.description`)}</span>
                 </span>

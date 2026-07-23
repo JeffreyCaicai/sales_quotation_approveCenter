@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import { AppShell } from "@/components/app-shell";
 import { ApprovalScreen } from "@/components/approval-screen";
 import { DashboardScreen } from "@/components/dashboard-screen";
+import { LoginScreen } from "@/components/login-screen";
 import { LocaleProvider } from "@/components/locale-provider";
 import { QuoteWizard } from "@/components/quote-wizard";
 import { QuoteVersionHistory } from "@/components/quote-version-history";
@@ -21,6 +22,22 @@ const businessControlUser: User = {
 };
 
 describe("shared localized role and status UI", () => {
+  it("renders a unique localized identity for every demo login option", () => {
+    const html = renderToStaticMarkup(
+      <LocaleProvider>
+        <LoginScreen onLogin={() => undefined} />
+      </LocaleProvider>,
+    );
+
+    expect(html).toContain("Chen Chen");
+    expect(html).toContain("Ayu Purnama");
+    expect(html).toContain("Freelancer Demo");
+    expect(html).toContain("Amal");
+    expect(html).toContain("Desti");
+    expect(html).toContain("Aprilliani Shintia Dewi");
+    expect(html).toContain("Thomas");
+  });
+
   it("renders the Business Control role in the application shell", () => {
     const html = renderToStaticMarkup(
       <LocaleProvider>
